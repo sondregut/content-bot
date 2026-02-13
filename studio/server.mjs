@@ -9,17 +9,16 @@ import sharp from 'sharp';
 import { fileURLToPath } from 'url';
 import archiver from 'archiver';
 import multer from 'multer';
+import admin from 'firebase-admin';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const rootDir = path.join(__dirname, '..');
+const rootDir = __dirname; // brands/ lives inside studio/
 
 dotenv.config({ path: path.join(__dirname, '.env') });
 
 const API_KEY = process.env.OPENAI_API_KEY;
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
-const AUTH_PASSWORD = process.env.AUTH_PASSWORD || '';
-const AUTH_SECRET = process.env.AUTH_SECRET || crypto.randomUUID();
 const IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1.5';
 const apiEnabled = Boolean(API_KEY);
 const claudeEnabled = Boolean(ANTHROPIC_KEY);
@@ -30,9 +29,33 @@ if (!apiEnabled) {
 if (!claudeEnabled) {
   console.warn('Missing ANTHROPIC_API_KEY. Prompt refinement will be skipped.');
 }
-if (!AUTH_PASSWORD) {
-  console.warn('Missing AUTH_PASSWORD. Auth is disabled — site is open to anyone.');
+
+// --- Firebase Admin ---
+let bucket = null;
+try {
+  // Strip literal newlines/carriage returns from JSON (common with env var storage)
+  const rawSA = process.env.FIREBASE_SERVICE_ACCOUNT || '';
+  const cleanedSA = (rawSA || '{}').replace(/[\n\r]/g, '');
+  const serviceAccount = JSON.parse(cleanedSA);
+  if (serviceAccount.project_id) {
+    // Ensure private key has actual newlines
+    if (serviceAccount.private_key) {
+      serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
+    }
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount),
+      storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
+    });
+    bucket = admin.storage().bucket();
+    console.log('[Firebase] Admin initialized for project:', serviceAccount.project_id);
+  } else {
+    console.warn('[Firebase] No valid service account — auth disabled (local dev mode).');
+  }
+} catch (err) {
+  console.error('[Firebase] Init failed:', err.message);
 }
+
+const ALLOWED_EMAILS = (process.env.ALLOWED_EMAILS || '').split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
 
 const openai = apiEnabled ? new OpenAI({ apiKey: API_KEY }) : null;
 const anthropic = claudeEnabled ? new Anthropic({ apiKey: ANTHROPIC_KEY }) : null;
@@ -58,215 +81,41 @@ const upload = multer({
   },
 });
 
-// --- Auth helpers ---
-function createToken(password) {
-  const payload = `${password}:${AUTH_SECRET}:${Date.now()}`;
-  return crypto.createHash('sha256').update(payload).digest('hex');
+// --- Firebase Auth middleware ---
+async function requireAuth(req, res, next) {
+  if (!admin.apps.length) return next(); // local dev fallback — no auth
+  const token = req.headers.authorization?.split('Bearer ')[1];
+  if (!token) return res.status(401).json({ error: 'Not authenticated' });
+  try {
+    const decoded = await admin.auth().verifyIdToken(token);
+    if (ALLOWED_EMAILS.length && !ALLOWED_EMAILS.includes(decoded.email?.toLowerCase())) {
+      return res.status(403).json({ error: 'Not authorized — email not in allowlist' });
+    }
+    req.user = decoded;
+    next();
+  } catch {
+    return res.status(401).json({ error: 'Invalid token' });
+  }
 }
 
-function verifyToken(token) {
-  if (!token) return false;
-  // Token is valid for 30 days
-  return typeof token === 'string' && token.length === 64;
+// --- Firebase Storage upload ---
+async function uploadToStorage(buffer, filename) {
+  if (!bucket) {
+    // local dev fallback — write to disk
+    await fs.writeFile(path.join(outputDir, filename), buffer);
+    return `/output/${filename}`;
+  }
+  const file = bucket.file(`carousel-studio/${filename}`);
+  await file.save(buffer, { metadata: { contentType: 'image/png' } });
+  await file.makePublic();
+  return `https://storage.googleapis.com/${bucket.name}/carousel-studio/${filename}`;
 }
-
-// Store valid tokens in memory (reset on server restart)
-const validTokens = new Set();
 
 app.use(express.json({ limit: '10mb' }));
-
-// --- Auth routes (before auth middleware) ---
-app.post('/api/auth/login', (req, res) => {
-  if (!AUTH_PASSWORD) {
-    return res.json({ ok: true, token: 'no-auth' });
-  }
-  const { password } = req.body || {};
-  if (password === AUTH_PASSWORD) {
-    const token = createToken(password);
-    validTokens.add(token);
-    res.json({ ok: true, token });
-  } else {
-    res.status(401).json({ error: 'Wrong password' });
-  }
-});
-
-app.get('/api/auth/check', (req, res) => {
-  if (!AUTH_PASSWORD) {
-    return res.json({ authenticated: true });
-  }
-  const token = req.headers['x-auth-token'];
-  if (token && validTokens.has(token)) {
-    return res.json({ authenticated: true });
-  }
-  res.json({ authenticated: false });
-});
-
-// --- Login page (served at /login) ---
-app.get('/login', (req, res) => {
-  if (!AUTH_PASSWORD) {
-    return res.redirect('/');
-  }
-  res.send(LOGIN_PAGE_HTML);
-});
-
-// --- Auth middleware ---
-function authMiddleware(req, res, next) {
-  // Skip auth if no password is set
-  if (!AUTH_PASSWORD) return next();
-
-  // Skip auth endpoints
-  if (req.path.startsWith('/api/auth/')) return next();
-  if (req.path === '/login') return next();
-
-  // Check token from header or query
-  const token = req.headers['x-auth-token'] || req.query.token;
-  if (token && validTokens.has(token)) {
-    return next();
-  }
-
-  // For API requests, return 401
-  if (req.path.startsWith('/api/')) {
-    return res.status(401).json({ error: 'Not authenticated' });
-  }
-
-  // For page requests, redirect to login
-  res.redirect('/login');
-}
-
-app.use(authMiddleware);
 
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/output', express.static(outputDir));
 app.use('/uploads', express.static(uploadsDir));
-
-// --- Login Page HTML ---
-const LOGIN_PAGE_HTML = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Carousel Studio — Login</title>
-  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet" />
-  <style>
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      font-family: 'DM Sans', system-ui, sans-serif;
-      background: #f0ede7;
-      height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-    .login-card {
-      background: #fff;
-      border-radius: 14px;
-      padding: 40px;
-      width: 380px;
-      max-width: 90vw;
-      box-shadow: 0 8px 32px rgba(7, 47, 87, 0.12);
-      text-align: center;
-    }
-    .login-card h1 {
-      font-family: 'Space Grotesk', sans-serif;
-      font-size: 1.5rem;
-      color: #072f57;
-      margin: 0 0 8px;
-    }
-    .login-card p {
-      font-size: 0.9rem;
-      color: #6b7280;
-      margin: 0 0 24px;
-    }
-    .login-card input {
-      width: 100%;
-      padding: 12px 16px;
-      border-radius: 10px;
-      border: 1px solid #e5e1d9;
-      font-family: inherit;
-      font-size: 1rem;
-      color: #0f172a;
-      margin-bottom: 16px;
-    }
-    .login-card input:focus {
-      outline: none;
-      border-color: #73a6d1;
-      box-shadow: 0 0 0 3px rgba(115, 166, 209, 0.15);
-    }
-    .login-card button {
-      width: 100%;
-      padding: 12px;
-      border-radius: 12px;
-      border: none;
-      background: #072f57;
-      color: #fff;
-      font-family: inherit;
-      font-size: 1rem;
-      font-weight: 600;
-      cursor: pointer;
-      transition: background 0.15s;
-    }
-    .login-card button:hover { background: #0a3d6f; }
-    .login-card button:disabled { opacity: 0.5; cursor: not-allowed; }
-    .error-msg {
-      color: #dc2626;
-      font-size: 0.85rem;
-      font-weight: 600;
-      margin-top: 12px;
-      min-height: 20px;
-    }
-  </style>
-</head>
-<body>
-  <div class="login-card">
-    <h1>Carousel Studio</h1>
-    <p>Enter your password to continue.</p>
-    <form id="login-form">
-      <input type="password" id="password" placeholder="Password" autofocus required />
-      <button type="submit" id="login-btn">Sign In</button>
-    </form>
-    <div class="error-msg" id="error-msg"></div>
-  </div>
-  <script>
-    const form = document.getElementById('login-form');
-    const pw = document.getElementById('password');
-    const btn = document.getElementById('login-btn');
-    const err = document.getElementById('error-msg');
-
-    // Check if already authenticated
-    const savedToken = localStorage.getItem('carousel_auth_token');
-    if (savedToken) {
-      fetch('/api/auth/check', { headers: { 'x-auth-token': savedToken } })
-        .then(r => r.json())
-        .then(d => { if (d.authenticated) window.location.href = '/'; });
-    }
-
-    form.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      btn.disabled = true;
-      err.textContent = '';
-      try {
-        const res = await fetch('/api/auth/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ password: pw.value }),
-        });
-        const data = await res.json();
-        if (data.ok) {
-          localStorage.setItem('carousel_auth_token', data.token);
-          window.location.href = '/';
-        } else {
-          err.textContent = data.error || 'Login failed';
-        }
-      } catch {
-        err.textContent = 'Connection error';
-      } finally {
-        btn.disabled = false;
-      }
-    });
-  </script>
-</body>
-</html>`;
 
 // --- Brand Configurations ---
 
@@ -352,6 +201,582 @@ const ICON_OVERLAY_CONFIGS = {
   'top-left': { position: 'top-left', sizePercent: 6, opacity: 0.15 },
   'mid-right': { position: 'mid-right', sizePercent: 10, opacity: 0.2 },
 };
+
+// --- Mockup (Sharp-rendered) Slide Constants & Helpers ---
+
+const MOCKUP_CANVAS = { width: 1080, height: 1920 };
+const MOCKUP_SAFE_ZONE = { top: 120, bottom: 200, left: 90, right: 90 };
+const MOCKUP_FONT_FAMILY = 'Helvetica, Arial, sans-serif';
+
+const MOCKUP_THEMES = {
+  dark: (brand) => ({
+    background: brand.colors.primary,
+    textColor: '#FFFFFF',
+    subtextColor: 'rgba(255,255,255,0.7)',
+    microColor: brand.colors.accent,
+    highlightColor: brand.colors.accent,
+  }),
+  light: (brand) => ({
+    background: '#F5F3EF',
+    textColor: brand.colors.primary,
+    subtextColor: 'rgba(0,0,0,0.6)',
+    microColor: brand.colors.accent,
+    highlightColor: brand.colors.accent,
+  }),
+};
+
+function escapeXml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function wrapText(text, fontSize, maxWidth, isBold = false) {
+  const charWidth = fontSize * (isBold ? 0.56 : 0.52);
+  const maxChars = Math.floor(maxWidth / charWidth);
+  const words = text.split(' ');
+  const lines = [];
+  let current = '';
+
+  for (const word of words) {
+    if (current && (current.length + 1 + word.length) > maxChars) {
+      lines.push(current);
+      current = word;
+    } else {
+      current = current ? current + ' ' + word : word;
+    }
+  }
+  if (current) lines.push(current);
+  return lines;
+}
+
+function svgTextLines(lines, { x, startY, fontSize, fontWeight, fill, lineHeight, letterSpacing }) {
+  return lines.map((line, i) => {
+    const y = startY + i * (fontSize * (lineHeight || 1.3));
+    const ls = letterSpacing ? ` letter-spacing="${letterSpacing}"` : '';
+    return `<text x="${x}" y="${y}" font-family="${MOCKUP_FONT_FAMILY}" font-size="${fontSize}" font-weight="${fontWeight || 'normal'}" fill="${fill}"${ls}>${escapeXml(line)}</text>`;
+  }).join('\n');
+}
+
+function svgHighlightBars(lines, phrase, { x, startY, fontSize, lineHeight, color, opacity }) {
+  if (!phrase) return '';
+  const charWidth = fontSize * 0.56;
+  const rects = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const idx = line.toLowerCase().indexOf(phrase.toLowerCase());
+    if (idx === -1) continue;
+
+    const matchLen = phrase.length;
+    const rx = x + idx * charWidth - 6;
+    const ry = startY + i * (fontSize * (lineHeight || 1.3)) - fontSize * 0.85;
+    const rw = matchLen * charWidth + 12;
+    const rh = fontSize * 1.2;
+
+    rects.push(`<rect x="${rx}" y="${ry}" width="${rw}" height="${rh}" rx="6" fill="${color}" opacity="${opacity}" />`);
+  }
+
+  return rects.join('\n');
+}
+
+async function getIPhoneFrame(brandId, width, height) {
+  const brandFramePath = path.join(rootDir, 'brands', brandId, 'assets', 'iphone-frame.png');
+  try {
+    await fs.access(brandFramePath);
+    return sharp(brandFramePath).resize(width, height).png().toBuffer();
+  } catch {
+    // Generate SVG iPhone frame with Dynamic Island
+    const r = Math.round(width * 0.12);
+    const bezelW = Math.round(width * 0.03);
+    const diW = Math.round(width * 0.35);
+    const diH = Math.round(height * 0.018);
+    const diX = Math.round((width - diW) / 2);
+    const diY = Math.round(height * 0.015);
+
+    const svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+      <rect x="0" y="0" width="${width}" height="${height}" rx="${r}" fill="#1A1A1A"/>
+      <rect x="${bezelW}" y="${bezelW}" width="${width - bezelW * 2}" height="${height - bezelW * 2}" rx="${r - bezelW}" fill="#000"/>
+      <rect x="${diX}" y="${diY}" width="${diW}" height="${diH}" rx="${Math.round(diH / 2)}" fill="#1A1A1A"/>
+    </svg>`;
+    return sharp(Buffer.from(svg)).png().toBuffer();
+  }
+}
+
+async function createPhoneMockup({ screenshotPath, brandId, phoneWidth, phoneHeight, angle }) {
+  phoneWidth = phoneWidth || 420;
+  phoneHeight = phoneHeight || 860;
+  angle = angle || 0;
+
+  const frameBuffer = await getIPhoneFrame(brandId, phoneWidth, phoneHeight);
+
+  // Inner screen area (inset from frame)
+  const bezel = Math.round(phoneWidth * 0.03);
+  const cornerR = Math.round(phoneWidth * 0.09);
+  const screenW = phoneWidth - bezel * 2;
+  const screenH = phoneHeight - bezel * 2;
+
+  let screenBuffer;
+  if (screenshotPath) {
+    const fullPath = path.join(uploadsDir, screenshotPath);
+    try {
+      await fs.access(fullPath);
+      screenBuffer = await sharp(fullPath)
+        .resize(screenW, screenH, { fit: 'cover' })
+        .png()
+        .toBuffer();
+    } catch {
+      screenBuffer = null;
+    }
+  }
+
+  if (!screenBuffer) {
+    // Placeholder screen
+    const placeholderSvg = `<svg width="${screenW}" height="${screenH}" xmlns="http://www.w3.org/2000/svg">
+      <rect width="${screenW}" height="${screenH}" rx="${cornerR}" fill="#1e293b"/>
+      <text x="${screenW / 2}" y="${screenH / 2}" font-family="${MOCKUP_FONT_FAMILY}" font-size="24" fill="rgba(255,255,255,0.3)" text-anchor="middle">Upload a screenshot</text>
+    </svg>`;
+    screenBuffer = await sharp(Buffer.from(placeholderSvg)).png().toBuffer();
+  }
+
+  // Mask screenshot with rounded corners
+  const maskSvg = `<svg width="${screenW}" height="${screenH}"><rect width="${screenW}" height="${screenH}" rx="${cornerR}" fill="white"/></svg>`;
+  screenBuffer = await sharp(screenBuffer)
+    .composite([{ input: Buffer.from(maskSvg), blend: 'dest-in' }])
+    .png()
+    .toBuffer();
+
+  // Composite screen onto frame
+  let phone = await sharp(frameBuffer)
+    .composite([{ input: screenBuffer, left: bezel, top: bezel }])
+    .png()
+    .toBuffer();
+
+  // Apply rotation if needed
+  if (angle !== 0) {
+    // Extend canvas to fit rotated image, then rotate
+    const diag = Math.ceil(Math.sqrt(phoneWidth * phoneWidth + phoneHeight * phoneHeight));
+    phone = await sharp(phone)
+      .extend({
+        top: Math.round((diag - phoneHeight) / 2),
+        bottom: Math.round((diag - phoneHeight) / 2),
+        left: Math.round((diag - phoneWidth) / 2),
+        right: Math.round((diag - phoneWidth) / 2),
+        background: { r: 0, g: 0, b: 0, alpha: 0 },
+      })
+      .rotate(angle, { background: { r: 0, g: 0, b: 0, alpha: 0 } })
+      .trim()
+      .png()
+      .toBuffer();
+  }
+
+  return phone;
+}
+
+// --- Image Usage Helpers (figure, background) ---
+
+async function createFigureElement({ imagePath, maxWidth, maxHeight, borderRadius }) {
+  const fullPath = path.join(uploadsDir, imagePath);
+  try {
+    await fs.access(fullPath);
+  } catch {
+    return null;
+  }
+
+  let img = sharp(fullPath).resize(maxWidth, maxHeight, { fit: 'inside', withoutEnlargement: true });
+  let buf = await img.png().toBuffer();
+
+  // Apply rounded corners if requested
+  if (borderRadius && borderRadius > 0) {
+    const meta = await sharp(buf).metadata();
+    const mask = `<svg width="${meta.width}" height="${meta.height}"><rect width="${meta.width}" height="${meta.height}" rx="${borderRadius}" fill="white"/></svg>`;
+    buf = await sharp(buf).composite([{ input: Buffer.from(mask), blend: 'dest-in' }]).png().toBuffer();
+  }
+
+  return buf;
+}
+
+async function createBackgroundImage(imagePath, overlayOpacity) {
+  const { width, height } = MOCKUP_CANVAS;
+  const fullPath = path.join(uploadsDir, imagePath);
+  try {
+    await fs.access(fullPath);
+  } catch {
+    return null;
+  }
+
+  const bgBuffer = await sharp(fullPath)
+    .resize(width, height, { fit: 'cover' })
+    .png()
+    .toBuffer();
+
+  // Apply dark gradient overlay for text readability
+  const opacity = overlayOpacity || 0.55;
+  const overlaySvg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#000" stop-opacity="${opacity * 0.6}"/>
+        <stop offset="40%" stop-color="#000" stop-opacity="${opacity * 0.3}"/>
+        <stop offset="70%" stop-color="#000" stop-opacity="${opacity * 0.7}"/>
+        <stop offset="100%" stop-color="#000" stop-opacity="${opacity}"/>
+      </linearGradient>
+    </defs>
+    <rect width="${width}" height="${height}" fill="url(#g)"/>
+  </svg>`;
+
+  const result = await sharp(bgBuffer)
+    .composite([{ input: Buffer.from(overlaySvg), blend: 'over' }])
+    .png()
+    .toBuffer();
+
+  return result;
+}
+
+function getFigurePosition(position, figMeta, canvasW, canvasH, padding) {
+  const fw = figMeta.width || 300;
+  const fh = figMeta.height || 300;
+  const p = padding || 60;
+  const positions = {
+    'top-right': { left: canvasW - fw - p, top: p + 80 },
+    'top-left': { left: p, top: p + 80 },
+    'center-right': { left: canvasW - fw - p, top: Math.round((canvasH - fh) / 2) },
+    'center-left': { left: p, top: Math.round((canvasH - fh) / 2) },
+    'bottom-right': { left: canvasW - fw - p, top: canvasH - fh - p - 120 },
+    'bottom-left': { left: p, top: canvasH - fh - p - 120 },
+    'center': { left: Math.round((canvasW - fw) / 2), top: Math.round((canvasH - fh) / 2) },
+  };
+  return positions[position] || positions['center-right'];
+}
+
+// --- Mockup Layout Renderers ---
+
+// Shared: build the text SVG layer for any layout
+function buildTextSvg({ width, height, bgFill, textX, textMaxWidth, microLabel, headline, body, highlight, highlightStyle, theme, fontSizes }) {
+  const { headlineFontSize, bodyFontSize, microFontSize } = fontSizes;
+  const highlightOpacity = highlightStyle === 'bold' ? 0.4 : 0.28;
+
+  const headlineLines = wrapText(headline, headlineFontSize, textMaxWidth, true);
+  const bodyLines = body ? wrapText(body, bodyFontSize, textMaxWidth) : [];
+
+  return { headlineLines, bodyLines, headlineFontSize, bodyFontSize, microFontSize, highlightOpacity };
+}
+
+async function renderPhoneRight(data, brand, theme) {
+  const { width, height } = MOCKUP_CANVAS;
+  const safe = MOCKUP_SAFE_ZONE;
+  const imageUsage = data.imageUsage || 'phone';
+
+  const micro = data.microLabel || brand.defaultMicroLabel;
+  const headline = data.headline || 'Your headline here';
+  const body = data.body || '';
+  const highlight = data.highlightPhrase || '';
+  const highlightOpacity = data.highlightStyle === 'bold' ? 0.4 : 0.28;
+
+  // Determine base layer + composites based on imageUsage
+  let baseBuffer = null;
+  let imageComposite = null;
+  let textMaxWidth;
+  const headlineFontSize = 72;
+  const bodyFontSize = 32;
+  const microFontSize = 24;
+
+  if (imageUsage === 'background' && data.screenshotImage) {
+    baseBuffer = await createBackgroundImage(data.screenshotImage, parseFloat(data.bgOverlayOpacity) || 0.55);
+    textMaxWidth = width - safe.left - safe.right;
+  } else if (imageUsage === 'figure' && data.screenshotImage) {
+    const figSizeMap = { small: 280, medium: 380, large: 500 };
+    const maxW = figSizeMap[data.figureSize] || 380;
+    const figBuf = await createFigureElement({
+      imagePath: data.screenshotImage,
+      maxWidth: maxW,
+      maxHeight: Math.round(maxW * 1.5),
+      borderRadius: parseInt(data.figureBorderRadius) || 24,
+    });
+    if (figBuf) {
+      const figMeta = await sharp(figBuf).metadata();
+      const pos = getFigurePosition(data.figurePosition || 'bottom-right', figMeta, width, height, 60);
+      imageComposite = { input: figBuf, left: pos.left, top: pos.top };
+    }
+    textMaxWidth = Math.round(width * 0.65) - safe.left;
+  } else {
+    // Phone frame (default)
+    const phoneSizeMap = { small: 360, medium: 420, large: 500 };
+    const pw = phoneSizeMap[data.phoneSize] || 420;
+    const ph = Math.round(pw * 2.05);
+    const phoneAngle = parseInt(data.phoneAngle) || -8;
+
+    const phoneMockup = await createPhoneMockup({
+      screenshotPath: data.screenshotImage,
+      brandId: brand.id,
+      phoneWidth: pw,
+      phoneHeight: ph,
+      angle: phoneAngle,
+    });
+    const phoneMeta = await sharp(phoneMockup).metadata();
+    const phoneLeft = width - (phoneMeta.width || pw) + 20;
+    const phoneTop = height - (phoneMeta.height || ph) + Math.round(ph * 0.12);
+    imageComposite = { input: phoneMockup, left: Math.max(0, phoneLeft), top: Math.max(0, Math.min(phoneTop, height - 10)) };
+    textMaxWidth = Math.round(width * 0.65) - safe.left;
+  }
+
+  const headlineLines = wrapText(headline, headlineFontSize, textMaxWidth, true);
+  const bodyLines = body ? wrapText(body, bodyFontSize, textMaxWidth) : [];
+
+  let textY = safe.top + 60;
+  // For background images, use white text always
+  const textFill = imageUsage === 'background' ? '#FFFFFF' : theme.textColor;
+  const subtextFill = imageUsage === 'background' ? 'rgba(255,255,255,0.75)' : theme.subtextColor;
+
+  const microSvg = svgTextLines([micro], { x: safe.left, startY: textY, fontSize: microFontSize, fontWeight: '700', fill: theme.microColor, letterSpacing: '4' });
+  textY += microFontSize + headlineFontSize + 16;
+
+  const highlightSvg = svgHighlightBars(headlineLines, highlight, { x: safe.left, startY: textY, fontSize: headlineFontSize, lineHeight: 1.25, color: theme.highlightColor, opacity: highlightOpacity });
+  const headlineSvg = svgTextLines(headlineLines, { x: safe.left, startY: textY, fontSize: headlineFontSize, fontWeight: 'bold', fill: textFill, lineHeight: 1.25 });
+  textY += headlineLines.length * headlineFontSize * 1.25 + 30;
+
+  const bodySvg = bodyLines.length ? svgTextLines(bodyLines, { x: safe.left, startY: textY, fontSize: bodyFontSize, fill: subtextFill, lineHeight: 1.5 }) : '';
+
+  if (baseBuffer) {
+    // Background mode: overlay text SVG on image
+    const textSvg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+      ${microSvg}
+      ${highlightSvg}
+      ${headlineSvg}
+      ${bodySvg}
+    </svg>`;
+    return sharp(baseBuffer).composite([{ input: Buffer.from(textSvg) }]).png().toBuffer();
+  }
+
+  const svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+    <rect width="${width}" height="${height}" fill="${theme.background}"/>
+    ${microSvg}
+    ${highlightSvg}
+    ${headlineSvg}
+    ${bodySvg}
+  </svg>`;
+
+  if (imageComposite) {
+    return sharp(Buffer.from(svg)).composite([imageComposite]).png().toBuffer();
+  }
+  return sharp(Buffer.from(svg)).png().toBuffer();
+}
+
+async function renderPhoneLeft(data, brand, theme) {
+  const { width, height } = MOCKUP_CANVAS;
+  const safe = MOCKUP_SAFE_ZONE;
+  const imageUsage = data.imageUsage || 'phone';
+
+  const micro = data.microLabel || brand.defaultMicroLabel;
+  const headline = data.headline || 'Your headline here';
+  const body = data.body || '';
+  const highlight = data.highlightPhrase || '';
+  const highlightOpacity = data.highlightStyle === 'bold' ? 0.4 : 0.28;
+
+  let baseBuffer = null;
+  let imageComposite = null;
+  let textX;
+  let textMaxWidth;
+  const headlineFontSize = 62;
+  const bodyFontSize = 30;
+  const microFontSize = 22;
+
+  if (imageUsage === 'background' && data.screenshotImage) {
+    baseBuffer = await createBackgroundImage(data.screenshotImage, parseFloat(data.bgOverlayOpacity) || 0.55);
+    textX = safe.left;
+    textMaxWidth = width - safe.left - safe.right;
+  } else if (imageUsage === 'figure' && data.screenshotImage) {
+    const figSizeMap = { small: 280, medium: 380, large: 500 };
+    const maxW = figSizeMap[data.figureSize] || 380;
+    const figBuf = await createFigureElement({
+      imagePath: data.screenshotImage,
+      maxWidth: maxW,
+      maxHeight: Math.round(maxW * 1.5),
+      borderRadius: parseInt(data.figureBorderRadius) || 24,
+    });
+    if (figBuf) {
+      const figMeta = await sharp(figBuf).metadata();
+      const pos = getFigurePosition(data.figurePosition || 'center-left', figMeta, width, height, 60);
+      imageComposite = { input: figBuf, left: pos.left, top: pos.top };
+      textX = pos.left + (figMeta.width || maxW) + 40;
+    } else {
+      textX = safe.left;
+    }
+    textMaxWidth = Math.max(width - textX - safe.right, 300);
+  } else {
+    // Phone frame (default)
+    const phoneSizeMap = { small: 340, medium: 400, large: 480 };
+    const pw = phoneSizeMap[data.phoneSize] || 400;
+    const ph = Math.round(pw * 2.05);
+    const phoneAngle = parseInt(data.phoneAngle) || 0;
+
+    const phoneMockup = await createPhoneMockup({
+      screenshotPath: data.screenshotImage,
+      brandId: brand.id,
+      phoneWidth: pw,
+      phoneHeight: ph,
+      angle: phoneAngle,
+    });
+    const phoneMeta = await sharp(phoneMockup).metadata();
+    const phoneLeft = safe.left - 20;
+    const phoneTop = Math.round((height - (phoneMeta.height || ph)) / 2);
+    imageComposite = { input: phoneMockup, left: Math.max(0, phoneLeft), top: Math.max(0, phoneTop) };
+    textX = (phoneMeta.width || pw) + safe.left + 40;
+    textMaxWidth = Math.max(width - textX - safe.right, 300);
+  }
+
+  const headlineLines = wrapText(headline, headlineFontSize, textMaxWidth, true);
+  const bodyLines = body ? wrapText(body, bodyFontSize, textMaxWidth) : [];
+
+  let textY = Math.round(height * 0.30);
+  const textFill = imageUsage === 'background' ? '#FFFFFF' : theme.textColor;
+  const subtextFill = imageUsage === 'background' ? 'rgba(255,255,255,0.75)' : theme.subtextColor;
+
+  const microSvg = svgTextLines([micro], { x: textX, startY: textY, fontSize: microFontSize, fontWeight: '700', fill: theme.microColor, letterSpacing: '4' });
+  textY += microFontSize + headlineFontSize + 12;
+
+  const highlightSvg = svgHighlightBars(headlineLines, highlight, { x: textX, startY: textY, fontSize: headlineFontSize, lineHeight: 1.25, color: theme.highlightColor, opacity: highlightOpacity });
+  const headlineSvg = svgTextLines(headlineLines, { x: textX, startY: textY, fontSize: headlineFontSize, fontWeight: 'bold', fill: textFill, lineHeight: 1.25 });
+  textY += headlineLines.length * headlineFontSize * 1.25 + 20;
+
+  const bodySvg = bodyLines.length ? svgTextLines(bodyLines, { x: textX, startY: textY, fontSize: bodyFontSize, fill: subtextFill, lineHeight: 1.5 }) : '';
+
+  if (baseBuffer) {
+    const textSvg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+      ${microSvg}
+      ${highlightSvg}
+      ${headlineSvg}
+      ${bodySvg}
+    </svg>`;
+    return sharp(baseBuffer).composite([{ input: Buffer.from(textSvg) }]).png().toBuffer();
+  }
+
+  const svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+    <rect width="${width}" height="${height}" fill="${theme.background}"/>
+    ${microSvg}
+    ${highlightSvg}
+    ${headlineSvg}
+    ${bodySvg}
+  </svg>`;
+
+  if (imageComposite) {
+    return sharp(Buffer.from(svg)).composite([imageComposite]).png().toBuffer();
+  }
+  return sharp(Buffer.from(svg)).png().toBuffer();
+}
+
+async function renderTextStatement(data, brand, theme) {
+  const { width, height } = MOCKUP_CANVAS;
+  const safe = MOCKUP_SAFE_ZONE;
+  const imageUsage = data.imageUsage || 'none';
+
+  const micro = data.microLabel || brand.defaultMicroLabel;
+  const headline = data.headline || 'Your headline here';
+  const body = data.body || '';
+  const highlight = data.highlightPhrase || '';
+  const highlightOpacity = data.highlightStyle === 'bold' ? 0.5 : 0.3;
+
+  let baseBuffer = null;
+  let imageComposite = null;
+
+  if (imageUsage === 'background' && data.screenshotImage) {
+    baseBuffer = await createBackgroundImage(data.screenshotImage, parseFloat(data.bgOverlayOpacity) || 0.6);
+  } else if (imageUsage === 'figure' && data.screenshotImage) {
+    const figSizeMap = { small: 240, medium: 340, large: 460 };
+    const maxW = figSizeMap[data.figureSize] || 340;
+    const figBuf = await createFigureElement({
+      imagePath: data.screenshotImage,
+      maxWidth: maxW,
+      maxHeight: maxW,
+      borderRadius: parseInt(data.figureBorderRadius) || 24,
+    });
+    if (figBuf) {
+      const figMeta = await sharp(figBuf).metadata();
+      const pos = getFigurePosition(data.figurePosition || 'bottom-right', figMeta, width, height, 80);
+      imageComposite = { input: figBuf, left: pos.left, top: pos.top };
+    }
+  }
+
+  const textMaxWidth = width - safe.left - safe.right;
+  const headlineFontSize = 82;
+  const bodyFontSize = 34;
+  const microFontSize = 24;
+
+  const headlineLines = wrapText(headline, headlineFontSize, textMaxWidth, true);
+  const bodyLines = body ? wrapText(body, bodyFontSize, textMaxWidth) : [];
+
+  const headlineBlockH = headlineLines.length * headlineFontSize * 1.25;
+  const bodyBlockH = bodyLines.length ? bodyLines.length * bodyFontSize * 1.5 + 30 : 0;
+  const microBlockH = microFontSize + headlineFontSize + 16;
+  const totalH = microBlockH + headlineBlockH + bodyBlockH;
+  let textY = Math.round((height - totalH) / 2);
+
+  const textFill = (imageUsage === 'background') ? '#FFFFFF' : theme.textColor;
+  const subtextFill = (imageUsage === 'background') ? 'rgba(255,255,255,0.75)' : theme.subtextColor;
+
+  const microSvg = svgTextLines([micro], { x: safe.left, startY: textY, fontSize: microFontSize, fontWeight: '700', fill: theme.microColor, letterSpacing: '5' });
+  textY += microBlockH;
+
+  const highlightSvg = svgHighlightBars(headlineLines, highlight, { x: safe.left, startY: textY, fontSize: headlineFontSize, lineHeight: 1.25, color: theme.highlightColor, opacity: highlightOpacity });
+  const headlineSvg = svgTextLines(headlineLines, { x: safe.left, startY: textY, fontSize: headlineFontSize, fontWeight: 'bold', fill: textFill, lineHeight: 1.25 });
+  textY += headlineBlockH + 30;
+
+  const bodySvg = bodyLines.length ? svgTextLines(bodyLines, { x: safe.left, startY: textY, fontSize: bodyFontSize, fill: subtextFill, lineHeight: 1.5 }) : '';
+
+  if (baseBuffer) {
+    const textSvg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+      ${microSvg}
+      ${highlightSvg}
+      ${headlineSvg}
+      ${bodySvg}
+    </svg>`;
+    const composites = [{ input: Buffer.from(textSvg) }];
+    if (imageComposite) composites.push(imageComposite);
+    return sharp(baseBuffer).composite(composites).png().toBuffer();
+  }
+
+  const svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+    <rect width="${width}" height="${height}" fill="${theme.background}"/>
+    ${microSvg}
+    ${highlightSvg}
+    ${headlineSvg}
+    ${bodySvg}
+  </svg>`;
+
+  if (imageComposite) {
+    return sharp(Buffer.from(svg)).composite([imageComposite]).png().toBuffer();
+  }
+  return sharp(Buffer.from(svg)).png().toBuffer();
+}
+
+async function generateMockupSlide(data, brand) {
+  const themeFn = MOCKUP_THEMES[data.mockupTheme] || MOCKUP_THEMES.dark;
+  const theme = themeFn(brand);
+  const layout = data.mockupLayout || 'text-statement';
+
+  let buffer;
+  switch (layout) {
+    case 'phone-right':
+      buffer = await renderPhoneRight(data, brand, theme);
+      break;
+    case 'phone-left':
+      buffer = await renderPhoneLeft(data, brand, theme);
+      break;
+    case 'text-statement':
+    default:
+      buffer = await renderTextStatement(data, brand, theme);
+      break;
+  }
+
+  if (data.includeOwl) {
+    buffer = await addAppIconOverlay(buffer, data.owlPosition, brand.id);
+  }
+
+  return buffer;
+}
+
+// --- End Mockup Helpers ---
 
 function spacedLetters(word) {
   return word.split('').join(' - ');
@@ -681,7 +1106,7 @@ function parseContentIdeas(markdown, brandId, brandName) {
 // --- API Routes ---
 
 // List available brands
-app.get('/api/brands', (req, res) => {
+app.get('/api/brands', requireAuth, (req, res) => {
   const brands = Object.values(BRANDS).map((b) => ({
     id: b.id,
     name: b.name,
@@ -692,7 +1117,7 @@ app.get('/api/brands', (req, res) => {
 });
 
 // Get content ideas for a brand
-app.get('/api/content-ideas', async (req, res) => {
+app.get('/api/content-ideas', requireAuth, async (req, res) => {
   try {
     const brandId = req.query.brand || 'athlete-mindset';
     const brand = getBrand(brandId);
@@ -707,7 +1132,7 @@ app.get('/api/content-ideas', async (req, res) => {
 });
 
 // Upload reference image
-app.post('/api/upload-reference', upload.single('image'), async (req, res) => {
+app.post('/api/upload-reference', requireAuth, upload.single('image'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No image uploaded' });
@@ -731,7 +1156,7 @@ app.post('/api/upload-reference', upload.single('image'), async (req, res) => {
 });
 
 // Generate single slide
-app.post('/api/generate', async (req, res) => {
+app.post('/api/generate', requireAuth, async (req, res) => {
   try {
     const data = req.body || {};
     const brandId = data.brand || 'athlete-mindset';
@@ -739,6 +1164,15 @@ app.post('/api/generate', async (req, res) => {
 
     if (!data.slideType) {
       return res.status(400).json({ error: 'Missing slideType' });
+    }
+
+    // Mockup slides: render with Sharp, no AI
+    if (data.slideType === 'mockup') {
+      const buffer = await generateMockupSlide(data, brand);
+      const slug = crypto.randomUUID().slice(0, 8);
+      const filename = `slide_${brandId}_mockup_${Date.now()}_${slug}.png`;
+      const url = await uploadToStorage(buffer, filename);
+      return res.json({ ok: true, filename, url, prompt: null, refinedPrompt: null, usedRefined: false });
     }
 
     const rawPrompt =
@@ -798,14 +1232,13 @@ app.post('/api/generate', async (req, res) => {
 
     const slug = crypto.randomUUID().slice(0, 8);
     const filename = `slide_${brandId}_${data.slideType}_${Date.now()}_${slug}.png`;
-    const filepath = path.join(outputDir, filename);
 
-    await fs.writeFile(filepath, buffer);
+    const url = await uploadToStorage(buffer, filename);
 
     res.json({
       ok: true,
       filename,
-      url: `/output/${filename}`,
+      url,
       prompt: rawPrompt,
       refinedPrompt: refinedPrompt || null,
       usedRefined: Boolean(refinedPrompt),
@@ -819,7 +1252,7 @@ app.post('/api/generate', async (req, res) => {
 // Batch carousel generation
 const carouselJobs = new Map();
 
-app.post('/api/generate-carousel', async (req, res) => {
+app.post('/api/generate-carousel', requireAuth, async (req, res) => {
   const { slides, includeOwl, owlPosition, quality, brand: brandId } = req.body || {};
   if (!slides || !Array.isArray(slides) || slides.length === 0) {
     return res.status(400).json({ error: 'Missing slides array' });
@@ -848,6 +1281,18 @@ app.post('/api/generate-carousel', async (req, res) => {
       const slideData = { ...slides[i], includeOwl, owlPosition, quality: quality || 'high' };
 
       try {
+        // Mockup slides: render with Sharp, skip AI
+        if (slideData.slideType === 'mockup') {
+          console.log(`[Carousel ${jobId}] ${brand.name} | Slide ${i + 1}/${slides.length} (mockup)`);
+          const mockupBuffer = await generateMockupSlide(slideData, brand);
+          const slug = crypto.randomUUID().slice(0, 8);
+          const filename = `carousel_${brand.id}_${jobId}_s${i + 1}_${slug}.png`;
+          const slideUrl = await uploadToStorage(mockupBuffer, filename);
+          job.slides.push({ slideNumber: i + 1, url: slideUrl, filename, ok: true });
+          job.completed = i + 1;
+          continue;
+        }
+
         const rawPrompt =
           slideData.slideType === 'photo'
             ? buildPhotoPrompt(slideData, brand)
@@ -876,11 +1321,11 @@ app.post('/api/generate-carousel', async (req, res) => {
 
         const slug = crypto.randomUUID().slice(0, 8);
         const filename = `carousel_${brand.id}_${jobId}_s${i + 1}_${slug}.png`;
-        await fs.writeFile(path.join(outputDir, filename), buffer);
+        const slideUrl = await uploadToStorage(buffer, filename);
 
         job.slides.push({
           slideNumber: i + 1,
-          url: `/output/${filename}`,
+          url: slideUrl,
           filename,
           ok: true,
         });
@@ -903,7 +1348,7 @@ app.post('/api/generate-carousel', async (req, res) => {
   })();
 });
 
-app.get('/api/carousel-status/:jobId', (req, res) => {
+app.get('/api/carousel-status/:jobId', requireAuth, (req, res) => {
   const job = carouselJobs.get(req.params.jobId);
   if (!job) {
     return res.status(404).json({ error: 'Job not found' });
@@ -919,7 +1364,7 @@ app.get('/api/carousel-status/:jobId', (req, res) => {
 });
 
 // --- Freeform AI Content Generation ---
-app.post('/api/generate-freeform', async (req, res) => {
+app.post('/api/generate-freeform', requireAuth, async (req, res) => {
   try {
     const { prompt: userPrompt, brand: brandId, slideCount } = req.body || {};
     if (!userPrompt) {
@@ -945,7 +1390,7 @@ Return ONLY valid JSON with this exact structure (no markdown, no explanation):
     {
       "number": 1,
       "label": "Hook",
-      "type": "photo or text",
+      "type": "photo, text, or mockup",
       "microLabel": "BRAND LABEL",
       "headline": "Main headline text",
       "body": "Supporting body text",
@@ -953,7 +1398,9 @@ Return ONLY valid JSON with this exact structure (no markdown, no explanation):
       "sport": "only for photo type - sport shown",
       "setting": "only for photo type - location",
       "action": "only for photo type - what athlete is doing",
-      "mood": "only for photo type - emotional tone"
+      "mood": "only for photo type - emotional tone",
+      "mockupLayout": "only for mockup type - phone-right, phone-left, or text-statement",
+      "mockupTheme": "only for mockup type - dark or light"
     }
   ]
 }
@@ -961,7 +1408,9 @@ Return ONLY valid JSON with this exact structure (no markdown, no explanation):
 Rules:
 - First slide should be a strong hook (usually photo type)
 - Last slide should be a CTA with "Download ${brand.name} — link in bio"
-- Mix photo and text types for visual variety
+- Mix photo, text, and mockup types for visual variety
+- Use mockup type with text-statement layout for bold statement slides (no screenshot needed)
+- Use mockup type with phone-right or phone-left for app screenshot slides (user provides screenshot after)
 - Headlines should be punchy, under 15 words
 - Body text should be 1-2 sentences max
 - Highlight the most impactful phrase in each slide
@@ -1001,7 +1450,7 @@ Rules:
 });
 
 // --- App Icon Upload ---
-app.post('/api/upload-icon', upload.single('icon'), async (req, res) => {
+app.post('/api/upload-icon', requireAuth, upload.single('icon'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No icon uploaded' });
@@ -1033,7 +1482,7 @@ app.post('/api/upload-icon', upload.single('icon'), async (req, res) => {
 });
 
 // --- API Key Settings ---
-app.post('/api/settings', async (req, res) => {
+app.post('/api/settings', requireAuth, async (req, res) => {
   try {
     const { openaiKey, anthropicKey } = req.body || {};
     const envPath = path.join(__dirname, '.env');
@@ -1075,7 +1524,7 @@ app.post('/api/settings', async (req, res) => {
 app.use('/brands', express.static(path.join(rootDir, 'brands')));
 
 // Download single image
-app.get('/api/download/:filename', async (req, res) => {
+app.get('/api/download/:filename', requireAuth, async (req, res) => {
   try {
     const filename = req.params.filename;
     const filepath = path.join(outputDir, filename);
@@ -1087,7 +1536,7 @@ app.get('/api/download/:filename', async (req, res) => {
 });
 
 // Download all carousel images as zip
-app.get('/api/download-carousel/:jobId', async (req, res) => {
+app.get('/api/download-carousel/:jobId', requireAuth, async (req, res) => {
   const job = carouselJobs.get(req.params.jobId);
   if (!job) {
     return res.status(404).json({ error: 'Job not found' });
@@ -1116,7 +1565,7 @@ app.get('/api/download-carousel/:jobId', async (req, res) => {
 });
 
 // Download selected images as zip
-app.post('/api/download-selected', async (req, res) => {
+app.post('/api/download-selected', requireAuth, async (req, res) => {
   const { filenames, brandId } = req.body || {};
   if (!filenames || !Array.isArray(filenames) || filenames.length === 0) {
     return res.status(400).json({ error: 'No filenames provided' });

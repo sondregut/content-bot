@@ -25,6 +25,143 @@ body {
   overflow: hidden;
 }
 
+/* Login Overlay */
+
+.login-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: #f0ede7;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+.login-card {
+  background: #fff;
+  border-radius: 14px;
+  padding: 40px;
+  width: 380px;
+  max-width: 90vw;
+  box-shadow: 0 8px 32px rgba(7, 47, 87, 0.12);
+  text-align: center;
+}
+
+.login-card h1 {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 1.5rem;
+  color: #072f57;
+  margin: 0 0 8px;
+}
+
+.login-card p {
+  font-size: 0.9rem;
+  color: #6b7280;
+  margin: 0 0 24px;
+}
+
+.login-card input {
+  width: 100%;
+  padding: 12px 16px;
+  border-radius: 10px;
+  border: 1px solid #e5e1d9;
+  font-family: inherit;
+  font-size: 1rem;
+  color: #0f172a;
+  margin-bottom: 12px;
+}
+
+.login-card input:focus {
+  outline: none;
+  border-color: #73a6d1;
+  box-shadow: 0 0 0 3px rgba(115, 166, 209, 0.15);
+}
+
+.login-card button[type="submit"] {
+  width: 100%;
+  padding: 12px;
+  border-radius: 12px;
+  border: none;
+  background: #072f57;
+  color: #fff;
+  font-family: inherit;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.login-card button[type="submit"]:hover { background: #0a3d6f; }
+.login-card button[type="submit"]:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.login-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 20px 0;
+  color: #9ca3af;
+  font-size: 0.82rem;
+}
+
+.login-divider::before,
+.login-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: #e5e1d9;
+}
+
+.google-btn {
+  width: 100%;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid #e5e1d9;
+  background: #fff;
+  color: #0f172a;
+  font-family: inherit;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.google-btn:hover {
+  background: #f9fafb;
+  border-color: #d1d5db;
+}
+
+.error-msg {
+  color: #dc2626;
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-top: 12px;
+  min-height: 20px;
+}
+
+/* Sign Out Button */
+
+.sign-out-btn {
+  padding: 6px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.2);
+  background: rgba(255,255,255,0.1);
+  color: var(--white);
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.sign-out-btn:hover { background: rgba(255,255,255,0.2); }
+
 .app {
   display: flex;
   flex-direction: column;
@@ -590,6 +727,17 @@ input:focus, select:focus, textarea:focus {
   background: var(--navy);
   color: var(--white);
   border-color: var(--navy);
+}
+
+/* Mockup Fields */
+
+#mockup-screenshot-section {
+  margin-top: 10px;
+}
+
+.screenshot-filename {
+  font-size: 0.82rem;
+  color: #6b7280;
 }
 
 /* Buttons */

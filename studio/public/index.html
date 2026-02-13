@@ -5,9 +5,42 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Carousel Studio</title>
     <link rel="stylesheet" href="/styles.css" />
+
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+    <script>
+      firebase.initializeApp({
+        apiKey: "AIzaSyCJYaaGX94krV32Exuo7Tu-B6n93QOPgo8",
+        authDomain: "fabled-emissary-476021-g0.firebaseapp.com",
+        projectId: "fabled-emissary-476021-g0",
+        storageBucket: "fabled-emissary-476021-g0.firebasestorage.app",
+        messagingSenderId: "343836617249",
+        appId: "1:343836617249:web:526cfa5f1af63f75bc1160"
+      });
+    </script>
   </head>
   <body>
-    <div class="app">
+    <!-- Login Overlay -->
+    <div class="login-overlay" id="login-overlay">
+      <div class="login-card">
+        <h1>Carousel Studio</h1>
+        <p>Sign in to continue.</p>
+        <form id="login-form">
+          <input type="email" id="login-email" placeholder="Email" required />
+          <input type="password" id="login-password" placeholder="Password" required />
+          <button type="submit" id="login-btn">Sign In</button>
+        </form>
+        <div class="login-divider"><span>or</span></div>
+        <button type="button" class="google-btn" id="google-login-btn">
+          <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59a14.5 14.5 0 0 1 0-9.18l-7.98-6.19a24.01 24.01 0 0 0 0 21.56l7.98-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+          Sign in with Google
+        </button>
+        <div class="error-msg" id="login-error"></div>
+      </div>
+    </div>
+
+    <div class="app" id="app-shell" style="display:none">
       <header class="app-header">
         <div class="header-left">
           <select id="brand-selector" class="app-dropdown"></select>
@@ -16,6 +49,7 @@
         <div class="header-right">
           <div class="badge">gpt-image-1.5 + Claude refinement</div>
           <button class="header-btn" id="settings-btn" title="API Settings">&#9881;</button>
+          <button class="sign-out-btn" id="sign-out-btn" title="Sign Out">Sign Out</button>
         </div>
       </header>
 
@@ -82,6 +116,7 @@
                   <select name="slideType" id="slideType">
                     <option value="photo">Photo-led</option>
                     <option value="text">Text-only</option>
+                    <option value="mockup">Mockup (Sharp)</option>
                   </select>
                 </div>
                 <div class="form-group">
@@ -147,6 +182,130 @@
                     </select>
                   </div>
                 </div>
+              </div>
+
+              <div class="form-section" id="mockup-fields" style="display:none">
+                <div class="form-row">
+                  <div class="form-group">
+                    <label class="label">Layout</label>
+                    <select name="mockupLayout" id="mockupLayout">
+                      <option value="phone-right">Phone Right</option>
+                      <option value="phone-left">Phone Left</option>
+                      <option value="text-statement">Text Statement</option>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label class="label">Theme</label>
+                    <select name="mockupTheme" id="mockupTheme">
+                      <option value="dark">Dark</option>
+                      <option value="light">Light</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label class="label">Highlight Style</label>
+                    <select name="highlightStyle" id="highlightStyle">
+                      <option value="subtle">Subtle</option>
+                      <option value="bold">Bold</option>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label class="label">Image Usage</label>
+                    <select name="imageUsage" id="imageUsage">
+                      <option value="phone">Phone Frame</option>
+                      <option value="figure">Figure / Icon</option>
+                      <option value="background">Full Background</option>
+                      <option value="none">No Image</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div id="mockup-image-upload-section">
+                  <label class="label">Image</label>
+                  <div class="ref-upload-row">
+                    <input type="file" id="screenshot-image-input" accept="image/*" style="display:none" />
+                    <button type="button" class="btn small" id="screenshot-upload-btn">Upload Image</button>
+                    <span class="screenshot-filename" id="screenshot-filename">No image</span>
+                    <button type="button" class="btn small danger" id="screenshot-clear-btn" style="display:none">Clear</button>
+                  </div>
+                  <img id="screenshot-preview" class="ref-preview-img" style="display:none" />
+                </div>
+
+                <div id="mockup-phone-options" style="display:none">
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label class="label">Phone Angle</label>
+                      <select name="phoneAngle" id="phoneAngle">
+                        <option value="0">0&deg;</option>
+                        <option value="-5">-5&deg;</option>
+                        <option value="-8" selected>-8&deg;</option>
+                        <option value="-12">-12&deg;</option>
+                        <option value="5">5&deg;</option>
+                        <option value="8">8&deg;</option>
+                      </select>
+                    </div>
+                    <div class="form-group">
+                      <label class="label">Phone Size</label>
+                      <select name="phoneSize" id="phoneSize">
+                        <option value="small">Small</option>
+                        <option value="medium" selected>Medium</option>
+                        <option value="large">Large</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                <div id="mockup-figure-options" style="display:none">
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label class="label">Position</label>
+                      <select name="figurePosition" id="figurePosition">
+                        <option value="top-right">Top Right</option>
+                        <option value="center-right" selected>Center Right</option>
+                        <option value="bottom-right">Bottom Right</option>
+                        <option value="top-left">Top Left</option>
+                        <option value="center-left">Center Left</option>
+                        <option value="bottom-left">Bottom Left</option>
+                        <option value="center">Center</option>
+                      </select>
+                    </div>
+                    <div class="form-group">
+                      <label class="label">Size</label>
+                      <select name="figureSize" id="figureSize">
+                        <option value="small">Small</option>
+                        <option value="medium" selected>Medium</option>
+                        <option value="large">Large</option>
+                      </select>
+                    </div>
+                    <div class="form-group">
+                      <label class="label">Corner Radius</label>
+                      <select name="figureBorderRadius" id="figureBorderRadius">
+                        <option value="0">None</option>
+                        <option value="12">Small</option>
+                        <option value="24" selected>Medium</option>
+                        <option value="48">Large</option>
+                        <option value="999">Circle</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                <div id="mockup-bg-options" style="display:none">
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label class="label">Overlay Darkness</label>
+                      <select name="bgOverlayOpacity" id="bgOverlayOpacity">
+                        <option value="0.35">Light (35%)</option>
+                        <option value="0.55" selected>Medium (55%)</option>
+                        <option value="0.7">Dark (70%)</option>
+                        <option value="0.85">Very Dark (85%)</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="screenshot-warning" id="screenshot-warning" style="display:none; color:#b45309; font-size:0.78rem; margin-top:4px;">Upload an image above to use with this mode.</div>
               </div>
 
               <div class="form-section">

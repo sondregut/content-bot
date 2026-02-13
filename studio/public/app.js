@@ -1,3 +1,83 @@
+// --- Firebase Auth ---
+async function getIdToken() {
+  const user = firebase.auth().currentUser;
+  if (!user) return null;
+  return user.getIdToken();
+}
+
+async function authFetch(url, opts = {}) {
+  const token = await getIdToken();
+  if (!opts.headers) opts.headers = {};
+  if (token) opts.headers['Authorization'] = `Bearer ${token}`;
+  if (!opts.headers['Content-Type'] && !(opts.body instanceof FormData)) {
+    opts.headers['Content-Type'] = 'application/json';
+  }
+  // FormData sets its own Content-Type with boundary
+  if (opts.body instanceof FormData) {
+    delete opts.headers['Content-Type'];
+  }
+  return fetch(url, opts);
+}
+
+// Auth state listener
+firebase.auth().onAuthStateChanged(async (user) => {
+  const overlay = document.getElementById('login-overlay');
+  const appShell = document.getElementById('app-shell');
+
+  if (user) {
+    overlay.style.display = 'none';
+    appShell.style.display = 'flex';
+    // Init app
+    loadApiKeysFromStorage();
+    try {
+      const res = await authFetch('/api/brands');
+      const data = await res.json();
+      brands = data.brands || [];
+      renderBrandSelector();
+    } catch (err) {
+      console.error('Failed to load brands:', err);
+    }
+    await loadContentIdeas();
+    updateIconPreview();
+  } else {
+    overlay.style.display = 'flex';
+    appShell.style.display = 'none';
+  }
+});
+
+// Login handlers
+document.getElementById('login-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const email = document.getElementById('login-email').value;
+  const password = document.getElementById('login-password').value;
+  const errEl = document.getElementById('login-error');
+  const btn = document.getElementById('login-btn');
+  btn.disabled = true;
+  errEl.textContent = '';
+  try {
+    await firebase.auth().signInWithEmailAndPassword(email, password);
+  } catch (err) {
+    errEl.textContent = err.message;
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+document.getElementById('google-login-btn').addEventListener('click', async () => {
+  const errEl = document.getElementById('login-error');
+  errEl.textContent = '';
+  try {
+    const provider = new firebase.auth.GoogleAuthProvider();
+    await firebase.auth().signInWithPopup(provider);
+  } catch (err) {
+    errEl.textContent = err.message;
+  }
+});
+
+document.getElementById('sign-out-btn').addEventListener('click', async () => {
+  await firebase.auth().signOut();
+});
+
 // --- State ---
 let brands = [];
 let currentBrand = 'athlete-mindset';
@@ -9,6 +89,7 @@ let generatedImages = {};
 let batchJobId = null;
 let pollTimer = null;
 let referenceImageFilename = null;
+let screenshotImageFilename = null;
 
 // --- DOM refs ---
 const brandSelector = document.getElementById('brand-selector');
@@ -23,6 +104,20 @@ const form = document.getElementById('slide-form');
 const slideTypeSelect = document.getElementById('slideType');
 const photoFields = document.getElementById('photo-fields');
 const textFields = document.getElementById('text-fields');
+const mockupFields = document.getElementById('mockup-fields');
+const mockupLayoutSelect = document.getElementById('mockupLayout');
+const mockupThemeSelect = document.getElementById('mockupTheme');
+const mockupPhoneOptions = document.getElementById('mockup-phone-options');
+const mockupFigureOptions = document.getElementById('mockup-figure-options');
+const mockupBgOptions = document.getElementById('mockup-bg-options');
+const mockupImageUploadSection = document.getElementById('mockup-image-upload-section');
+const imageUsageSelect = document.getElementById('imageUsage');
+const screenshotImageInput = document.getElementById('screenshot-image-input');
+const screenshotUploadBtn = document.getElementById('screenshot-upload-btn');
+const screenshotFilename = document.getElementById('screenshot-filename');
+const screenshotClearBtn = document.getElementById('screenshot-clear-btn');
+const screenshotPreview = document.getElementById('screenshot-preview');
+const screenshotWarning = document.getElementById('screenshot-warning');
 const statusEl = document.getElementById('status');
 const previewImg = document.getElementById('preview-image');
 const generateAllBtn = document.getElementById('generate-all-btn');
@@ -69,21 +164,7 @@ const mockupBody = document.getElementById('mockup-body');
 const mockupPhotoPlaceholder = document.getElementById('mockup-photo-placeholder');
 const mockupIconImg = document.getElementById('mockup-icon-img');
 
-// --- Init ---
-window.addEventListener('load', async () => {
-  loadApiKeysFromStorage();
-  try {
-    const res = await fetch('/api/brands', { headers: getAuthHeaders() });
-    if (res.status === 401) { window.location.href = '/login'; return; }
-    const data = await res.json();
-    brands = data.brands || [];
-    renderBrandSelector();
-  } catch (err) {
-    console.error('Failed to load brands:', err);
-  }
-  await loadContentIdeas();
-  updateIconPreview();
-});
+// --- Init (handled by onAuthStateChanged above) ---
 
 // --- API Key Settings ---
 function loadApiKeysFromStorage() {
@@ -93,22 +174,9 @@ function loadApiKeysFromStorage() {
   settingsAnthropicKey.value = anthropic;
 }
 
+// Headers are now handled by authFetch — these are kept for localStorage key storage only
 function getHeaders() {
-  const headers = { 'Content-Type': 'application/json' };
-  const authToken = localStorage.getItem('carousel_auth_token');
-  if (authToken) headers['x-auth-token'] = authToken;
-  const openaiKey = localStorage.getItem('carousel_openai_key');
-  const anthropicKey = localStorage.getItem('carousel_anthropic_key');
-  if (openaiKey) headers['x-openai-key'] = openaiKey;
-  if (anthropicKey) headers['x-anthropic-key'] = anthropicKey;
-  return headers;
-}
-
-function getAuthHeaders() {
-  const headers = {};
-  const authToken = localStorage.getItem('carousel_auth_token');
-  if (authToken) headers['x-auth-token'] = authToken;
-  return headers;
+  return { 'Content-Type': 'application/json' };
 }
 
 settingsBtn.addEventListener('click', () => {
@@ -137,9 +205,8 @@ settingsSaveBtn.addEventListener('click', async () => {
 
   // Send to server to update .env
   try {
-    const res = await fetch('/api/settings', {
+    const res = await authFetch('/api/settings', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ openaiKey, anthropicKey }),
     });
     const data = await res.json();
@@ -180,7 +247,7 @@ brandSelector.addEventListener('change', async () => {
 async function loadContentIdeas() {
   try {
     sidebar.innerHTML = '<div class="sidebar-loading">Loading ideas...</div>';
-    const res = await fetch(`/api/content-ideas?brand=${currentBrand}`, { headers: getAuthHeaders() });
+    const res = await authFetch(`/api/content-ideas?brand=${currentBrand}`);
     contentData = await res.json();
     renderSidebar();
   } catch (err) {
@@ -292,7 +359,7 @@ function renderSlideTabs() {
     const s = slideEdits[i];
     const active = i === currentSlideIndex ? 'active' : '';
     const generated = generatedImages[i] ? 'generated' : '';
-    const typeIcon = s.type === 'photo' ? 'P' : 'T';
+    const typeIcon = s.type === 'photo' ? 'P' : s.type === 'mockup' ? 'M' : 'T';
     html += `<button class="slide-tab ${active} ${generated}" data-index="${i}">`;
     html += `<span class="tab-num">${s.number}</span>`;
     html += `<span class="tab-type">${typeIcon}</span>`;
@@ -330,6 +397,30 @@ function loadSlideIntoForm(index) {
   form.elements.action.value = slide.action || '';
   form.elements.mood.value = slide.mood || '';
 
+  // Mockup fields
+  mockupLayoutSelect.value = slide.mockupLayout || 'phone-right';
+  mockupThemeSelect.value = slide.mockupTheme || 'dark';
+  imageUsageSelect.value = slide.imageUsage || 'phone';
+  if (form.elements.phoneAngle) form.elements.phoneAngle.value = slide.phoneAngle || '-8';
+  if (form.elements.phoneSize) form.elements.phoneSize.value = slide.phoneSize || 'medium';
+  if (form.elements.highlightStyle) form.elements.highlightStyle.value = slide.highlightStyle || 'subtle';
+  if (form.elements.figurePosition) form.elements.figurePosition.value = slide.figurePosition || 'center-right';
+  if (form.elements.figureSize) form.elements.figureSize.value = slide.figureSize || 'medium';
+  if (form.elements.figureBorderRadius) form.elements.figureBorderRadius.value = slide.figureBorderRadius || '24';
+  if (form.elements.bgOverlayOpacity) form.elements.bgOverlayOpacity.value = slide.bgOverlayOpacity || '0.55';
+
+  // Restore screenshot state
+  if (slide.screenshotImage) {
+    screenshotImageFilename = slide.screenshotImage;
+    screenshotFilename.textContent = slide.screenshotImage;
+    screenshotClearBtn.style.display = 'inline-block';
+  } else {
+    screenshotImageFilename = null;
+    screenshotFilename.textContent = 'No screenshot';
+    screenshotPreview.style.display = 'none';
+    screenshotClearBtn.style.display = 'none';
+  }
+
   toggleTypeFields();
 
   if (generatedImages[index]) {
@@ -360,17 +451,54 @@ function saveCurrentSlideEdits() {
     slide.setting = form.elements.setting.value;
     slide.action = form.elements.action.value;
     slide.mood = form.elements.mood.value;
+  } else if (slide.type === 'mockup') {
+    slide.mockupLayout = mockupLayoutSelect.value;
+    slide.mockupTheme = mockupThemeSelect.value;
+    slide.imageUsage = imageUsageSelect.value;
+    slide.phoneAngle = form.elements.phoneAngle?.value || '-8';
+    slide.phoneSize = form.elements.phoneSize?.value || 'medium';
+    slide.highlightStyle = form.elements.highlightStyle?.value || 'subtle';
+    slide.figurePosition = form.elements.figurePosition?.value || 'center-right';
+    slide.figureSize = form.elements.figureSize?.value || 'medium';
+    slide.figureBorderRadius = form.elements.figureBorderRadius?.value || '24';
+    slide.bgOverlayOpacity = form.elements.bgOverlayOpacity?.value || '0.55';
+    slide.screenshotImage = screenshotImageFilename || null;
   }
 }
 
 function toggleTypeFields() {
-  const isPhoto = slideTypeSelect.value === 'photo';
-  photoFields.style.display = isPhoto ? 'block' : 'none';
-  textFields.style.display = isPhoto ? 'none' : 'block';
+  const type = slideTypeSelect.value;
+  photoFields.style.display = type === 'photo' ? 'block' : 'none';
+  textFields.style.display = type === 'text' ? 'block' : 'none';
+  mockupFields.style.display = type === 'mockup' ? 'block' : 'none';
+  if (type === 'mockup') toggleMockupPhoneOptions();
+}
+
+function toggleMockupPhoneOptions() {
+  const usage = imageUsageSelect.value;
+  const needsImage = usage !== 'none';
+
+  mockupPhoneOptions.style.display = usage === 'phone' ? 'block' : 'none';
+  mockupFigureOptions.style.display = usage === 'figure' ? 'block' : 'none';
+  mockupBgOptions.style.display = usage === 'background' ? 'block' : 'none';
+  mockupImageUploadSection.style.display = needsImage ? 'block' : 'none';
+  screenshotWarning.style.display = needsImage && !screenshotImageFilename ? 'block' : 'none';
 }
 
 slideTypeSelect.addEventListener('change', () => {
   toggleTypeFields();
+  updatePreviewMockup();
+});
+
+mockupLayoutSelect.addEventListener('change', () => {
+  toggleMockupPhoneOptions();
+  updatePreviewMockup();
+});
+
+mockupThemeSelect.addEventListener('change', updatePreviewMockup);
+
+imageUsageSelect.addEventListener('change', () => {
+  toggleMockupPhoneOptions();
   updatePreviewMockup();
 });
 
@@ -397,11 +525,18 @@ function updatePreviewMockup() {
   const accentColor = brand?.colors?.accent || '#73a6d1';
   const primaryColor = brand?.colors?.primary || '#072f57';
 
+  const isMockup = (form.elements.slideType?.value || slide.type) === 'mockup';
+
   // Update mockup background based on type
   if (isPhoto) {
     previewMockup.classList.add('photo-type');
     previewMockup.style.background = '';
     mockupPhotoPlaceholder.style.display = 'flex';
+  } else if (isMockup) {
+    previewMockup.classList.remove('photo-type');
+    const mockupTheme = mockupThemeSelect.value || 'dark';
+    previewMockup.style.background = mockupTheme === 'light' ? '#F5F3EF' : primaryColor;
+    mockupPhotoPlaceholder.style.display = 'none';
   } else {
     previewMockup.classList.remove('photo-type');
     previewMockup.style.background = primaryColor;
@@ -457,7 +592,7 @@ iconFileInput.addEventListener('change', async () => {
   fd.append('brand', currentBrand);
 
   try {
-    const res = await fetch('/api/upload-icon', { method: 'POST', body: fd });
+    const res = await authFetch('/api/upload-icon', { method: 'POST', body: fd });
     const data = await res.json();
     if (data.ok) {
       updateIconPreview();
@@ -490,7 +625,7 @@ refImageInput.addEventListener('change', async () => {
   fd.append('image', file);
 
   try {
-    const res = await fetch('/api/upload-reference', { method: 'POST', body: fd });
+    const res = await authFetch('/api/upload-reference', { method: 'POST', body: fd });
     const data = await res.json();
     if (data.ok) {
       referenceImageFilename = data.filename;
@@ -537,6 +672,18 @@ function buildSlidePayload(slide) {
     payload.mood = slide.mood || 'calm intensity, disciplined';
     payload.overlayStyle = form.elements.overlayStyle?.value || 'dark gradient';
     payload.overlayPlacement = form.elements.overlayPlacement?.value || 'bottom third';
+  } else if (payload.slideType === 'mockup') {
+    payload.mockupLayout = slide.mockupLayout || mockupLayoutSelect.value || 'phone-right';
+    payload.mockupTheme = slide.mockupTheme || mockupThemeSelect.value || 'dark';
+    payload.imageUsage = slide.imageUsage || imageUsageSelect.value || 'phone';
+    payload.phoneAngle = slide.phoneAngle || form.elements.phoneAngle?.value || '-8';
+    payload.phoneSize = slide.phoneSize || form.elements.phoneSize?.value || 'medium';
+    payload.highlightStyle = slide.highlightStyle || form.elements.highlightStyle?.value || 'subtle';
+    payload.figurePosition = slide.figurePosition || form.elements.figurePosition?.value || 'center-right';
+    payload.figureSize = slide.figureSize || form.elements.figureSize?.value || 'medium';
+    payload.figureBorderRadius = slide.figureBorderRadius || form.elements.figureBorderRadius?.value || '24';
+    payload.bgOverlayOpacity = slide.bgOverlayOpacity || form.elements.bgOverlayOpacity?.value || '0.55';
+    payload.screenshotImage = slide.screenshotImage || screenshotImageFilename || null;
   } else {
     payload.backgroundStyle = form.elements.backgroundStyle?.value || 'dark premium navy/near-black with very subtle grain';
     payload.layoutTemplate = form.elements.layoutTemplate?.value || 'Layout A - Classic Left Lane';
@@ -566,9 +713,8 @@ form.addEventListener('submit', async (e) => {
   spinnerText.textContent = `Generating slide ${currentSlideIndex + 1}...`;
 
   try {
-    const res = await fetch('/api/generate', {
+    const res = await authFetch('/api/generate', {
       method: 'POST',
-      headers: getHeaders(),
       body: JSON.stringify(payload),
     });
 
@@ -619,9 +765,8 @@ downloadAllBtn.addEventListener('click', async () => {
     return;
   }
 
-  const res = await fetch('/api/download-selected', {
+  const res = await authFetch('/api/download-selected', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ filenames, brandId: currentBrand }),
   });
   if (!res.ok) return;
@@ -657,9 +802,8 @@ generateAllBtn.addEventListener('click', async () => {
   generateAllBtn.disabled = true;
 
   try {
-    const res = await fetch('/api/generate-carousel', {
+    const res = await authFetch('/api/generate-carousel', {
       method: 'POST',
-      headers: getHeaders(),
       body: JSON.stringify(payload),
     });
 
@@ -684,7 +828,7 @@ async function pollBatchStatus() {
   if (!batchJobId) return;
 
   try {
-    const res = await fetch(`/api/carousel-status/${batchJobId}`);
+    const res = await authFetch(`/api/carousel-status/${batchJobId}`);
     const job = await res.json();
 
     const pct = job.total > 0 ? Math.round((job.completed / job.total) * 100) : 0;
@@ -774,6 +918,44 @@ function updateGallery() {
   });
 }
 
+// --- Screenshot Upload (Mockup) ---
+screenshotUploadBtn.addEventListener('click', () => screenshotImageInput.click());
+
+screenshotImageInput.addEventListener('change', async () => {
+  const file = screenshotImageInput.files[0];
+  if (!file) return;
+
+  screenshotFilename.textContent = 'Uploading...';
+  const fd = new FormData();
+  fd.append('image', file);
+
+  try {
+    const res = await authFetch('/api/upload-reference', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (data.ok) {
+      screenshotImageFilename = data.filename;
+      screenshotFilename.textContent = file.name;
+      screenshotPreview.src = data.url;
+      screenshotPreview.style.display = 'block';
+      screenshotClearBtn.style.display = 'inline-block';
+      screenshotWarning.style.display = 'none';
+    } else {
+      screenshotFilename.textContent = 'Upload failed';
+    }
+  } catch {
+    screenshotFilename.textContent = 'Upload error';
+  }
+});
+
+screenshotClearBtn.addEventListener('click', () => {
+  screenshotImageFilename = null;
+  screenshotFilename.textContent = 'No screenshot';
+  screenshotPreview.style.display = 'none';
+  screenshotClearBtn.style.display = 'none';
+  screenshotImageInput.value = '';
+  toggleMockupPhoneOptions();
+});
+
 // --- Freeform AI Generation ---
 freeformGenerateBtn.addEventListener('click', async () => {
   const prompt = freeformInput.value.trim();
@@ -786,9 +968,8 @@ freeformGenerateBtn.addEventListener('click', async () => {
   freeformStatus.textContent = 'Generating slide content with Claude...';
 
   try {
-    const res = await fetch('/api/generate-freeform', {
+    const res = await authFetch('/api/generate-freeform', {
       method: 'POST',
-      headers: getHeaders(),
       body: JSON.stringify({
         prompt,
         brand: currentBrand,
