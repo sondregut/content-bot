@@ -48,6 +48,8 @@
       <header class="app-header">
         <div class="header-left">
           <select id="brand-selector" class="app-dropdown"></select>
+          <button class="header-btn brand-add-btn" id="create-brand-btn" title="Create Brand">+</button>
+          <button class="header-btn brand-edit-btn" id="edit-brand-btn" title="Edit Brand" style="display:none">&#9998;</button>
           <h1>Carousel Studio</h1>
         </div>
         <div class="header-right">
@@ -441,6 +443,93 @@
     </div>
 
     <!-- Settings Modal -->
+    <!-- Brand Creation / Edit Modal -->
+    <div class="modal-overlay" id="brand-modal" style="display:none">
+      <div class="modal brand-modal-wide">
+        <div class="modal-header">
+          <h3 id="brand-modal-title">Create Brand</h3>
+          <button class="modal-close" id="brand-modal-close">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group full">
+            <label class="label">Brand Name *</label>
+            <input type="text" id="brand-name" placeholder="e.g. My Startup" required />
+          </div>
+          <div class="form-group full">
+            <label class="label">Website URL (optional)</label>
+            <input type="text" id="brand-website" placeholder="e.g. myapp.com" />
+          </div>
+          <div class="form-group full">
+            <label class="label">Short Description *</label>
+            <textarea id="brand-description" rows="2" placeholder="1-3 sentences about what your brand does, who it's for, and what makes it unique"></textarea>
+          </div>
+
+          <div class="brand-ai-row">
+            <button type="button" class="btn secondary" id="brand-ai-setup-btn">Generate with AI</button>
+            <span class="brand-ai-status" id="brand-ai-status"></span>
+          </div>
+
+          <div class="brand-colors-section">
+            <label class="label">Brand Colors</label>
+            <div class="brand-color-row">
+              <div class="brand-color-picker">
+                <label>Primary</label>
+                <input type="color" id="brand-color-primary" value="#1A1A2E" />
+                <span class="color-hex" id="brand-color-primary-hex">#1A1A2E</span>
+              </div>
+              <div class="brand-color-picker">
+                <label>Accent</label>
+                <input type="color" id="brand-color-accent" value="#E94560" />
+                <span class="color-hex" id="brand-color-accent-hex">#E94560</span>
+              </div>
+              <div class="brand-color-picker">
+                <label>Text</label>
+                <input type="color" id="brand-color-white" value="#FFFFFF" />
+                <span class="color-hex" id="brand-color-white-hex">#FFFFFF</span>
+              </div>
+              <div class="brand-color-picker">
+                <label>Secondary</label>
+                <input type="color" id="brand-color-secondary" value="#16213E" />
+                <span class="color-hex" id="brand-color-secondary-hex">#16213E</span>
+              </div>
+              <div class="brand-color-picker">
+                <label>CTA</label>
+                <input type="color" id="brand-color-cta" value="#0F3460" />
+                <span class="color-hex" id="brand-color-cta-hex">#0F3460</span>
+              </div>
+            </div>
+          </div>
+
+          <details class="brand-advanced">
+            <summary>Advanced Settings</summary>
+            <div class="form-group full">
+              <label class="label">System Prompt (AI brand voice)</label>
+              <textarea id="brand-system-prompt" rows="5" placeholder="AI-generated brand brief will appear here..."></textarea>
+            </div>
+            <div class="form-group full">
+              <label class="label">Default Micro-Label</label>
+              <input type="text" id="brand-micro-label" placeholder="e.g. MY BRAND" />
+            </div>
+            <div class="form-group full">
+              <label class="label">Watermark Text</label>
+              <input type="text" id="brand-watermark" placeholder="e.g. mybrand.com" />
+            </div>
+            <div class="form-group full">
+              <label class="label">Default Background Description</label>
+              <input type="text" id="brand-bg-desc" placeholder="e.g. dark navy with subtle grain" />
+            </div>
+          </details>
+
+          <div class="brand-modal-status" id="brand-modal-status"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn" id="brand-delete-btn" style="display:none;color:#ef4444;margin-right:auto">Delete</button>
+          <button class="btn" id="brand-modal-cancel">Cancel</button>
+          <button class="btn primary" id="brand-save-btn">Save Brand</button>
+        </div>
+      </div>
+    </div>
+
     <div class="modal-overlay" id="settings-modal" style="display:none">
       <div class="modal">
         <div class="modal-header">

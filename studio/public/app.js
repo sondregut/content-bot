@@ -33,7 +33,16 @@ firebase.auth().onAuthStateChanged(async (user) => {
       const res = await authFetch('/api/brands');
       const data = await res.json();
       brands = data.brands || [];
+      if (brands.length > 0) {
+        currentBrand = brands[0].id;
+      }
       renderBrandSelector();
+      // Auto-open brand creation for new users with no custom brands
+      const hasCustomBrands = brands.some((b) => !b.isDefault);
+      if (!hasCustomBrands && typeof openBrandModal === 'function') {
+        // Small delay so the app shell renders first
+        setTimeout(() => openBrandModal(), 300);
+      }
     } catch (err) {
       console.error('Failed to load brands:', err);
     }
@@ -250,6 +259,10 @@ function renderBrandSelector() {
   brandSelector.innerHTML = brands
     .map((b) => `<option value="${b.id}" ${b.id === currentBrand ? 'selected' : ''}>${b.name}</option>`)
     .join('');
+  // Show edit button only for user-created brands
+  const selected = brands.find((b) => b.id === currentBrand);
+  const editBtn = document.getElementById('edit-brand-btn');
+  if (editBtn) editBtn.style.display = (selected && !selected.isDefault) ? 'flex' : 'none';
 }
 
 brandSelector.addEventListener('change', async () => {
@@ -260,8 +273,174 @@ brandSelector.addEventListener('change', async () => {
   slideEdits = [];
   editorArea.style.display = 'none';
   emptyState.style.display = 'flex';
+  renderBrandSelector(); // update edit button visibility
   await loadContentIdeas();
   updateIconPreview();
+});
+
+// --- Brand Creation / Edit Modal ---
+const brandModal = document.getElementById('brand-modal');
+const brandModalTitle = document.getElementById('brand-modal-title');
+const brandNameInput = document.getElementById('brand-name');
+const brandWebsiteInput = document.getElementById('brand-website');
+const brandDescInput = document.getElementById('brand-description');
+const brandAiBtn = document.getElementById('brand-ai-setup-btn');
+const brandAiStatus = document.getElementById('brand-ai-status');
+const brandSaveBtn = document.getElementById('brand-save-btn');
+const brandDeleteBtn = document.getElementById('brand-delete-btn');
+const brandModalStatus = document.getElementById('brand-modal-status');
+const colorInputs = {
+  primary: document.getElementById('brand-color-primary'),
+  accent: document.getElementById('brand-color-accent'),
+  white: document.getElementById('brand-color-white'),
+  secondary: document.getElementById('brand-color-secondary'),
+  cta: document.getElementById('brand-color-cta'),
+};
+let editingBrandId = null;
+
+// Sync hex labels with color pickers
+for (const [key, input] of Object.entries(colorInputs)) {
+  const hexLabel = document.getElementById(`brand-color-${key}-hex`);
+  input.addEventListener('input', () => { hexLabel.textContent = input.value.toUpperCase(); });
+}
+
+function openBrandModal(brand = null) {
+  editingBrandId = brand ? brand.id : null;
+  brandModalTitle.textContent = brand ? 'Edit Brand' : 'Create Brand';
+  brandNameInput.value = brand?.name || '';
+  brandWebsiteInput.value = brand?.website || '';
+  brandDescInput.value = '';
+  document.getElementById('brand-system-prompt').value = brand?.systemPrompt || '';
+  document.getElementById('brand-micro-label').value = brand?.defaultMicroLabel || '';
+  document.getElementById('brand-watermark').value = brand?.iconOverlayText || '';
+  document.getElementById('brand-bg-desc').value = brand?.defaultBackground || '';
+  brandModalStatus.textContent = '';
+  brandDeleteBtn.style.display = brand ? 'inline-block' : 'none';
+
+  const colors = brand?.colors || { primary: '#1A1A2E', accent: '#E94560', white: '#FFFFFF', secondary: '#16213E', cta: '#0F3460' };
+  for (const [key, input] of Object.entries(colorInputs)) {
+    input.value = colors[key] || '#000000';
+    document.getElementById(`brand-color-${key}-hex`).textContent = input.value.toUpperCase();
+  }
+
+  brandModal.style.display = 'flex';
+}
+
+function closeBrandModal() {
+  brandModal.style.display = 'none';
+  editingBrandId = null;
+}
+
+document.getElementById('create-brand-btn').addEventListener('click', () => openBrandModal());
+document.getElementById('edit-brand-btn').addEventListener('click', () => {
+  const brand = brands.find((b) => b.id === currentBrand);
+  if (brand && !brand.isDefault) openBrandModal(brand);
+});
+document.getElementById('brand-modal-close').addEventListener('click', closeBrandModal);
+document.getElementById('brand-modal-cancel').addEventListener('click', closeBrandModal);
+brandModal.addEventListener('click', (e) => { if (e.target === brandModal) closeBrandModal(); });
+
+// AI Setup
+brandAiBtn.addEventListener('click', async () => {
+  const name = brandNameInput.value.trim();
+  const description = brandDescInput.value.trim();
+  if (!name || !description) {
+    brandAiStatus.textContent = 'Enter name and description first';
+    return;
+  }
+  brandAiBtn.disabled = true;
+  brandAiStatus.textContent = 'Generating with AI...';
+  try {
+    const res = await authFetch('/api/brands/ai-setup', {
+      method: 'POST',
+      body: JSON.stringify({ name, description, websiteUrl: brandWebsiteInput.value.trim() }),
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'AI setup failed');
+    const s = data.suggestion;
+    if (s.colors) {
+      for (const [key, input] of Object.entries(colorInputs)) {
+        if (s.colors[key]) {
+          input.value = s.colors[key];
+          document.getElementById(`brand-color-${key}-hex`).textContent = s.colors[key].toUpperCase();
+        }
+      }
+    }
+    if (s.systemPrompt) document.getElementById('brand-system-prompt').value = s.systemPrompt;
+    if (s.defaultBackground) document.getElementById('brand-bg-desc').value = s.defaultBackground;
+    if (!document.getElementById('brand-micro-label').value) {
+      document.getElementById('brand-micro-label').value = name.toUpperCase();
+    }
+    if (s.tone) brandAiStatus.textContent = `Tone: ${s.tone}`;
+    else brandAiStatus.textContent = 'Done!';
+  } catch (err) {
+    brandAiStatus.textContent = err.message;
+  } finally {
+    brandAiBtn.disabled = false;
+  }
+});
+
+// Save Brand
+brandSaveBtn.addEventListener('click', async () => {
+  const name = brandNameInput.value.trim();
+  if (!name) { brandModalStatus.textContent = 'Brand name is required'; brandModalStatus.className = 'brand-modal-status error'; return; }
+  const colors = {};
+  for (const [key, input] of Object.entries(colorInputs)) colors[key] = input.value;
+  const payload = {
+    name,
+    website: brandWebsiteInput.value.trim(),
+    colors,
+    systemPrompt: document.getElementById('brand-system-prompt').value.trim(),
+    defaultMicroLabel: document.getElementById('brand-micro-label').value.trim() || name.toUpperCase(),
+    defaultBackground: document.getElementById('brand-bg-desc').value.trim() || 'dark premium background with subtle grain',
+    iconOverlayText: document.getElementById('brand-watermark').value.trim() || brandWebsiteInput.value.trim(),
+  };
+  brandSaveBtn.disabled = true;
+  brandModalStatus.textContent = 'Saving...';
+  brandModalStatus.className = 'brand-modal-status';
+  try {
+    const url = editingBrandId ? `/api/brands/${editingBrandId}` : '/api/brands';
+    const method = editingBrandId ? 'PUT' : 'POST';
+    const res = await authFetch(url, { method, body: JSON.stringify(payload) });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    // Refresh brands
+    const bRes = await authFetch('/api/brands');
+    const bData = await bRes.json();
+    brands = bData.brands || [];
+    if (data.brand?.id) currentBrand = data.brand.id;
+    renderBrandSelector();
+    await loadContentIdeas();
+    updateIconPreview();
+    closeBrandModal();
+  } catch (err) {
+    brandModalStatus.textContent = err.message;
+    brandModalStatus.className = 'brand-modal-status error';
+  } finally {
+    brandSaveBtn.disabled = false;
+  }
+});
+
+// Delete Brand
+brandDeleteBtn.addEventListener('click', async () => {
+  if (!editingBrandId) return;
+  if (!confirm('Delete this brand? This cannot be undone.')) return;
+  try {
+    const res = await authFetch(`/api/brands/${editingBrandId}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    const bRes = await authFetch('/api/brands');
+    const bData = await bRes.json();
+    brands = bData.brands || [];
+    currentBrand = brands[0]?.id || 'athlete-mindset';
+    renderBrandSelector();
+    await loadContentIdeas();
+    updateIconPreview();
+    closeBrandModal();
+  } catch (err) {
+    brandModalStatus.textContent = err.message;
+    brandModalStatus.className = 'brand-modal-status error';
+  }
 });
 
 async function loadContentIdeas() {

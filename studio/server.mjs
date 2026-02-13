@@ -32,6 +32,7 @@ if (!claudeEnabled) {
 
 // --- Firebase Admin ---
 let bucket = null;
+let db = null;
 try {
   // Strip literal newlines/carriage returns from JSON (common with env var storage)
   const rawSA = process.env.FIREBASE_SERVICE_ACCOUNT || '';
@@ -47,6 +48,7 @@ try {
       storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
     });
     bucket = admin.storage().bucket();
+    db = admin.firestore();
     console.log('[Firebase] Admin initialized for project:', serviceAccount.project_id);
   } else {
     console.warn('[Firebase] No valid service account — auth disabled (local dev mode).');
@@ -88,6 +90,7 @@ async function requireAuth(req, res, next) {
   if (!token) return res.status(401).json({ error: 'Not authenticated' });
   try {
     const decoded = await admin.auth().verifyIdToken(token);
+    // Only enforce allowlist if explicitly configured
     if (ALLOWED_EMAILS.length && !ALLOWED_EMAILS.includes(decoded.email?.toLowerCase())) {
       return res.status(403).json({ error: 'Not authorized — email not in allowlist' });
     }
@@ -192,6 +195,23 @@ Typography: Sprint times should be monospace, large, high contrast.`,
 
 function getBrand(brandId) {
   return BRANDS[brandId] || BRANDS['athlete-mindset'];
+}
+
+// Async brand lookup — checks hardcoded first, then Firestore
+async function getBrandAsync(brandId, userId) {
+  if (BRANDS[brandId]) return BRANDS[brandId];
+  if (!db) return BRANDS['athlete-mindset'];
+  try {
+    const doc = await db.collection('carousel_brands').doc(brandId).get();
+    if (doc.exists && doc.data().createdBy === userId) return { id: brandId, ...doc.data() };
+  } catch (e) {
+    console.error('[getBrandAsync]', e.message);
+  }
+  return BRANDS['athlete-mindset'];
+}
+
+function slugify(name) {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40);
 }
 
 const ICON_OVERLAY_CONFIGS = {
@@ -1105,21 +1125,171 @@ function parseContentIdeas(markdown, brandId, brandName) {
 
 // --- API Routes ---
 
-// List available brands
-app.get('/api/brands', requireAuth, (req, res) => {
-  const brands = Object.values(BRANDS).map((b) => ({
-    id: b.id,
-    name: b.name,
-    website: b.website,
-    colors: b.colors,
-  }));
-  res.json({ brands });
+// List available brands (hardcoded + user's Firestore brands)
+app.get('/api/brands', requireAuth, async (req, res) => {
+  try {
+    const hardcoded = Object.values(BRANDS).map((b) => ({
+      id: b.id,
+      name: b.name,
+      website: b.website,
+      colors: b.colors,
+      isDefault: true,
+    }));
+    let userBrands = [];
+    if (db && req.user?.uid) {
+      const snap = await db.collection('carousel_brands')
+        .where('createdBy', '==', req.user.uid)
+        .orderBy('createdAt', 'desc')
+        .get();
+      userBrands = snap.docs.map((d) => ({ id: d.id, ...d.data(), isDefault: false }));
+    }
+    res.json({ brands: [...userBrands, ...hardcoded] });
+  } catch (err) {
+    console.error('[Brands]', err);
+    res.json({ brands: Object.values(BRANDS).map((b) => ({ id: b.id, name: b.name, website: b.website, colors: b.colors, isDefault: true })) });
+  }
+});
+
+// Create a new brand
+app.post('/api/brands', requireAuth, async (req, res) => {
+  try {
+    const { name, website, colors, systemPrompt, defaultMicroLabel, defaultBackground, iconOverlayText } = req.body;
+    if (!name || !colors) return res.status(400).json({ error: 'Name and colors are required' });
+    const id = slugify(name) + '-' + crypto.randomUUID().slice(0, 6);
+    const brand = {
+      name,
+      website: website || '',
+      colors: {
+        primary: colors.primary || '#1A1A2E',
+        accent: colors.accent || '#E94560',
+        white: colors.white || '#FFFFFF',
+        secondary: colors.secondary || '#16213E',
+        cta: colors.cta || '#0F3460',
+      },
+      systemPrompt: systemPrompt || '',
+      defaultMicroLabel: defaultMicroLabel || name.toUpperCase(),
+      defaultBackground: defaultBackground || `dark premium background with subtle grain`,
+      iconOverlayText: iconOverlayText || website || '',
+      createdBy: req.user.uid,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+    if (!db) return res.status(500).json({ error: 'Database not available' });
+    await db.collection('carousel_brands').doc(id).set(brand);
+    res.json({ ok: true, brand: { id, ...brand } });
+  } catch (err) {
+    console.error('[Create Brand]', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Update a brand
+app.put('/api/brands/:id', requireAuth, async (req, res) => {
+  try {
+    if (!db) return res.status(500).json({ error: 'Database not available' });
+    const doc = await db.collection('carousel_brands').doc(req.params.id).get();
+    if (!doc.exists) return res.status(404).json({ error: 'Brand not found' });
+    if (doc.data().createdBy !== req.user.uid) return res.status(403).json({ error: 'Not your brand' });
+    const updates = {};
+    for (const key of ['name', 'website', 'colors', 'systemPrompt', 'defaultMicroLabel', 'defaultBackground', 'iconOverlayText']) {
+      if (req.body[key] !== undefined) updates[key] = req.body[key];
+    }
+    await db.collection('carousel_brands').doc(req.params.id).update(updates);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[Update Brand]', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Delete a brand
+app.delete('/api/brands/:id', requireAuth, async (req, res) => {
+  try {
+    if (!db) return res.status(500).json({ error: 'Database not available' });
+    const doc = await db.collection('carousel_brands').doc(req.params.id).get();
+    if (!doc.exists) return res.status(404).json({ error: 'Brand not found' });
+    if (doc.data().createdBy !== req.user.uid) return res.status(403).json({ error: 'Not your brand' });
+    await db.collection('carousel_brands').doc(req.params.id).delete();
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[Delete Brand]', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// AI brand setup — generate colors, system prompt, etc. from description
+app.post('/api/brands/ai-setup', requireAuth, async (req, res) => {
+  try {
+    const { name, description, websiteUrl } = req.body;
+    if (!name || !description) return res.status(400).json({ error: 'Name and description required' });
+
+    let websiteContent = '';
+    if (websiteUrl) {
+      try {
+        const url = websiteUrl.startsWith('http') ? websiteUrl : `https://${websiteUrl}`;
+        const resp = await fetch(url, { signal: AbortSignal.timeout(5000) });
+        const html = await resp.text();
+        // Basic HTML to text extraction
+        websiteContent = html.replace(/<script[\s\S]*?<\/script>/gi, '')
+          .replace(/<style[\s\S]*?<\/style>/gi, '')
+          .replace(/<[^>]+>/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .slice(0, 3000);
+      } catch (e) {
+        console.warn('[AI Setup] Could not fetch website:', e.message);
+      }
+    }
+
+    if (!anthropic) return res.status(500).json({ error: 'Claude API not configured' });
+
+    const msg = await anthropic.messages.create({
+      model: 'claude-sonnet-4-5-20250514',
+      max_tokens: 1024,
+      messages: [{
+        role: 'user',
+        content: `Given this brand info, generate a complete brand configuration for a social media carousel creation tool.
+
+Brand: ${name}
+Description: ${description}
+${websiteContent ? `Website content (extracted): ${websiteContent}` : ''}
+
+Return ONLY valid JSON (no markdown, no code fences) with:
+- colors: { primary (dark bg), accent (highlight), white (text), secondary (alt bg), cta (button) } — all hex codes
+- systemPrompt: 150-200 word brand brief for AI content generation, describing tone, audience, content pillars
+- defaultBackground: one-line visual description for AI image backgrounds
+- contentPillars: array of 4-5 content themes as short strings
+- tone: short tone/voice description (2-3 words)`
+      }],
+    });
+
+    const text = msg.content[0]?.text || '';
+    // Try to parse JSON from the response
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      // Try extracting JSON from possible markdown wrapping
+      const match = text.match(/\{[\s\S]*\}/);
+      parsed = match ? JSON.parse(match[0]) : null;
+    }
+
+    if (!parsed) return res.status(500).json({ error: 'Failed to parse AI response' });
+    res.json({ ok: true, suggestion: parsed });
+  } catch (err) {
+    console.error('[AI Setup]', err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Get content ideas for a brand
 app.get('/api/content-ideas', requireAuth, async (req, res) => {
   try {
     const brandId = req.query.brand || 'athlete-mindset';
+    // Only hardcoded brands have content-ideas.md files
+    if (!BRANDS[brandId]) {
+      const brand = await getBrandAsync(brandId, req.user?.uid);
+      return res.json({ apps: [{ appName: brand.name, brandId, categories: [] }] });
+    }
     const brand = getBrand(brandId);
     const mdPath = path.join(rootDir, 'brands', brandId, 'content-ideas.md');
     const markdown = await fs.readFile(mdPath, 'utf-8');
@@ -1160,7 +1330,7 @@ app.post('/api/generate', requireAuth, async (req, res) => {
   try {
     const data = req.body || {};
     const brandId = data.brand || 'athlete-mindset';
-    const brand = getBrand(brandId);
+    const brand = await getBrandAsync(brandId, req.user?.uid);
 
     if (!data.slideType) {
       return res.status(400).json({ error: 'Missing slideType' });
@@ -1258,7 +1428,7 @@ app.post('/api/generate-carousel', requireAuth, async (req, res) => {
     return res.status(400).json({ error: 'Missing slides array' });
   }
 
-  const brand = getBrand(brandId || 'athlete-mindset');
+  const brand = await getBrandAsync(brandId || 'athlete-mindset', req.user?.uid);
 
   const jobId = crypto.randomUUID().slice(0, 12);
   const job = {
@@ -1374,7 +1544,7 @@ app.post('/api/generate-freeform', requireAuth, async (req, res) => {
       return res.status(500).json({ error: 'Claude API not configured' });
     }
 
-    const brand = getBrand(brandId || 'athlete-mindset');
+    const brand = await getBrandAsync(brandId || 'athlete-mindset', req.user?.uid);
     const numSlides = Math.min(Math.max(parseInt(slideCount) || 7, 1), 20);
 
     const freeformSystemPrompt = `${brand.systemPrompt}
