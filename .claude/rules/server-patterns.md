@@ -7,11 +7,11 @@ paths:
 
 ## Brand Isolation (CRITICAL)
 
-- **Never** use `'athlete-mindset'` as a default/fallback in any route or function
+- **Never** use a specific brand ID as a default/fallback in any route or function
 - All generation routes MUST require an explicit `brand` parameter — return 400 if missing
-- `getBrand()` and `getBrandAsync()` fall back to `GENERIC_BRAND`, not a hardcoded brand
-- `ADMIN_EMAILS` constant controls who sees hardcoded brands in `GET /api/brands`
+- `getBrandAsync()` falls back to `GENERIC_BRAND` — the only brand lookup function
 - Firestore brand lookups verify `createdBy === userId` — users only see their own brands
+- Open signup — no email allowlist or admin gating
 
 ## Image Generation
 

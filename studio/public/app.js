@@ -302,10 +302,8 @@ function renderBrandSelector() {
       .map((b) => `<option value="${b.id}" ${b.id === currentBrand ? 'selected' : ''}>${b.name}</option>`)
       .join('');
   }
-  // Show edit button only for user-created brands
-  const selected = brands.find((b) => b.id === currentBrand);
   const editBtn = document.getElementById('edit-brand-btn');
-  if (editBtn) editBtn.style.display = (selected && !selected.isDefault) ? 'flex' : 'none';
+  if (editBtn) editBtn.style.display = currentBrand ? 'flex' : 'none';
 }
 
 brandSelector.addEventListener('change', async () => {
@@ -385,7 +383,7 @@ function closeBrandModal() {
 document.getElementById('create-brand-btn').addEventListener('click', () => openBrandModal());
 document.getElementById('edit-brand-btn').addEventListener('click', () => {
   const brand = brands.find((b) => b.id === currentBrand);
-  if (brand && !brand.isDefault) openBrandModal(brand);
+  if (brand) openBrandModal(brand);
 });
 document.getElementById('brand-modal-close').addEventListener('click', closeBrandModal);
 document.getElementById('brand-modal-cancel').addEventListener('click', closeBrandModal);

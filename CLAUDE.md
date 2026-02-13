@@ -23,7 +23,6 @@ OPENAI_API_KEY=         # gpt-image-1.5 generation
 ANTHROPIC_API_KEY=      # Claude prompt refinement + freeform content
 FIREBASE_SERVICE_ACCOUNT=  # JSON string (escaped newlines)
 FIREBASE_STORAGE_BUCKET=
-ALLOWED_EMAILS=         # Comma-separated email allowlist
 ```
 
 ## Deployment
@@ -44,8 +43,9 @@ Vercel auto-deploys from `main` branch. Config in root `vercel.json`.
 - **ES Modules** throughout (`import/export`, `"type": "module"`)
 - **No frontend framework** — vanilla JS with direct DOM manipulation in `public/app.js`
 - **Brand-scoped everything** — all generation routes require a `brand` parameter; no hardcoded defaults
-- **ADMIN_EMAILS** in server.mjs — only these emails see hardcoded brands (Athlete Mindset, TrackSpeed)
-- **GENERIC_BRAND** fallback — new users get neutral defaults, never another user's brand config
+- **All brands in Firestore** — no hardcoded brands; every user creates their own via the UI
+- **GENERIC_BRAND** fallback — safety net for missing/invalid brand lookups
+- **Open signup** — anyone can create an account (no email allowlist)
 - **Firebase optional** — server runs without Firebase in local dev (no auth, local disk storage)
 - **Image pipeline:** User prompt -> Claude Haiku refines -> GPT-Image-1.5 generates -> Sharp composites overlays
 
@@ -53,12 +53,12 @@ Vercel auto-deploys from `main` branch. Config in root `vercel.json`.
 
 | Method | Path | Auth | Purpose |
 |--------|------|------|---------|
-| GET | `/api/brands` | Yes | List brands (admin: hardcoded + Firestore; others: Firestore only) |
+| GET | `/api/brands` | Yes | List user's Firestore brands |
 | POST | `/api/brands` | Yes | Create brand in Firestore |
 | PUT | `/api/brands/:id` | Yes | Update own brand |
 | DELETE | `/api/brands/:id` | Yes | Delete own brand |
 | POST | `/api/brands/ai-setup` | Yes | AI-generate brand config from description |
-| GET | `/api/content-ideas?brand=` | Yes | Pre-written carousel templates (hardcoded brands only) |
+| GET | `/api/content-ideas?brand=` | Yes | Pre-written carousel templates (from `brands/{id}/content-ideas.md`) |
 | POST | `/api/generate` | Yes | Generate single slide (AI or mockup) |
 | POST | `/api/generate-carousel` | Yes | Batch generate with job polling |
 | GET | `/api/carousel-status/:jobId` | Yes | Poll batch progress |
@@ -69,8 +69,8 @@ Vercel auto-deploys from `main` branch. Config in root `vercel.json`.
 
 ## Critical Patterns
 
-- **Brand isolation:** Non-admin users MUST NOT see hardcoded brands. All fallbacks use `GENERIC_BRAND`, never `BRANDS['athlete-mindset']`.
-- **`getBrandAsync(brandId, userId)`** resolves: hardcoded BRANDS -> Firestore lookup (with `createdBy` check) -> GENERIC_BRAND fallback.
+- **Brand isolation:** Users only see brands where `createdBy === uid`. All fallbacks use `GENERIC_BRAND`.
+- **`getBrandAsync(brandId, userId)`** resolves: Firestore lookup (with `createdBy` check) -> GENERIC_BRAND fallback.
 - **Mockup canvas:** 1080x1920 (9:16 TikTok). Safe zones: top 120px, bottom 200px, sides 90px.
 - **Batch jobs:** In-memory Map (`carouselJobs`), auto-cleaned after 30 min. Not persistent across deploys.
 

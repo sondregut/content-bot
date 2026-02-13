@@ -2,7 +2,7 @@
 
 ## Brand Data Structure
 
-Every brand (hardcoded or Firestore) follows this shape:
+Every brand (stored in Firestore) follows this shape:
 ```javascript
 {
   id: 'slug-uuid',           // URL-safe identifier
@@ -24,22 +24,12 @@ Every brand (hardcoded or Firestore) follows this shape:
 }
 ```
 
-## Hardcoded vs Custom Brands
+## Brand Storage
 
-| | Hardcoded (BRANDS object) | Custom (Firestore) |
-|---|---|---|
-| Storage | `server.mjs` constant | `carousel_brands` collection |
-| Visible to | Admin emails only | Creator only (`createdBy` check) |
-| Content ideas | `brands/{id}/content-ideas.md` | None (use freeform) |
-| App icon | `brands/{id}/assets/app-icon.png` | Uploaded via `/api/upload-icon` |
-| `isDefault` flag | `true` | `false` |
+All brands live in Firestore `carousel_brands` collection. Users only see brands where `createdBy` matches their UID.
 
-## Adding a New Hardcoded Brand
-
-1. Add entry to `BRANDS` object in `server.mjs`
-2. Create `brands/{id}/` directory with: `content-ideas.md`, `style-guide.md`, `assets/app-icon.png`
-3. Add admin email to `ADMIN_EMAILS` if needed
-4. Content ideas format: see existing brands for markdown structure
+- **Content ideas:** Optional `brands/{id}/content-ideas.md` on disk (loaded if present)
+- **App icon:** `brands/{id}/assets/app-icon.png` on disk, or uploaded via `/api/upload-icon`
 
 ## Content Ideas Markdown Format
 
