@@ -1418,13 +1418,76 @@ app.post('/api/brands/analyze-website', requireAuth, async (req, res) => {
       || html.match(/<link[^>]*href=["']([^"']*)["'][^>]*rel=["'](?:icon|shortcut icon|apple-touch-icon)["']/i);
     let favicon = faviconMatch ? faviconMatch[1] : '';
 
-    // Extract images
-    const imgRegex = /<img[^>]*src=["']([^"']+)["']/gi;
+    // Extract images from multiple sources
     const rawImages = [];
+
+    // 1. Standard <img src="...">
+    const imgRegex = /<img[^>]*src=["']([^"']+)["']/gi;
     let imgMatch;
     while ((imgMatch = imgRegex.exec(html)) !== null) {
       rawImages.push(imgMatch[1]);
     }
+
+    // 2. srcset, data-src, <source srcset>, background-image
+    const lazySrcRegex = /(?:data-src|data-lazy-src|data-original)=["']([^"']+)["']/gi;
+    while ((imgMatch = lazySrcRegex.exec(html)) !== null) {
+      rawImages.push(imgMatch[1]);
+    }
+    const srcsetRegex = /srcset=["']([^"']+)["']/gi;
+    while ((imgMatch = srcsetRegex.exec(html)) !== null) {
+      // srcset has "url size, url size" format — extract each URL
+      for (const entry of imgMatch[1].split(',')) {
+        const srcUrl = entry.trim().split(/\s+/)[0];
+        if (srcUrl) rawImages.push(srcUrl);
+      }
+    }
+    const bgImageRegex = /background-image:\s*url\(["']?([^"')]+)["']?\)/gi;
+    while ((imgMatch = bgImageRegex.exec(html)) !== null) {
+      rawImages.push(imgMatch[1]);
+    }
+
+    // 3. Broad scan: any quoted URL with image extension anywhere in HTML
+    const anyImageUrlRegex = /["']((?:https?:\/\/[^"'\s]+|\/[^"'\s]+)\.(?:png|jpg|jpeg|webp|avif))(?:\?[^"']*)?\b/gi;
+    while ((imgMatch = anyImageUrlRegex.exec(html)) !== null) {
+      rawImages.push(imgMatch[1]);
+    }
+
+    // 4. Scan JS bundles for image URLs (catches SPAs like Vite/React/Next)
+    try {
+      const scriptSrcRegex = /<script[^>]*src=["']([^"']+\.js)["']/gi;
+      const bundleUrls = [];
+      let scriptMatch;
+      while ((scriptMatch = scriptSrcRegex.exec(html)) !== null) {
+        const src = scriptMatch[1];
+        // Skip CDN/external scripts
+        if (/^https?:\/\//i.test(src)) {
+          try {
+            const scriptHost = new URL(src).hostname;
+            const pageHost = new URL(finalUrl).hostname;
+            if (!scriptHost.endsWith(pageHost) && !pageHost.endsWith(scriptHost)) continue;
+          } catch { continue; }
+        }
+        bundleUrls.push(src);
+        if (bundleUrls.length >= 2) break;
+      }
+      const baseForResolve = new URL(finalUrl);
+      for (const bundleSrc of bundleUrls) {
+        try {
+          const bundleUrl = new URL(bundleSrc, baseForResolve).href;
+          const bundleResp = await fetch(bundleUrl, {
+            signal: AbortSignal.timeout(3000),
+            headers: { 'User-Agent': 'Mozilla/5.0 (compatible; CarouselStudio/1.0)' },
+          });
+          if (!bundleResp.ok) continue;
+          const jsText = await bundleResp.text();
+          const jsImageRegex = /["']((?:https?:\/\/[^"'\s]+|\/[^"'\s]+)\.(?:png|jpg|jpeg|webp|avif))["']/gi;
+          let jsMatch;
+          while ((jsMatch = jsImageRegex.exec(jsText)) !== null) {
+            rawImages.push(jsMatch[1]);
+          }
+        } catch { /* timeout or fetch error — skip */ }
+      }
+    } catch { /* ignore bundle scanning errors */ }
 
     // Extract CSS colors (hex codes from style blocks and inline styles)
     const colorRegex = /#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b/g;
@@ -1481,6 +1544,40 @@ app.post('/api/brands/analyze-website', requireAuth, async (req, res) => {
       seenUrls.add(resolved);
       images.push({ url: resolved, type: 'img' });
       if (images.length >= 20) break;
+    }
+
+    // 5. Fallback: probe common image paths if we found very few images
+    if (images.length < 3) {
+      const commonPaths = [
+        '/og-image.png', '/og-image.jpg',
+        '/logo.png', '/logo.svg',
+        '/apple-touch-icon.png',
+        '/images/logo.png', '/img/logo.png',
+        '/assets/logo.png',
+      ];
+      const probePromises = commonPaths
+        .map(p => `${baseUrl.origin}${p}`)
+        .filter(u => !seenUrls.has(u))
+        .map(async (probeUrl) => {
+          try {
+            const resp = await fetch(probeUrl, {
+              method: 'HEAD',
+              signal: AbortSignal.timeout(2000),
+              headers: { 'User-Agent': 'Mozilla/5.0 (compatible; CarouselStudio/1.0)' },
+            });
+            if (resp.ok && (resp.headers.get('content-type') || '').startsWith('image/')) {
+              return probeUrl;
+            }
+          } catch { /* ignore */ }
+          return null;
+        });
+      const probeResults = await Promise.all(probePromises);
+      for (const found of probeResults) {
+        if (found && !seenUrls.has(found)) {
+          seenUrls.add(found);
+          images.push({ url: found, type: 'probe' });
+        }
+      }
     }
 
     // Send to Claude for brand analysis
