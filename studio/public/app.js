@@ -215,8 +215,14 @@ const mockupIconImg = document.getElementById('mockup-icon-img');
 const mockupTextGroup = document.getElementById('mockup-text-group');
 const mockupTextReset = document.getElementById('mockup-text-reset');
 
-// --- Text Offset (drag to move) ---
-let textOffset = { x: 0, y: 0 };
+// --- Per-element Text Offsets (drag to move) ---
+let elementOffsets = {
+  micro: { x: 0, y: 0 },
+  headline: { x: 0, y: 0 },
+  body: { x: 0, y: 0 },
+  icon: { x: 0, y: 0 },
+};
+let selectedElement = 'headline'; // which element is selected for dragging
 
 // --- Init (handled by onAuthStateChanged above) ---
 
@@ -942,9 +948,33 @@ function loadSlideIntoForm(index) {
   if (form.elements.figureBorderRadius) form.elements.figureBorderRadius.value = slide.figureBorderRadius || '24';
   if (form.elements.bgOverlayOpacity) form.elements.bgOverlayOpacity.value = slide.bgOverlayOpacity || '0.55';
 
-  // Restore text offset
-  textOffset = { x: slide.textOffsetX || 0, y: slide.textOffsetY || 0 };
+  // New mockup controls
+  if (form.elements.aspectRatio) form.elements.aspectRatio.value = slide.aspectRatio || '9:16';
+  if (form.elements.mockupFont) form.elements.mockupFont.value = slide.fontFamily || 'Helvetica';
+  if (form.elements.overlayDarken) {
+    form.elements.overlayDarken.value = Math.round((slide.overlayDarken || 0) * 100);
+    const darkenLabel = document.getElementById('darkenValue');
+    if (darkenLabel) darkenLabel.textContent = Math.round((slide.overlayDarken || 0) * 100) + '%';
+  }
+
+  // Color overrides
+  const textColorEnabled = document.getElementById('mockupTextColorEnabled');
+  const accentColorEnabled = document.getElementById('mockupAccentColorEnabled');
+  if (textColorEnabled) textColorEnabled.checked = !!slide.textColor;
+  if (accentColorEnabled) accentColorEnabled.checked = !!slide.microColor;
+  if (form.elements.mockupTextColor && slide.textColor) form.elements.mockupTextColor.value = slide.textColor;
+  if (form.elements.mockupAccentColor && slide.microColor) form.elements.mockupAccentColor.value = slide.microColor;
+
+  // Restore per-element offsets
+  elementOffsets = {
+    micro: { x: slide.microOffsetX || 0, y: slide.microOffsetY || 0 },
+    headline: { x: slide.headlineOffsetX || 0, y: slide.headlineOffsetY || 0 },
+    body: { x: slide.bodyOffsetX || 0, y: slide.bodyOffsetY || 0 },
+    icon: { x: slide.iconOffsetX || 0, y: slide.iconOffsetY || 0 },
+  };
+  selectedElement = 'headline';
   applyTextOffset();
+  updateAspectRatioPreview();
 
   // Restore screenshot state
   if (slide.screenshotImage) {
@@ -1015,8 +1045,24 @@ function saveCurrentSlideEdits() {
     slide.figureBorderRadius = form.elements.figureBorderRadius?.value || '24';
     slide.bgOverlayOpacity = form.elements.bgOverlayOpacity?.value || '0.55';
     slide.screenshotImage = screenshotImageFilename || null;
-    slide.textOffsetX = textOffset.x;
-    slide.textOffsetY = textOffset.y;
+    // Per-element offsets
+    slide.microOffsetX = elementOffsets.micro.x;
+    slide.microOffsetY = elementOffsets.micro.y;
+    slide.headlineOffsetX = elementOffsets.headline.x;
+    slide.headlineOffsetY = elementOffsets.headline.y;
+    slide.bodyOffsetX = elementOffsets.body.x;
+    slide.bodyOffsetY = elementOffsets.body.y;
+    slide.iconOffsetX = elementOffsets.icon.x;
+    slide.iconOffsetY = elementOffsets.icon.y;
+    // New controls
+    slide.aspectRatio = form.elements.aspectRatio?.value || '9:16';
+    slide.fontFamily = form.elements.mockupFont?.value || 'Helvetica';
+    slide.overlayDarken = (parseInt(form.elements.overlayDarken?.value) || 0) / 100;
+    // Color overrides (only if enabled)
+    const textColorEnabled = document.getElementById('mockupTextColorEnabled');
+    const accentColorEnabled = document.getElementById('mockupAccentColorEnabled');
+    slide.textColor = textColorEnabled?.checked ? form.elements.mockupTextColor?.value : null;
+    slide.microColor = accentColorEnabled?.checked ? form.elements.mockupAccentColor?.value : null;
   }
 }
 
@@ -1059,8 +1105,13 @@ bgTextShortcutBtn.addEventListener('click', () => {
 
 mockupLayoutSelect.addEventListener('change', () => {
   toggleMockupPhoneOptions();
-  // Reset text offset when layout changes (each layout has different default positions)
-  textOffset = { x: 0, y: 0 };
+  // Reset offsets when layout changes (each layout has different default positions)
+  elementOffsets = {
+    micro: { x: 0, y: 0 },
+    headline: { x: 0, y: 0 },
+    body: { x: 0, y: 0 },
+    icon: { x: 0, y: 0 },
+  };
   updatePreviewMockup();
 });
 
@@ -1072,6 +1123,22 @@ imageUsageSelect.addEventListener('change', () => {
 });
 
 document.getElementById('bgOverlayOpacity').addEventListener('change', updatePreviewMockup);
+
+// New mockup controls
+document.getElementById('aspectRatio').addEventListener('change', () => {
+  updateAspectRatioPreview();
+  updatePreviewMockup();
+});
+document.getElementById('mockupFont').addEventListener('change', updatePreviewMockup);
+document.getElementById('overlayDarken').addEventListener('input', () => {
+  const val = document.getElementById('overlayDarken').value;
+  document.getElementById('darkenValue').textContent = val + '%';
+  updatePreviewMockup();
+});
+document.getElementById('mockupTextColor').addEventListener('input', updatePreviewMockup);
+document.getElementById('mockupAccentColor').addEventListener('input', updatePreviewMockup);
+document.getElementById('mockupTextColorEnabled').addEventListener('change', updatePreviewMockup);
+document.getElementById('mockupAccentColorEnabled').addEventListener('change', updatePreviewMockup);
 
 // Live preview update on form input
 ['microLabel', 'headline', 'body', 'highlightPhrase', 'slideLabel'].forEach((name) => {
@@ -1091,9 +1158,11 @@ function updatePreviewMockup() {
   const highlight = form.elements.highlightPhrase?.value || slide.highlight || '';
   const isPhoto = (form.elements.slideType?.value || slide.type) === 'photo';
 
-  // Get brand colors
+  // Get brand colors (may be overridden)
   const brand = brands.find((b) => b.id === currentBrand);
-  const accentColor = brand?.colors?.accent || '#73a6d1';
+  const accentColorEnabled = document.getElementById('mockupAccentColorEnabled')?.checked;
+  const textColorEnabled = document.getElementById('mockupTextColorEnabled')?.checked;
+  const accentColor = accentColorEnabled ? (form.elements.mockupAccentColor?.value || '#73a6d1') : (brand?.colors?.accent || '#73a6d1');
   const primaryColor = brand?.colors?.primary || '#072f57';
 
   const isMockup = (form.elements.slideType?.value || slide.type) === 'mockup';
@@ -1125,6 +1194,9 @@ function updatePreviewMockup() {
     mockupPhotoPlaceholder.style.display = 'none';
   }
 
+  // Text color override
+  const textColor = textColorEnabled ? (form.elements.mockupTextColor?.value || '#FFFFFF') : '';
+
   // Update text content
   mockupMicro.textContent = microLabel;
   mockupMicro.style.color = accentColor;
@@ -1143,8 +1215,36 @@ function updatePreviewMockup() {
   } else {
     mockupHeadline.textContent = headline;
   }
+  if (textColor) mockupHeadline.style.color = textColor;
+  else mockupHeadline.style.color = '';
 
   mockupBody.textContent = body;
+  if (textColor) mockupBody.style.color = textColor;
+  else mockupBody.style.color = '';
+
+  // Darken overlay on preview
+  let darkenEl = previewMockup.querySelector('.mockup-darken');
+  const darkenVal = parseInt(form.elements.overlayDarken?.value) || 0;
+  if (isMockup && darkenVal > 0) {
+    if (!darkenEl) {
+      darkenEl = document.createElement('div');
+      darkenEl.className = 'mockup-darken';
+      darkenEl.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;pointer-events:none;z-index:0;border-radius:12px;';
+      previewMockup.insertBefore(darkenEl, previewMockup.firstChild);
+    }
+    darkenEl.style.background = `rgba(0,0,0,${darkenVal / 100})`;
+    darkenEl.style.display = 'block';
+  } else if (darkenEl) {
+    darkenEl.style.display = 'none';
+  }
+
+  // Font preview
+  const fontFamily = form.elements.mockupFont?.value || 'Helvetica';
+  if (isMockup) {
+    mockupHeadline.style.fontFamily = fontFamily + ', sans-serif';
+    mockupBody.style.fontFamily = fontFamily + ', sans-serif';
+    mockupMicro.style.fontFamily = fontFamily + ', sans-serif';
+  }
 
   // Icon position
   const mockupIcon = document.getElementById('mockup-icon');
@@ -1158,77 +1258,109 @@ function updatePreviewMockup() {
   applyTextOffset();
 }
 
-// --- Drag to Move Text ---
+// --- Drag to Move Text (per-element) ---
 function applyTextOffset() {
   // Preview is 5x smaller than canvas (1080/216 ≈ 5)
   const scale = 5;
-  mockupTextGroup.style.transform = `translate(${textOffset.x / scale}px, ${textOffset.y / scale}px)`;
-  mockupTextReset.style.display = (textOffset.x !== 0 || textOffset.y !== 0) ? 'block' : 'none';
+  mockupMicro.style.transform = `translate(${elementOffsets.micro.x / scale}px, ${elementOffsets.micro.y / scale}px)`;
+  mockupHeadline.style.transform = `translate(${elementOffsets.headline.x / scale}px, ${elementOffsets.headline.y / scale}px)`;
+  mockupBody.style.transform = `translate(${elementOffsets.body.x / scale}px, ${elementOffsets.body.y / scale}px)`;
+  const hasOffset = Object.values(elementOffsets).some(o => o.x !== 0 || o.y !== 0);
+  mockupTextReset.style.display = hasOffset ? 'block' : 'none';
 }
 
 function resetTextOffset() {
-  textOffset = { x: 0, y: 0 };
+  elementOffsets = {
+    micro: { x: 0, y: 0 },
+    headline: { x: 0, y: 0 },
+    body: { x: 0, y: 0 },
+    icon: { x: 0, y: 0 },
+  };
   applyTextOffset();
   saveCurrentSlideEdits();
   saveSession();
 }
 
+function updateAspectRatioPreview() {
+  const ratio = form.elements.aspectRatio?.value || '9:16';
+  previewMockup.classList.remove('aspect-4-5', 'aspect-1-1');
+  if (ratio === '4:5') previewMockup.classList.add('aspect-4-5');
+  else if (ratio === '1:1') previewMockup.classList.add('aspect-1-1');
+}
+
 mockupTextReset.addEventListener('click', resetTextOffset);
 
-// Drag handlers (mouse + touch)
+// Drag handlers (mouse + touch) — per-element on the small preview
 {
   const scale = 5;
   let dragging = false;
   let startX, startY, startOffsetX, startOffsetY;
+  let dragTarget = null; // 'micro' | 'headline' | 'body'
 
   function isEditing() {
     return mockupTextGroup.querySelector('[contenteditable="true"]') !== null;
   }
 
-  function startDrag(clientX, clientY) {
+  function getElementKey(el) {
+    if (el === mockupMicro || el.closest('.mockup-micro')) return 'micro';
+    if (el === mockupHeadline || el.closest('.mockup-headline')) return 'headline';
+    if (el === mockupBody || el.closest('.mockup-body')) return 'body';
+    return 'headline'; // fallback
+  }
+
+  function startDrag(clientX, clientY, el) {
     if (isEditing()) return;
     const isMockup = (slideTypeSelect.value || slideEdits[currentSlideIndex]?.type) === 'mockup';
     if (!isMockup) return;
+    dragTarget = getElementKey(el);
+    selectedElement = dragTarget;
     dragging = true;
     startX = clientX;
     startY = clientY;
-    startOffsetX = textOffset.x;
-    startOffsetY = textOffset.y;
+    startOffsetX = elementOffsets[dragTarget].x;
+    startOffsetY = elementOffsets[dragTarget].y;
     mockupTextGroup.classList.add('dragging');
   }
 
   function moveDrag(clientX, clientY) {
-    if (!dragging) return;
+    if (!dragging || !dragTarget) return;
     const dx = (clientX - startX) * scale;
     const dy = (clientY - startY) * scale;
-    textOffset.x = Math.max(-500, Math.min(500, startOffsetX + dx));
-    textOffset.y = Math.max(-800, Math.min(800, startOffsetY + dy));
+    elementOffsets[dragTarget].x = Math.max(-500, Math.min(500, startOffsetX + dx));
+    elementOffsets[dragTarget].y = Math.max(-800, Math.min(800, startOffsetY + dy));
     applyTextOffset();
   }
 
   function endDrag() {
     if (!dragging) return;
     dragging = false;
+    dragTarget = null;
     mockupTextGroup.classList.remove('dragging');
     saveCurrentSlideEdits();
     saveSession();
   }
 
-  // Mouse
-  mockupTextGroup.addEventListener('mousedown', (e) => {
-    if (e.button !== 0) return;
-    e.preventDefault();
-    startDrag(e.clientX, e.clientY);
+  // Mouse — each element is individually draggable
+  [mockupMicro, mockupHeadline, mockupBody].forEach(el => {
+    el.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      startDrag(e.clientX, e.clientY, el);
+    });
   });
   window.addEventListener('mousemove', (e) => moveDrag(e.clientX, e.clientY));
   window.addEventListener('mouseup', endDrag);
 
   // Touch
-  mockupTextGroup.addEventListener('touchstart', (e) => {
-    if (isEditing()) return;
-    const t = e.touches[0];
-    startDrag(t.clientX, t.clientY);
-  }, { passive: true });
+  [mockupMicro, mockupHeadline, mockupBody].forEach(el => {
+    el.addEventListener('touchstart', (e) => {
+      if (isEditing()) return;
+      const t = e.touches[0];
+      e.stopPropagation();
+      startDrag(t.clientX, t.clientY, el);
+    }, { passive: true });
+  });
   window.addEventListener('touchmove', (e) => {
     if (!dragging) return;
     const t = e.touches[0];
@@ -1312,37 +1444,50 @@ function updatePreviewDragOverlay() {
   }
 }
 
+function getCanvasHeight(slide) {
+  const ratios = { '9:16': 1920, '4:5': 1350, '1:1': 1080 };
+  return ratios[slide?.aspectRatio] || 1920;
+}
+
 function positionPreviewEditGroup() {
-  // The preview image maps 1080x1920 canvas to its display size
-  // We position the edit group relative to the overlay based on offset and layout
+  // The preview image maps canvas to its display size
   const slide = slideEdits[currentSlideIndex];
   if (!previewImg.naturalWidth) return;
   const imgRect = previewImg.getBoundingClientRect();
   const frameRect = previewFrame.getBoundingClientRect();
-  // Image offset within the frame (centered)
   const imgLeft = imgRect.left - frameRect.left;
   const imgTop = imgRect.top - frameRect.top;
+  const canvasH = getCanvasHeight(slide);
   const scaleX = imgRect.width / 1080;
-  const scaleY = imgRect.height / 1920;
+  const scaleY = imgRect.height / canvasH;
 
   // Approximate text position in canvas-space based on layout
   const layout = slide?.mockupLayout || 'phone-right';
   let canvasTextX = 90; // safe.left
-  let canvasTextY = 180; // safe.top + 60
+  let canvasTextY = Math.round(120 * (canvasH / 1920)) + 60;
   if (layout === 'phone-left') {
     canvasTextX = 500;
-    canvasTextY = 576; // height * 0.30
+    canvasTextY = Math.round(canvasH * 0.30);
   } else if (layout === 'text-statement') {
-    canvasTextY = 500; // approximate center
+    canvasTextY = Math.round(canvasH * 0.3);
   }
 
-  // Apply user offset
-  const ox = slide?.textOffsetX || 0;
-  const oy = slide?.textOffsetY || 0;
+  // Apply headline offset (used for group positioning)
+  const ox = slide?.headlineOffsetX || 0;
+  const oy = slide?.headlineOffsetY || 0;
 
   previewEditGroup.style.left = (imgLeft + (canvasTextX + ox) * scaleX) + 'px';
   previewEditGroup.style.top = (imgTop + (canvasTextY + oy) * scaleY) + 'px';
   previewEditGroup.style.maxWidth = (imgRect.width * 0.6) + 'px';
+
+  // Position individual elements with their own offsets
+  const microOx = (slide?.microOffsetX || 0) - ox;
+  const microOy = (slide?.microOffsetY || 0) - oy;
+  previewEditMicro.style.transform = `translate(${microOx * scaleX}px, ${microOy * scaleY}px)`;
+  previewEditHeadline.style.transform = 'none';
+  const bodyOx = (slide?.bodyOffsetX || 0) - ox;
+  const bodyOy = (slide?.bodyOffsetY || 0) - oy;
+  previewEditBody.style.transform = `translate(${bodyOx * scaleX}px, ${bodyOy * scaleY}px)`;
 }
 
 // Auto-regenerate mockup (fast, no AI call)
@@ -1374,31 +1519,49 @@ async function regenerateMockup() {
   }
 }
 
-// Drag on the preview image
+// Drag on the preview image — per-element
 {
   let dragging = false;
   let startX, startY, startOffsetX, startOffsetY;
+  let previewDragTarget = 'headline';
 
   function isPreviewEditing() {
     return previewEditGroup.classList.contains('editing');
   }
 
   function getPreviewScale() {
+    const slide = slideEdits[currentSlideIndex];
+    const canvasH = getCanvasHeight(slide);
     const imgRect = previewImg.getBoundingClientRect();
-    return { sx: 1080 / imgRect.width, sy: 1920 / imgRect.height };
+    return { sx: 1080 / imgRect.width, sy: canvasH / imgRect.height };
   }
 
-  function startPreviewDrag(clientX, clientY) {
+  function getPreviewDragTarget(e) {
+    const el = e.target;
+    if (el === previewEditMicro || el.closest('.preview-edit-micro')) return 'micro';
+    if (el === previewEditBody || el.closest('.preview-edit-body')) return 'body';
+    // Default to selected element or headline
+    return selectedElement || 'headline';
+  }
+
+  function startPreviewDrag(clientX, clientY, target) {
     if (isPreviewEditing()) return;
     const slide = slideEdits[currentSlideIndex];
     if (!slide || slide.type !== 'mockup') return;
     if (previewImg.style.display !== 'block') return;
+    previewDragTarget = target;
+    selectedElement = target;
     dragging = true;
     startX = clientX;
     startY = clientY;
-    startOffsetX = textOffset.x;
-    startOffsetY = textOffset.y;
+    startOffsetX = elementOffsets[previewDragTarget].x;
+    startOffsetY = elementOffsets[previewDragTarget].y;
     previewDragOverlay.classList.add('dragging');
+    // Highlight selected element
+    [previewEditMicro, previewEditHeadline, previewEditBody].forEach(el => el.classList.remove('drag-selected'));
+    if (previewDragTarget === 'micro') previewEditMicro.classList.add('drag-selected');
+    else if (previewDragTarget === 'body') previewEditBody.classList.add('drag-selected');
+    else previewEditHeadline.classList.add('drag-selected');
   }
 
   function movePreviewDrag(clientX, clientY) {
@@ -1406,11 +1569,9 @@ async function regenerateMockup() {
     const { sx, sy } = getPreviewScale();
     const dx = (clientX - startX) * sx;
     const dy = (clientY - startY) * sy;
-    textOffset.x = Math.max(-500, Math.min(500, startOffsetX + dx));
-    textOffset.y = Math.max(-800, Math.min(800, startOffsetY + dy));
-    // Move the edit group in real-time
+    elementOffsets[previewDragTarget].x = Math.max(-500, Math.min(500, startOffsetX + dx));
+    elementOffsets[previewDragTarget].y = Math.max(-800, Math.min(800, startOffsetY + dy));
     positionPreviewEditGroup();
-    // Also sync the small mockup
     applyTextOffset();
   }
 
@@ -1418,20 +1579,26 @@ async function regenerateMockup() {
     if (!dragging) return;
     dragging = false;
     previewDragOverlay.classList.remove('dragging');
-    // Only regenerate if offset actually changed
-    if (textOffset.x !== startOffsetX || textOffset.y !== startOffsetY) {
+    if (elementOffsets[previewDragTarget].x !== startOffsetX || elementOffsets[previewDragTarget].y !== startOffsetY) {
       saveCurrentSlideEdits();
       saveSession();
       regenerateMockup();
     }
   }
 
+  // Click on individual elements to select
+  [previewEditMicro, previewEditHeadline, previewEditBody].forEach(el => {
+    el.style.pointerEvents = 'auto';
+    el.style.cursor = 'grab';
+  });
+
   // Mouse
   previewDragOverlay.addEventListener('mousedown', (e) => {
     if (e.button !== 0) return;
     if (isPreviewEditing()) return;
     e.preventDefault();
-    startPreviewDrag(e.clientX, e.clientY);
+    const target = getPreviewDragTarget(e);
+    startPreviewDrag(e.clientX, e.clientY, target);
   });
   window.addEventListener('mousemove', (e) => movePreviewDrag(e.clientX, e.clientY));
   window.addEventListener('mouseup', endPreviewDrag);
@@ -1440,7 +1607,8 @@ async function regenerateMockup() {
   previewDragOverlay.addEventListener('touchstart', (e) => {
     if (isPreviewEditing()) return;
     const t = e.touches[0];
-    startPreviewDrag(t.clientX, t.clientY);
+    const target = getPreviewDragTarget(e);
+    startPreviewDrag(t.clientX, t.clientY, target);
   }, { passive: true });
   window.addEventListener('touchmove', (e) => {
     if (!dragging) return;
@@ -1673,8 +1841,21 @@ function buildSlidePayload(slide, slideIndex) {
     payload.figureBorderRadius = slide.figureBorderRadius || form.elements.figureBorderRadius?.value || '24';
     payload.bgOverlayOpacity = slide.bgOverlayOpacity || form.elements.bgOverlayOpacity?.value || '0.55';
     payload.screenshotImage = slide.screenshotImage || screenshotImageFilename || null;
-    payload.textOffsetX = slide.textOffsetX || 0;
-    payload.textOffsetY = slide.textOffsetY || 0;
+    // Per-element offsets
+    payload.microOffsetX = slide.microOffsetX || 0;
+    payload.microOffsetY = slide.microOffsetY || 0;
+    payload.headlineOffsetX = slide.headlineOffsetX || 0;
+    payload.headlineOffsetY = slide.headlineOffsetY || 0;
+    payload.bodyOffsetX = slide.bodyOffsetX || 0;
+    payload.bodyOffsetY = slide.bodyOffsetY || 0;
+    payload.iconOffsetX = slide.iconOffsetX || 0;
+    payload.iconOffsetY = slide.iconOffsetY || 0;
+    // New controls
+    payload.aspectRatio = slide.aspectRatio || form.elements.aspectRatio?.value || '9:16';
+    payload.fontFamily = slide.fontFamily || form.elements.mockupFont?.value || 'Helvetica';
+    payload.overlayDarken = slide.overlayDarken || 0;
+    if (slide.textColor) payload.textColor = slide.textColor;
+    if (slide.microColor) payload.microColor = slide.microColor;
   } else {
     payload.backgroundStyle = form.elements.backgroundStyle?.value || 'dark premium navy/near-black with very subtle grain';
     payload.layoutTemplate = form.elements.layoutTemplate?.value || 'Layout A - Classic Left Lane';

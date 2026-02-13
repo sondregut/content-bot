@@ -297,6 +297,49 @@
                 </div>
                 <div class="form-row">
                   <div class="form-group">
+                    <label class="label">Aspect Ratio</label>
+                    <select name="aspectRatio" id="aspectRatio">
+                      <option value="9:16">9:16 (TikTok)</option>
+                      <option value="4:5">4:5 (Instagram)</option>
+                      <option value="1:1">1:1 (Square)</option>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label class="label">Font</label>
+                    <select name="mockupFont" id="mockupFont">
+                      <option value="Helvetica">Helvetica</option>
+                      <option value="Arial">Arial</option>
+                      <option value="Georgia">Georgia</option>
+                      <option value="Times New Roman">Times New Roman</option>
+                      <option value="Courier">Courier</option>
+                      <option value="Impact">Impact</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label class="label">Text Color</label>
+                    <div class="color-override-row">
+                      <input type="color" name="mockupTextColor" id="mockupTextColor" value="#FFFFFF" />
+                      <label class="checkbox"><input type="checkbox" id="mockupTextColorEnabled" /> Override</label>
+                    </div>
+                  </div>
+                  <div class="form-group">
+                    <label class="label">Accent Color</label>
+                    <div class="color-override-row">
+                      <input type="color" name="mockupAccentColor" id="mockupAccentColor" value="#73A6D1" />
+                      <label class="checkbox"><input type="checkbox" id="mockupAccentColorEnabled" /> Override</label>
+                    </div>
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label class="label">Darken <span id="darkenValue">0%</span></label>
+                    <input type="range" name="overlayDarken" id="overlayDarken" min="0" max="100" value="0" />
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
                     <label class="label">Highlight Style</label>
                     <select name="highlightStyle" id="highlightStyle">
                       <option value="subtle">Subtle</option>
