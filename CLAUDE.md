@@ -34,6 +34,11 @@ Vercel auto-deploys from `main` branch. Config in root `vercel.json`.
 - Static: `studio/public/*`
 - Temp storage on Vercel: `/tmp/output/`, `/tmp/uploads/`
 
+## Workflow
+
+- **Commit between implementations** — after completing each feature or fix, `git add . && git commit -m "descriptive message" && git push`. Vercel auto-deploys from main.
+- Don't batch multiple unrelated changes into one commit
+
 ## Key Conventions
 
 - **ES Modules** throughout (`import/export`, `"type": "module"`)
