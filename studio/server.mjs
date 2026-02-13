@@ -1336,7 +1336,7 @@ app.post('/api/brands/ai-setup', requireAuth, async (req, res) => {
     if (!anthropic) return res.status(500).json({ error: 'Claude API not configured' });
 
     const msg = await anthropic.messages.create({
-      model: 'claude-sonnet-4-5-20250514',
+      model: 'claude-haiku-4-5-20251001',
       max_tokens: 1024,
       messages: [{
         role: 'user',
@@ -1370,6 +1370,170 @@ Return ONLY valid JSON (no markdown, no code fences) with:
     res.json({ ok: true, suggestion: parsed });
   } catch (err) {
     console.error('[AI Setup]', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Analyze website — fetch HTML, extract meta/images/colors, generate brand config
+app.post('/api/brands/analyze-website', requireAuth, async (req, res) => {
+  try {
+    let { url } = req.body;
+    if (!url) return res.status(400).json({ error: 'URL required' });
+
+    // Normalize URL
+    url = url.trim();
+    if (!/^https?:\/\//i.test(url)) url = `https://${url}`;
+
+    // Fetch HTML
+    let html, finalUrl;
+    try {
+      const resp = await fetch(url, {
+        signal: AbortSignal.timeout(8000),
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; CarouselStudio/1.0)' },
+        redirect: 'follow',
+      });
+      finalUrl = resp.url;
+      html = await resp.text();
+    } catch (e) {
+      return res.status(400).json({ error: `Could not reach website: ${e.message}` });
+    }
+
+    // Extract structured data from HTML
+    const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+    const pageTitle = titleMatch ? titleMatch[1].replace(/\s+/g, ' ').trim() : '';
+
+    const metaTag = (name) => {
+      const re = new RegExp(`<meta[^>]*(?:name|property)=["']${name}["'][^>]*content=["']([^"']*)["']`, 'i');
+      const re2 = new RegExp(`<meta[^>]*content=["']([^"']*)["'][^>]*(?:name|property)=["']${name}["']`, 'i');
+      return (html.match(re)?.[1] || html.match(re2)?.[1] || '').trim();
+    };
+
+    const metaDesc = metaTag('description') || metaTag('og:description');
+    const ogImage = metaTag('og:image');
+    const ogSiteName = metaTag('og:site_name');
+    const themeColor = metaTag('theme-color');
+
+    // Extract favicon
+    const faviconMatch = html.match(/<link[^>]*rel=["'](?:icon|shortcut icon|apple-touch-icon)["'][^>]*href=["']([^"']*)["']/i)
+      || html.match(/<link[^>]*href=["']([^"']*)["'][^>]*rel=["'](?:icon|shortcut icon|apple-touch-icon)["']/i);
+    let favicon = faviconMatch ? faviconMatch[1] : '';
+
+    // Extract images
+    const imgRegex = /<img[^>]*src=["']([^"']+)["']/gi;
+    const rawImages = [];
+    let imgMatch;
+    while ((imgMatch = imgRegex.exec(html)) !== null) {
+      rawImages.push(imgMatch[1]);
+    }
+
+    // Extract CSS colors (hex codes from style blocks and inline styles)
+    const colorRegex = /#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b/g;
+    const styleBlocks = html.match(/<style[\s\S]*?<\/style>/gi) || [];
+    const inlineStyles = html.match(/style=["'][^"']*["']/gi) || [];
+    const cssColorsRaw = [...styleBlocks.join(' ').matchAll(colorRegex), ...inlineStyles.join(' ').matchAll(colorRegex)].map(m => m[0]);
+    // Deduplicate and count frequency
+    const colorFreq = {};
+    for (const c of cssColorsRaw) {
+      const normalized = c.toLowerCase();
+      if (normalized === '#fff' || normalized === '#ffffff' || normalized === '#000' || normalized === '#000000') continue; // skip black/white
+      colorFreq[normalized] = (colorFreq[normalized] || 0) + 1;
+    }
+    const extractedColors = Object.entries(colorFreq).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([c]) => c);
+
+    // Extract text content
+    const textContent = html
+      .replace(/<script[\s\S]*?<\/script>/gi, '')
+      .replace(/<style[\s\S]*?<\/style>/gi, '')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 3000);
+
+    // Resolve relative URLs
+    const baseUrl = new URL(finalUrl);
+    const resolveUrl = (src) => {
+      if (!src || src.startsWith('data:')) return null;
+      try {
+        return new URL(src, baseUrl).href;
+      } catch { return null; }
+    };
+
+    favicon = resolveUrl(favicon) || `${baseUrl.origin}/favicon.ico`;
+
+    // Process images: resolve URLs, filter junk
+    const seenUrls = new Set();
+    const images = [];
+    // Add og:image first
+    if (ogImage) {
+      const resolved = resolveUrl(ogImage);
+      if (resolved) {
+        images.push({ url: resolved, type: 'og:image' });
+        seenUrls.add(resolved);
+      }
+    }
+    for (const src of rawImages) {
+      const resolved = resolveUrl(src);
+      if (!resolved || seenUrls.has(resolved)) continue;
+      // Filter out tiny tracking pixels, svgs, data URIs
+      if (/\.svg(\?|$)/i.test(resolved)) continue;
+      if (/\b(pixel|tracking|spacer|blank|1x1)\b/i.test(resolved)) continue;
+      if (/\.(gif)(\?|$)/i.test(resolved) && !/\.(gifv)(\?|$)/i.test(resolved)) continue;
+      seenUrls.add(resolved);
+      images.push({ url: resolved, type: 'img' });
+      if (images.length >= 20) break;
+    }
+
+    // Send to Claude for brand analysis
+    if (!anthropic) return res.status(500).json({ error: 'Claude API not configured' });
+
+    const msg = await anthropic.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 1024,
+      messages: [{
+        role: 'user',
+        content: `Analyze this website and generate a brand configuration for a social media carousel creation tool.
+
+Page URL: ${finalUrl}
+Page title: ${pageTitle}
+Meta description: ${metaDesc}
+OG site name: ${ogSiteName}
+OG image: ${ogImage || 'none'}
+Theme color: ${themeColor || 'none'}
+CSS colors found on site (by frequency): ${extractedColors.join(', ') || 'none'}
+Page text (first 3000 chars): ${textContent}
+
+Return ONLY valid JSON (no markdown, no code fences) with:
+- name: brand name (short, clean)
+- description: 1-2 sentence brand description
+- colors: { primary (dark bg color), accent (highlight/brand color), white (text color), secondary (alt bg), cta (button/action color) } — hex codes that match the website's actual color scheme. Use the CSS colors found on the site as reference.
+- systemPrompt: 150-200 word brand brief for AI content generation describing tone, audience, content pillars, visual style
+- defaultBackground: one-line visual description for slide backgrounds matching the brand aesthetic
+- tone: 2-3 word tone description (e.g. "bold, energetic")
+- microLabel: short uppercase label for slides (e.g. "SPORTYLAB")
+- watermarkText: website domain for watermark (e.g. "sportylab.no")`
+      }],
+    });
+
+    const text = msg.content[0]?.text || '';
+    let brand;
+    try {
+      brand = JSON.parse(text);
+    } catch {
+      const match = text.match(/\{[\s\S]*\}/);
+      brand = match ? JSON.parse(match[0]) : null;
+    }
+
+    if (!brand) return res.status(500).json({ error: 'Failed to parse AI response' });
+
+    res.json({
+      ok: true,
+      brand,
+      images,
+      favicon,
+      pageTitle,
+    });
+  } catch (err) {
+    console.error('[Analyze Website]', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -1613,20 +1777,25 @@ app.post('/api/generate-carousel', requireAuth, async (req, res) => {
             ? buildPhotoPrompt(slideData, brand)
             : buildTextPrompt(slideData, brand);
 
+        // Per-slide reference image takes priority over global
+        const slideRefImage = slideData.referenceImage || referenceImage;
+        const slideRefUsage = slideData.referenceUsage || referenceUsage;
+        const slideRefInstructions = slideData.referenceInstructions || referenceInstructions;
+
         // Append reference instruction if provided
         let carouselRefInstruction = '';
-        if (referenceImage) {
-          carouselRefInstruction = `\n\nReference image provided: Use it as ${referenceUsage || 'background inspiration'}. ${referenceInstructions || ''}`;
+        if (slideRefImage) {
+          carouselRefInstruction = `\n\nReference image provided: Use it as ${slideRefUsage || 'background inspiration'}. ${slideRefInstructions || ''}`;
         }
 
         const refinedPrompt = await refinePromptWithClaude(rawPrompt + carouselRefInstruction, slideData.slideType, slideData, brand);
         const prompt = refinedPrompt || (rawPrompt + carouselRefInstruction);
 
-        console.log(`[Carousel ${jobId}] ${brand.name} | Slide ${i + 1}/${slides.length}`);
+        console.log(`[Carousel ${jobId}] ${brand.name} | Slide ${i + 1}/${slides.length}${slideRefImage ? ' (ref image)' : ''}`);
 
         let response;
-        if (referenceImage) {
-          const refPath = path.join(uploadsDir, referenceImage);
+        if (slideRefImage) {
+          const refPath = path.join(uploadsDir, slideRefImage);
           try {
             await fs.access(refPath);
             const refBuffer = await fs.readFile(refPath);

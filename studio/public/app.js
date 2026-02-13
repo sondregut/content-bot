@@ -348,7 +348,14 @@ function openBrandModal(brand = null) {
   document.getElementById('brand-watermark').value = brand?.iconOverlayText || '';
   document.getElementById('brand-bg-desc').value = brand?.defaultBackground || '';
   brandModalStatus.textContent = '';
+  brandAiStatus.textContent = brand ? '' : 'Paste a URL to auto-setup';
   brandDeleteBtn.style.display = brand ? 'inline-block' : 'none';
+
+  // Reset analysis UI
+  if (analysisAbort) analysisAbort.abort();
+  clearTimeout(analysisDebounce);
+  const analysisEl = document.getElementById('brand-analysis-section');
+  if (analysisEl) analysisEl.style.display = 'none';
 
   const colors = brand?.colors || { primary: '#1A1A2E', accent: '#E94560', white: '#FFFFFF', secondary: '#16213E', cta: '#0F3460' };
   for (const [key, input] of Object.entries(colorInputs)) {
@@ -373,12 +380,272 @@ document.getElementById('brand-modal-close').addEventListener('click', closeBran
 document.getElementById('brand-modal-cancel').addEventListener('click', closeBrandModal);
 brandModal.addEventListener('click', (e) => { if (e.target === brandModal) closeBrandModal(); });
 
-// AI Setup
+// --- Website Analysis (auto-trigger on URL input) ---
+const brandAnalysisSection = document.getElementById('brand-analysis-section');
+const brandAnalysisSteps = document.getElementById('brand-analysis-steps');
+const brandPreviewRow = document.getElementById('brand-preview-row');
+const brandPreviewThumb = document.getElementById('brand-preview-thumb');
+const brandPreviewName = document.getElementById('brand-preview-name');
+const brandPreviewDesc = document.getElementById('brand-preview-desc');
+const brandImagesSection = document.getElementById('brand-images-section');
+const brandImagesGrid = document.getElementById('brand-images-grid');
+const brandImagesCount = document.getElementById('brand-images-count');
+const analysisCount = document.getElementById('analysis-count');
+const analysisChevron = document.getElementById('analysis-chevron');
+const analysisHeader = document.getElementById('analysis-header');
+const analysisStatusLine = document.getElementById('analysis-status-line');
+const analysisStatusText = document.getElementById('analysis-status-text');
+let analysisDebounce = null;
+let analysisAbort = null;
+let analysisStepsCollapsed = false;
+let analysisCompleteCount = 0;
+
+function setAnalysisStep(stepName, state) {
+  const step = brandAnalysisSteps.querySelector(`[data-step="${stepName}"]`);
+  if (!step) return;
+  const wasNotDone = !step.classList.contains('done');
+  step.className = 'analysis-step' + (state !== 'waiting' ? ` ${state}` : '');
+  const icon = step.querySelector('.step-icon');
+  if (state === 'done') icon.textContent = '\u2713';
+  else if (state === 'error') icon.textContent = '\u2717';
+  else icon.textContent = '';
+
+  // Update completed count
+  if (state === 'done' && wasNotDone) {
+    analysisCompleteCount = Math.min(analysisCompleteCount + 1, 4);
+  }
+  analysisCount.textContent = `${analysisCompleteCount} of 4 completed`;
+}
+
+function resetAnalysisUI() {
+  brandPreviewRow.style.display = 'none';
+  brandImagesSection.style.display = 'none';
+  brandImagesGrid.innerHTML = '';
+  analysisCompleteCount = 0;
+  analysisCount.textContent = '0 of 4 completed';
+  analysisStepsCollapsed = false;
+  brandAnalysisSteps.classList.remove('collapsed');
+  analysisChevron.classList.remove('collapsed');
+  analysisStatusLine.style.display = 'none';
+  brandAnalysisSteps.querySelectorAll('.analysis-step').forEach(el => {
+    el.className = 'analysis-step';
+    el.querySelector('.step-icon').textContent = '';
+  });
+}
+
+function collapseAnalysisSteps() {
+  analysisStepsCollapsed = true;
+  brandAnalysisSteps.classList.add('collapsed');
+  analysisChevron.classList.add('collapsed');
+}
+
+function toggleAnalysisSteps() {
+  analysisStepsCollapsed = !analysisStepsCollapsed;
+  brandAnalysisSteps.classList.toggle('collapsed', analysisStepsCollapsed);
+  analysisChevron.classList.toggle('collapsed', analysisStepsCollapsed);
+}
+
+// Click header to toggle expand/collapse
+analysisHeader.addEventListener('click', toggleAnalysisSteps);
+
+async function analyzeWebsite(url) {
+  if (analysisAbort) analysisAbort.abort();
+  analysisAbort = new AbortController();
+  const signal = analysisAbort.signal;
+
+  resetAnalysisUI();
+  brandAnalysisSection.style.display = 'block';
+  analysisStatusLine.style.display = 'none';
+
+  setAnalysisStep('fetch', 'active');
+
+  try {
+    await new Promise(r => setTimeout(r, 300));
+    if (signal.aborted) return;
+
+    const fetchPromise = authFetch('/api/brands/analyze-website', {
+      method: 'POST',
+      body: JSON.stringify({ url }),
+      signal,
+    });
+
+    setTimeout(() => {
+      if (!signal.aborted) {
+        setAnalysisStep('fetch', 'done');
+        setAnalysisStep('analyze', 'active');
+      }
+    }, 1200);
+
+    setTimeout(() => {
+      if (!signal.aborted) {
+        setAnalysisStep('analyze', 'done');
+        setAnalysisStep('images', 'active');
+      }
+    }, 2400);
+
+    setTimeout(() => {
+      if (!signal.aborted) {
+        setAnalysisStep('images', 'done');
+        setAnalysisStep('generate', 'active');
+        // Show "Almost ready..." during the final generate step
+        analysisStatusLine.style.display = 'block';
+        analysisStatusText.textContent = 'Almost ready...';
+        analysisStatusLine.className = 'analysis-status-line pending';
+      }
+    }, 3600);
+
+    const res = await fetchPromise;
+    if (signal.aborted) return;
+    const data = await res.json();
+
+    if (!data.ok) {
+      brandAnalysisSteps.querySelectorAll('.analysis-step.active').forEach(el => {
+        el.className = 'analysis-step error';
+        el.querySelector('.step-icon').textContent = '\u2717';
+      });
+      analysisStatusLine.style.display = 'block';
+      analysisStatusText.textContent = data.error || 'Analysis failed';
+      analysisStatusLine.className = 'analysis-status-line error';
+      return;
+    }
+
+    // All steps done
+    ['fetch', 'analyze', 'images', 'generate'].forEach(s => setAnalysisStep(s, 'done'));
+
+    // Show "All set!" status
+    analysisStatusLine.style.display = 'block';
+    analysisStatusText.textContent = 'All set!';
+    analysisStatusLine.className = 'analysis-status-line success';
+
+    // Auto-collapse steps after a beat
+    setTimeout(() => collapseAnalysisSteps(), 600);
+
+    const { brand, images, favicon, pageTitle } = data;
+
+    // Show preview card (prominent)
+    if (favicon || (images && images.length > 0)) {
+      brandPreviewThumb.src = favicon || images[0].url;
+      brandPreviewThumb.onerror = () => { brandPreviewRow.style.display = 'none'; };
+      brandPreviewName.textContent = brand.name || pageTitle || '';
+      brandPreviewDesc.textContent = brand.description || '';
+      brandPreviewRow.style.display = 'flex';
+    }
+
+    // Auto-fill brand fields
+    if (!brandNameInput.value.trim() && brand.name) {
+      brandNameInput.value = brand.name;
+    }
+    if (!brandDescInput.value.trim() && brand.description) {
+      brandDescInput.value = brand.description;
+    }
+
+    // Fill colors from analysis
+    if (brand.colors) {
+      for (const [key, input] of Object.entries(colorInputs)) {
+        if (brand.colors[key]) {
+          input.value = brand.colors[key];
+          document.getElementById(`brand-color-${key}-hex`).textContent = brand.colors[key].toUpperCase();
+        }
+      }
+    }
+
+    // Fill advanced fields
+    if (brand.systemPrompt) document.getElementById('brand-system-prompt').value = brand.systemPrompt;
+    if (brand.defaultBackground) document.getElementById('brand-bg-desc').value = brand.defaultBackground;
+    if (brand.microLabel) document.getElementById('brand-micro-label').value = brand.microLabel;
+    if (brand.watermarkText) document.getElementById('brand-watermark').value = brand.watermarkText;
+
+    if (brand.tone) brandAiStatus.textContent = `Tone: ${brand.tone}`;
+
+    // Render images grid
+    if (images && images.length > 0) {
+      brandImagesGrid.innerHTML = '';
+      brandImagesCount.textContent = `(${images.length} found)`;
+      images.forEach((img) => {
+        const thumb = document.createElement('img');
+        thumb.className = 'brand-image-thumb';
+        thumb.src = img.url;
+        thumb.title = img.type || 'image';
+        thumb.loading = 'lazy';
+        thumb.onerror = () => thumb.remove();
+        thumb.addEventListener('click', () => selectBrandImage(thumb, img.url));
+        brandImagesGrid.appendChild(thumb);
+      });
+      brandImagesSection.style.display = 'block';
+    }
+
+  } catch (err) {
+    if (err.name === 'AbortError') return;
+    brandAnalysisSteps.querySelectorAll('.analysis-step.active').forEach(el => {
+      el.className = 'analysis-step error';
+      el.querySelector('.step-icon').textContent = '\u2717';
+    });
+    analysisStatusLine.style.display = 'block';
+    analysisStatusText.textContent = 'Could not analyze website';
+    analysisStatusLine.className = 'analysis-status-line error';
+    console.error('[Website Analysis]', err);
+  }
+}
+
+async function selectBrandImage(thumbEl, imageUrl) {
+  // Highlight selected image
+  brandImagesGrid.querySelectorAll('.brand-image-thumb').forEach(t => t.classList.remove('selected'));
+  thumbEl.classList.add('selected');
+
+  // Upload as brand icon via existing upload-icon endpoint
+  try {
+    // Fetch image and upload as file
+    const resp = await fetch(imageUrl);
+    const blob = await resp.blob();
+    const form = new FormData();
+    form.append('icon', blob, 'website-icon.png');
+    form.append('brand', editingBrandId || '__pending__');
+    const res = await authFetch('/api/upload-icon', { method: 'POST', body: form });
+    const data = await res.json();
+    if (data.ok) {
+      updateIconPreview();
+    }
+  } catch (err) {
+    console.warn('Could not set image as icon:', err.message);
+  }
+}
+
+// Auto-trigger: debounced input + instant paste
+function isValidUrl(str) {
+  return str.includes('.') && str.length > 3 && !/\s/.test(str);
+}
+
+brandWebsiteInput.addEventListener('input', () => {
+  clearTimeout(analysisDebounce);
+  const val = brandWebsiteInput.value.trim();
+  if (isValidUrl(val)) {
+    analysisDebounce = setTimeout(() => analyzeWebsite(val), 1500);
+  } else {
+    brandAnalysisSection.style.display = 'none';
+  }
+});
+
+brandWebsiteInput.addEventListener('paste', () => {
+  clearTimeout(analysisDebounce);
+  // Use setTimeout(0) to get the pasted value after it's applied
+  setTimeout(() => {
+    const val = brandWebsiteInput.value.trim();
+    if (isValidUrl(val)) analyzeWebsite(val);
+  }, 0);
+});
+
+// AI Setup (fallback manual trigger — works with URL alone or name+desc)
 brandAiBtn.addEventListener('click', async () => {
   const name = brandNameInput.value.trim();
   const description = brandDescInput.value.trim();
-  if (!name || !description) {
-    brandAiStatus.textContent = 'Enter name and description first';
+  const websiteUrl = brandWebsiteInput.value.trim();
+  if (!name && !websiteUrl) {
+    brandAiStatus.textContent = 'Enter a website URL or brand name';
+    return;
+  }
+  // If URL is provided, trigger website analysis instead
+  if (websiteUrl && !description) {
+    analyzeWebsite(websiteUrl);
     return;
   }
   brandAiBtn.disabled = true;
@@ -919,6 +1186,45 @@ refClearBtn.addEventListener('click', () => {
   refImageInput.value = '';
 });
 
+// --- Per-Slide Reference Image Upload ---
+slideRefBtn.addEventListener('click', () => slideRefInput.click());
+
+slideRefInput.addEventListener('change', async () => {
+  const file = slideRefInput.files[0];
+  if (!file) return;
+
+  slideRefFilename.textContent = 'Uploading...';
+  const fd = new FormData();
+  fd.append('image', file);
+
+  try {
+    const res = await authFetch('/api/upload-reference', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (data.ok) {
+      slideReferenceImages[currentSlideIndex] = { filename: data.filename, displayName: file.name };
+      slideRefFilename.textContent = file.name;
+      slideRefPreview.src = data.url;
+      slideRefPreview.style.display = 'block';
+      slideRefClear.style.display = 'inline-block';
+      renderSlideTabs();
+    } else {
+      slideRefFilename.textContent = 'Upload failed';
+    }
+  } catch {
+    slideRefFilename.textContent = 'Upload error';
+  }
+  slideRefInput.value = '';
+});
+
+slideRefClear.addEventListener('click', () => {
+  delete slideReferenceImages[currentSlideIndex];
+  slideRefFilename.textContent = 'No image';
+  slideRefPreview.style.display = 'none';
+  slideRefClear.style.display = 'none';
+  slideRefInput.value = '';
+  renderSlideTabs();
+});
+
 // --- Build payload ---
 function buildSlidePayload(slide, slideIndex) {
   const payload = {
@@ -976,7 +1282,7 @@ form.addEventListener('submit', async (e) => {
   saveCurrentSlideEdits();
 
   const slide = slideEdits[currentSlideIndex];
-  const payload = buildSlidePayload(slide);
+  const payload = buildSlidePayload(slide, currentSlideIndex);
 
   statusEl.textContent = `Generating slide ${currentSlideIndex + 1}...`;
   previewImg.style.display = 'none';
@@ -1116,7 +1422,7 @@ generateAllBtn.addEventListener('click', async () => {
   if (!selectedIdea || slideEdits.length === 0) return;
   saveCurrentSlideEdits();
 
-  const slides = slideEdits.map((s) => buildSlidePayload(s));
+  const slides = slideEdits.map((s, i) => buildSlidePayload(s, i));
   const payload = {
     slides,
     includeOwl: form.elements.includeOwl.checked,
