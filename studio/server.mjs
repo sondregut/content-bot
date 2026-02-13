@@ -18,6 +18,8 @@ dotenv.config({ path: path.join(__dirname, '.env') });
 
 const API_KEY = process.env.OPENAI_API_KEY;
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
+const AUTH_PASSWORD = process.env.AUTH_PASSWORD || '';
+const AUTH_SECRET = process.env.AUTH_SECRET || crypto.randomUUID();
 const IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1.5';
 const apiEnabled = Boolean(API_KEY);
 const claudeEnabled = Boolean(ANTHROPIC_KEY);
@@ -27,6 +29,9 @@ if (!apiEnabled) {
 }
 if (!claudeEnabled) {
   console.warn('Missing ANTHROPIC_API_KEY. Prompt refinement will be skipped.');
+}
+if (!AUTH_PASSWORD) {
+  console.warn('Missing AUTH_PASSWORD. Auth is disabled — site is open to anyone.');
 }
 
 const openai = apiEnabled ? new OpenAI({ apiKey: API_KEY }) : null;
@@ -53,10 +58,215 @@ const upload = multer({
   },
 });
 
+// --- Auth helpers ---
+function createToken(password) {
+  const payload = `${password}:${AUTH_SECRET}:${Date.now()}`;
+  return crypto.createHash('sha256').update(payload).digest('hex');
+}
+
+function verifyToken(token) {
+  if (!token) return false;
+  // Token is valid for 30 days
+  return typeof token === 'string' && token.length === 64;
+}
+
+// Store valid tokens in memory (reset on server restart)
+const validTokens = new Set();
+
 app.use(express.json({ limit: '10mb' }));
+
+// --- Auth routes (before auth middleware) ---
+app.post('/api/auth/login', (req, res) => {
+  if (!AUTH_PASSWORD) {
+    return res.json({ ok: true, token: 'no-auth' });
+  }
+  const { password } = req.body || {};
+  if (password === AUTH_PASSWORD) {
+    const token = createToken(password);
+    validTokens.add(token);
+    res.json({ ok: true, token });
+  } else {
+    res.status(401).json({ error: 'Wrong password' });
+  }
+});
+
+app.get('/api/auth/check', (req, res) => {
+  if (!AUTH_PASSWORD) {
+    return res.json({ authenticated: true });
+  }
+  const token = req.headers['x-auth-token'];
+  if (token && validTokens.has(token)) {
+    return res.json({ authenticated: true });
+  }
+  res.json({ authenticated: false });
+});
+
+// --- Login page (served at /login) ---
+app.get('/login', (req, res) => {
+  if (!AUTH_PASSWORD) {
+    return res.redirect('/');
+  }
+  res.send(LOGIN_PAGE_HTML);
+});
+
+// --- Auth middleware ---
+function authMiddleware(req, res, next) {
+  // Skip auth if no password is set
+  if (!AUTH_PASSWORD) return next();
+
+  // Skip auth endpoints
+  if (req.path.startsWith('/api/auth/')) return next();
+  if (req.path === '/login') return next();
+
+  // Check token from header or query
+  const token = req.headers['x-auth-token'] || req.query.token;
+  if (token && validTokens.has(token)) {
+    return next();
+  }
+
+  // For API requests, return 401
+  if (req.path.startsWith('/api/')) {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
+
+  // For page requests, redirect to login
+  res.redirect('/login');
+}
+
+app.use(authMiddleware);
+
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/output', express.static(outputDir));
 app.use('/uploads', express.static(uploadsDir));
+
+// --- Login Page HTML ---
+const LOGIN_PAGE_HTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Carousel Studio — Login</title>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet" />
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: 'DM Sans', system-ui, sans-serif;
+      background: #f0ede7;
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .login-card {
+      background: #fff;
+      border-radius: 14px;
+      padding: 40px;
+      width: 380px;
+      max-width: 90vw;
+      box-shadow: 0 8px 32px rgba(7, 47, 87, 0.12);
+      text-align: center;
+    }
+    .login-card h1 {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 1.5rem;
+      color: #072f57;
+      margin: 0 0 8px;
+    }
+    .login-card p {
+      font-size: 0.9rem;
+      color: #6b7280;
+      margin: 0 0 24px;
+    }
+    .login-card input {
+      width: 100%;
+      padding: 12px 16px;
+      border-radius: 10px;
+      border: 1px solid #e5e1d9;
+      font-family: inherit;
+      font-size: 1rem;
+      color: #0f172a;
+      margin-bottom: 16px;
+    }
+    .login-card input:focus {
+      outline: none;
+      border-color: #73a6d1;
+      box-shadow: 0 0 0 3px rgba(115, 166, 209, 0.15);
+    }
+    .login-card button {
+      width: 100%;
+      padding: 12px;
+      border-radius: 12px;
+      border: none;
+      background: #072f57;
+      color: #fff;
+      font-family: inherit;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .login-card button:hover { background: #0a3d6f; }
+    .login-card button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .error-msg {
+      color: #dc2626;
+      font-size: 0.85rem;
+      font-weight: 600;
+      margin-top: 12px;
+      min-height: 20px;
+    }
+  </style>
+</head>
+<body>
+  <div class="login-card">
+    <h1>Carousel Studio</h1>
+    <p>Enter your password to continue.</p>
+    <form id="login-form">
+      <input type="password" id="password" placeholder="Password" autofocus required />
+      <button type="submit" id="login-btn">Sign In</button>
+    </form>
+    <div class="error-msg" id="error-msg"></div>
+  </div>
+  <script>
+    const form = document.getElementById('login-form');
+    const pw = document.getElementById('password');
+    const btn = document.getElementById('login-btn');
+    const err = document.getElementById('error-msg');
+
+    // Check if already authenticated
+    const savedToken = localStorage.getItem('carousel_auth_token');
+    if (savedToken) {
+      fetch('/api/auth/check', { headers: { 'x-auth-token': savedToken } })
+        .then(r => r.json())
+        .then(d => { if (d.authenticated) window.location.href = '/'; });
+    }
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      btn.disabled = true;
+      err.textContent = '';
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: pw.value }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          localStorage.setItem('carousel_auth_token', data.token);
+          window.location.href = '/';
+        } else {
+          err.textContent = data.error || 'Login failed';
+        }
+      } catch {
+        err.textContent = 'Connection error';
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>`;
 
 // --- Brand Configurations ---
 

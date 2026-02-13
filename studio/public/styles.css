@@ -661,6 +661,7 @@ input:focus, select:focus, textarea:focus {
   display: flex;
   align-items: center;
   justify-content: center;
+  position: relative;
 }
 
 .preview-frame img {
@@ -668,6 +669,35 @@ input:focus, select:focus, textarea:focus {
   max-height: 600px;
   border-radius: 10px;
   display: none;
+}
+
+/* Loading Spinner */
+.loading-spinner {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.loading-spinner.active { display: flex; }
+
+.spinner-ring {
+  width: 48px;
+  height: 48px;
+  border: 4px solid rgba(115, 166, 209, 0.2);
+  border-top-color: var(--cyan);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.spinner-text {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: rgba(255,255,255,0.6);
 }
 
 /* Gallery */

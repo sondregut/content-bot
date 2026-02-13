@@ -57,6 +57,10 @@ const iconFileInput = document.getElementById('icon-file-input');
 const cornerPicker = document.getElementById('corner-picker');
 const owlPositionInput = document.getElementById('owlPosition');
 
+// Loading spinner refs
+const loadingSpinner = document.getElementById('loading-spinner');
+const spinnerText = document.getElementById('spinner-text');
+
 // Preview mockup refs
 const previewMockup = document.getElementById('preview-mockup');
 const mockupMicro = document.getElementById('mockup-micro');
@@ -69,7 +73,8 @@ const mockupIconImg = document.getElementById('mockup-icon-img');
 window.addEventListener('load', async () => {
   loadApiKeysFromStorage();
   try {
-    const res = await fetch('/api/brands');
+    const res = await fetch('/api/brands', { headers: getAuthHeaders() });
+    if (res.status === 401) { window.location.href = '/login'; return; }
     const data = await res.json();
     brands = data.brands || [];
     renderBrandSelector();
@@ -90,10 +95,19 @@ function loadApiKeysFromStorage() {
 
 function getHeaders() {
   const headers = { 'Content-Type': 'application/json' };
+  const authToken = localStorage.getItem('carousel_auth_token');
+  if (authToken) headers['x-auth-token'] = authToken;
   const openaiKey = localStorage.getItem('carousel_openai_key');
   const anthropicKey = localStorage.getItem('carousel_anthropic_key');
   if (openaiKey) headers['x-openai-key'] = openaiKey;
   if (anthropicKey) headers['x-anthropic-key'] = anthropicKey;
+  return headers;
+}
+
+function getAuthHeaders() {
+  const headers = {};
+  const authToken = localStorage.getItem('carousel_auth_token');
+  if (authToken) headers['x-auth-token'] = authToken;
   return headers;
 }
 
@@ -166,7 +180,7 @@ brandSelector.addEventListener('change', async () => {
 async function loadContentIdeas() {
   try {
     sidebar.innerHTML = '<div class="sidebar-loading">Loading ideas...</div>';
-    const res = await fetch(`/api/content-ideas?brand=${currentBrand}`);
+    const res = await fetch(`/api/content-ideas?brand=${currentBrand}`, { headers: getAuthHeaders() });
     contentData = await res.json();
     renderSidebar();
   } catch (err) {
@@ -548,6 +562,8 @@ form.addEventListener('submit', async (e) => {
   statusEl.textContent = `Generating slide ${currentSlideIndex + 1}...`;
   previewImg.style.display = 'none';
   downloadButtons.style.display = 'none';
+  loadingSpinner.classList.add('active');
+  spinnerText.textContent = `Generating slide ${currentSlideIndex + 1}...`;
 
   try {
     const res = await fetch('/api/generate', {
@@ -571,6 +587,8 @@ form.addEventListener('submit', async (e) => {
     updateGallery();
   } catch (err) {
     statusEl.textContent = `Error: ${err.message}`;
+  } finally {
+    loadingSpinner.classList.remove('active');
   }
 });
 
