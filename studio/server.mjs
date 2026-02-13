@@ -1796,10 +1796,16 @@ app.post('/api/edit-slide', requireAuth, async (req, res) => {
 
     const brand = await getBrandAsync(brandId, req.user?.uid);
 
-    // Fetch existing image
-    const imgRes = await fetch(imageUrl);
-    if (!imgRes.ok) throw new Error('Failed to fetch source image');
-    const imgBuffer = Buffer.from(await imgRes.arrayBuffer());
+    // Fetch existing image — handle relative paths (local dev) and full URLs
+    let imgBuffer;
+    if (imageUrl.startsWith('/output/')) {
+      const localPath = path.join(outputDir, path.basename(imageUrl));
+      imgBuffer = await fs.readFile(localPath);
+    } else {
+      const imgRes = await fetch(imageUrl);
+      if (!imgRes.ok) throw new Error('Failed to fetch source image');
+      imgBuffer = Buffer.from(await imgRes.arrayBuffer());
+    }
 
     const response = await openai.images.edit({
       model: resolveImageModel(imageModel),

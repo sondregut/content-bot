@@ -439,7 +439,41 @@ body {
 
 /* Editor */
 
-.editor-area { max-width: 900px; }
+.editor-area { max-width: 1400px; }
+
+.editor-columns {
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+}
+
+.editor-left-col {
+  flex: 1;
+  min-width: 0;
+  max-width: 560px;
+}
+
+.editor-right-col {
+  flex: 1;
+  min-width: 0;
+  max-width: 500px;
+  position: sticky;
+  top: 24px;
+  align-self: flex-start;
+}
+
+@media (max-width: 900px) {
+  .editor-columns {
+    flex-direction: column;
+  }
+  .editor-left-col,
+  .editor-right-col {
+    max-width: 100%;
+  }
+  .editor-right-col {
+    position: static;
+  }
+}
 
 .idea-header {
   display: flex;
@@ -906,7 +940,7 @@ input:focus, select:focus, textarea:focus {
   background: var(--ink);
   border-radius: var(--radius);
   padding: 12px;
-  min-height: 300px;
+  min-height: 200px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -915,7 +949,7 @@ input:focus, select:focus, textarea:focus {
 
 .preview-frame img {
   max-width: 100%;
-  max-height: 600px;
+  max-height: 500px;
   border-radius: 10px;
   display: none;
 }
@@ -969,8 +1003,8 @@ input:focus, select:focus, textarea:focus {
 
 .gallery-strip {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
-  overflow-x: auto;
   padding: 4px 0 12px;
 }
 
