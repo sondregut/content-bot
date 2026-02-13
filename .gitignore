@@ -8,3 +8,7 @@ output/
 .DS_Store
 .vercel
 .env*.local
+
+# Claude Code local files (not shared)
+CLAUDE.local.md
+.claude/settings.local.json

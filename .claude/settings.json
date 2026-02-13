@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "Edit(studio/**)",
+      "Edit(brands/**)",
+      "Edit(CLAUDE.md)",
+      "Edit(.claude/**)",
+      "Bash(cd * && npm run dev)",
+      "Bash(cd * && npm install*)",
+      "Bash(git *)",
+      "Bash(ls *)",
+      "Bash(mkdir *)",
+      "Bash(node *)"
+    ],
+    "deny": [
+      "Read(studio/.env)",
+      "Read(studio/.env.local)",
+      "Read(.env.local)",
+      "Bash(rm -rf *)"
+    ]
+  }
+}
