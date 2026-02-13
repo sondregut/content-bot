@@ -984,6 +984,7 @@ function loadSlideIntoForm(index) {
     statusEl.textContent = 'Ready.';
   }
   updateEditSection();
+  updatePreviewDragOverlay();
 }
 
 function saveCurrentSlideEdits() {
@@ -1284,6 +1285,238 @@ setupInlineEdit(mockupMicro, 'microLabel');
 setupInlineEdit(mockupHeadline, 'headline');
 setupInlineEdit(mockupBody, 'body');
 
+// --- Preview Image Drag & Inline Edit ---
+const previewFrame = document.getElementById('preview-frame');
+const previewDragOverlay = document.getElementById('preview-drag-overlay');
+const previewEditGroup = document.getElementById('preview-edit-group');
+const previewEditMicro = document.getElementById('preview-edit-micro');
+const previewEditHeadline = document.getElementById('preview-edit-headline');
+const previewEditBody = document.getElementById('preview-edit-body');
+const previewDragHint = document.getElementById('preview-drag-hint');
+
+// Show/hide the drag overlay when a mockup image is generated
+function updatePreviewDragOverlay() {
+  const slide = slideEdits[currentSlideIndex];
+  const isMockup = slide && slide.type === 'mockup';
+  const hasImage = previewImg.style.display === 'block' && previewImg.src;
+  if (isMockup && hasImage) {
+    previewDragOverlay.style.display = 'block';
+    // Position the text group to match approximate text location
+    positionPreviewEditGroup();
+    // Fill in text content (invisible, used for hit area and editing)
+    previewEditMicro.textContent = form.elements.microLabel?.value || '';
+    previewEditHeadline.textContent = form.elements.headline?.value || '';
+    previewEditBody.textContent = form.elements.body?.value || '';
+  } else {
+    previewDragOverlay.style.display = 'none';
+  }
+}
+
+function positionPreviewEditGroup() {
+  // The preview image maps 1080x1920 canvas to its display size
+  // We position the edit group relative to the overlay based on offset and layout
+  const slide = slideEdits[currentSlideIndex];
+  if (!previewImg.naturalWidth) return;
+  const imgRect = previewImg.getBoundingClientRect();
+  const frameRect = previewFrame.getBoundingClientRect();
+  // Image offset within the frame (centered)
+  const imgLeft = imgRect.left - frameRect.left;
+  const imgTop = imgRect.top - frameRect.top;
+  const scaleX = imgRect.width / 1080;
+  const scaleY = imgRect.height / 1920;
+
+  // Approximate text position in canvas-space based on layout
+  const layout = slide?.mockupLayout || 'phone-right';
+  let canvasTextX = 90; // safe.left
+  let canvasTextY = 180; // safe.top + 60
+  if (layout === 'phone-left') {
+    canvasTextX = 500;
+    canvasTextY = 576; // height * 0.30
+  } else if (layout === 'text-statement') {
+    canvasTextY = 500; // approximate center
+  }
+
+  // Apply user offset
+  const ox = slide?.textOffsetX || 0;
+  const oy = slide?.textOffsetY || 0;
+
+  previewEditGroup.style.left = (imgLeft + (canvasTextX + ox) * scaleX) + 'px';
+  previewEditGroup.style.top = (imgTop + (canvasTextY + oy) * scaleY) + 'px';
+  previewEditGroup.style.maxWidth = (imgRect.width * 0.6) + 'px';
+}
+
+// Auto-regenerate mockup (fast, no AI call)
+async function regenerateMockup() {
+  const slide = slideEdits[currentSlideIndex];
+  if (!slide || slide.type !== 'mockup') return;
+
+  saveCurrentSlideEdits();
+  const payload = buildSlidePayload(slide, currentSlideIndex);
+
+  statusEl.textContent = 'Repositioning...';
+  try {
+    const res = await authFetch('/api/generate', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Generation failed');
+
+    generatedImages[currentSlideIndex] = { url: data.url, filename: data.filename };
+    previewImg.src = data.url;
+    previewImg.style.display = 'block';
+    statusEl.textContent = `Slide ${currentSlideIndex + 1} done.`;
+    updateGallery();
+    saveSession();
+    updatePreviewDragOverlay();
+  } catch (err) {
+    statusEl.textContent = `Error: ${err.message}`;
+  }
+}
+
+// Drag on the preview image
+{
+  let dragging = false;
+  let startX, startY, startOffsetX, startOffsetY;
+
+  function isPreviewEditing() {
+    return previewEditGroup.classList.contains('editing');
+  }
+
+  function getPreviewScale() {
+    const imgRect = previewImg.getBoundingClientRect();
+    return { sx: 1080 / imgRect.width, sy: 1920 / imgRect.height };
+  }
+
+  function startPreviewDrag(clientX, clientY) {
+    if (isPreviewEditing()) return;
+    const slide = slideEdits[currentSlideIndex];
+    if (!slide || slide.type !== 'mockup') return;
+    if (previewImg.style.display !== 'block') return;
+    dragging = true;
+    startX = clientX;
+    startY = clientY;
+    startOffsetX = textOffset.x;
+    startOffsetY = textOffset.y;
+    previewDragOverlay.classList.add('dragging');
+  }
+
+  function movePreviewDrag(clientX, clientY) {
+    if (!dragging) return;
+    const { sx, sy } = getPreviewScale();
+    const dx = (clientX - startX) * sx;
+    const dy = (clientY - startY) * sy;
+    textOffset.x = Math.max(-500, Math.min(500, startOffsetX + dx));
+    textOffset.y = Math.max(-800, Math.min(800, startOffsetY + dy));
+    // Move the edit group in real-time
+    positionPreviewEditGroup();
+    // Also sync the small mockup
+    applyTextOffset();
+  }
+
+  function endPreviewDrag() {
+    if (!dragging) return;
+    dragging = false;
+    previewDragOverlay.classList.remove('dragging');
+    // Only regenerate if offset actually changed
+    if (textOffset.x !== startOffsetX || textOffset.y !== startOffsetY) {
+      saveCurrentSlideEdits();
+      saveSession();
+      regenerateMockup();
+    }
+  }
+
+  // Mouse
+  previewDragOverlay.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    if (isPreviewEditing()) return;
+    e.preventDefault();
+    startPreviewDrag(e.clientX, e.clientY);
+  });
+  window.addEventListener('mousemove', (e) => movePreviewDrag(e.clientX, e.clientY));
+  window.addEventListener('mouseup', endPreviewDrag);
+
+  // Touch
+  previewDragOverlay.addEventListener('touchstart', (e) => {
+    if (isPreviewEditing()) return;
+    const t = e.touches[0];
+    startPreviewDrag(t.clientX, t.clientY);
+  }, { passive: true });
+  window.addEventListener('touchmove', (e) => {
+    if (!dragging) return;
+    const t = e.touches[0];
+    movePreviewDrag(t.clientX, t.clientY);
+  }, { passive: true });
+  window.addEventListener('touchend', endPreviewDrag);
+
+  // Double-click to edit text
+  previewDragOverlay.addEventListener('dblclick', (e) => {
+    const slide = slideEdits[currentSlideIndex];
+    if (!slide || slide.type !== 'mockup') return;
+    e.preventDefault();
+    enterPreviewEditMode();
+  });
+}
+
+function enterPreviewEditMode() {
+  previewEditGroup.classList.add('editing');
+  previewEditMicro.textContent = form.elements.microLabel?.value || '';
+  previewEditHeadline.textContent = form.elements.headline?.value || '';
+  previewEditBody.textContent = form.elements.body?.value || '';
+  previewEditMicro.contentEditable = 'true';
+  previewEditHeadline.contentEditable = 'true';
+  previewEditBody.contentEditable = 'true';
+  previewEditHeadline.focus();
+  // Select headline text
+  const range = document.createRange();
+  range.selectNodeContents(previewEditHeadline);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+  previewDragHint.textContent = 'Press Escape when done';
+}
+
+function exitPreviewEditMode(save) {
+  if (!previewEditGroup.classList.contains('editing')) return;
+  previewEditGroup.classList.remove('editing');
+  previewEditMicro.contentEditable = 'false';
+  previewEditHeadline.contentEditable = 'false';
+  previewEditBody.contentEditable = 'false';
+  previewDragHint.textContent = 'Drag to move text \u00b7 Double-click to edit';
+
+  if (save) {
+    const newMicro = previewEditMicro.textContent.trim();
+    const newHeadline = previewEditHeadline.textContent.trim();
+    const newBody = previewEditBody.textContent.trim();
+    if (newMicro) form.elements.microLabel.value = newMicro;
+    if (newHeadline) form.elements.headline.value = newHeadline;
+    form.elements.body.value = newBody;
+    saveCurrentSlideEdits();
+    saveSession();
+    updatePreviewMockup();
+    regenerateMockup();
+  }
+}
+
+// Escape/Enter keys for preview edit mode
+document.addEventListener('keydown', (e) => {
+  if (!previewEditGroup.classList.contains('editing')) return;
+  if (e.key === 'Escape') {
+    exitPreviewEditMode(false);
+  } else if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    exitPreviewEditMode(true);
+  }
+});
+
+// Click outside preview to exit edit mode
+document.addEventListener('mousedown', (e) => {
+  if (!previewEditGroup.classList.contains('editing')) return;
+  if (!previewFrame.contains(e.target)) {
+    exitPreviewEditMode(true);
+  }
+});
+
 // --- Icon Upload & Corner Picker ---
 function updateIconPreview() {
   const iconUrl = `/brands/${currentBrand}/assets/app-icon.png?t=${Date.now()}`;
@@ -1493,6 +1726,7 @@ form.addEventListener('submit', async (e) => {
     renderSlideTabs();
     updateGallery();
     updateEditSection();
+    updatePreviewDragOverlay();
     saveSession();
     addToVault(data.url, data.filename);
   } catch (err) {
