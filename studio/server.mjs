@@ -194,21 +194,32 @@ Typography: Sprint times should be monospace, large, high contrast.`,
   },
 };
 
+const GENERIC_BRAND = {
+  id: 'generic',
+  name: 'My Brand',
+  website: '',
+  colors: { primary: '#1A1A2E', accent: '#E94560', white: '#FFFFFF', secondary: '#16213E', cta: '#0F3460' },
+  defaultMicroLabel: 'MY BRAND',
+  defaultBackground: 'dark premium background with subtle grain',
+  iconOverlayText: '',
+  systemPrompt: 'You are an expert visual designer and prompt engineer for social media carousel content.',
+};
+
 function getBrand(brandId) {
-  return BRANDS[brandId] || BRANDS['athlete-mindset'];
+  return BRANDS[brandId] || GENERIC_BRAND;
 }
 
 // Async brand lookup — checks hardcoded first, then Firestore
 async function getBrandAsync(brandId, userId) {
   if (BRANDS[brandId]) return BRANDS[brandId];
-  if (!db) return BRANDS['athlete-mindset'];
+  if (!db || !brandId) return GENERIC_BRAND;
   try {
     const doc = await db.collection('carousel_brands').doc(brandId).get();
     if (doc.exists && doc.data().createdBy === userId) return { id: brandId, ...doc.data() };
   } catch (e) {
     console.error('[getBrandAsync]', e.message);
   }
-  return BRANDS['athlete-mindset'];
+  return GENERIC_BRAND;
 }
 
 function slugify(name) {
@@ -916,7 +927,7 @@ function buildPhotoPrompt(data, brand) {
     .join('\n');
 }
 
-async function addAppIconOverlay(baseBuffer, configKey = 'bottom-right', brandId = 'athlete-mindset') {
+async function addAppIconOverlay(baseBuffer, configKey = 'bottom-right', brandId = 'generic') {
   const cfg = ICON_OVERLAY_CONFIGS[configKey] || ICON_OVERLAY_CONFIGS['bottom-right'];
   const brand = getBrand(brandId);
   const base = sharp(baseBuffer);
@@ -1288,11 +1299,11 @@ Return ONLY valid JSON (no markdown, no code fences) with:
 // Get content ideas for a brand
 app.get('/api/content-ideas', requireAuth, async (req, res) => {
   try {
-    const brandId = req.query.brand || 'athlete-mindset';
+    const brandId = req.query.brand;
     // Only hardcoded brands have content-ideas.md files
-    if (!BRANDS[brandId]) {
-      const brand = await getBrandAsync(brandId, req.user?.uid);
-      return res.json({ apps: [{ appName: brand.name, brandId, categories: [] }] });
+    if (!brandId || !BRANDS[brandId]) {
+      const brand = brandId ? await getBrandAsync(brandId, req.user?.uid) : GENERIC_BRAND;
+      return res.json({ apps: [{ appName: brand.name, brandId: brandId || 'generic', categories: [] }] });
     }
     const brand = getBrand(brandId);
     const mdPath = path.join(rootDir, 'brands', brandId, 'content-ideas.md');
@@ -1333,7 +1344,8 @@ app.post('/api/upload-reference', requireAuth, upload.single('image'), async (re
 app.post('/api/generate', requireAuth, async (req, res) => {
   try {
     const data = req.body || {};
-    const brandId = data.brand || 'athlete-mindset';
+    const brandId = data.brand;
+    if (!brandId) return res.status(400).json({ error: 'Missing brand' });
     const brand = await getBrandAsync(brandId, req.user?.uid);
 
     if (!data.slideType) {
@@ -1432,7 +1444,8 @@ app.post('/api/generate-carousel', requireAuth, async (req, res) => {
     return res.status(400).json({ error: 'Missing slides array' });
   }
 
-  const brand = await getBrandAsync(brandId || 'athlete-mindset', req.user?.uid);
+  if (!brandId) return res.status(400).json({ error: 'Missing brand' });
+  const brand = await getBrandAsync(brandId, req.user?.uid);
 
   const jobId = crypto.randomUUID().slice(0, 12);
   const job = {
@@ -1544,11 +1557,14 @@ app.post('/api/generate-freeform', requireAuth, async (req, res) => {
     if (!userPrompt) {
       return res.status(400).json({ error: 'Missing prompt' });
     }
+    if (!brandId) {
+      return res.status(400).json({ error: 'Missing brand' });
+    }
     if (!anthropic) {
       return res.status(500).json({ error: 'Claude API not configured' });
     }
 
-    const brand = await getBrandAsync(brandId || 'athlete-mindset', req.user?.uid);
+    const brand = await getBrandAsync(brandId, req.user?.uid);
     const numSlides = Math.min(Math.max(parseInt(slideCount) || 7, 1), 20);
 
     const freeformSystemPrompt = `${brand.systemPrompt}
@@ -1630,7 +1646,8 @@ app.post('/api/upload-icon', requireAuth, upload.single('icon'), async (req, res
       return res.status(400).json({ error: 'No icon uploaded' });
     }
 
-    const brandId = req.body.brand || 'athlete-mindset';
+    const brandId = req.body.brand;
+    if (!brandId) return res.status(400).json({ error: 'Missing brand' });
     const assetsDir = path.join(rootDir, 'brands', brandId, 'assets');
     await fs.mkdir(assetsDir, { recursive: true });
 
@@ -1721,7 +1738,7 @@ app.get('/api/download-carousel/:jobId', requireAuth, async (req, res) => {
     return res.status(404).json({ error: 'No generated slides found' });
   }
 
-  const brand = getBrand(job.brandId || 'athlete-mindset');
+  const brand = getBrand(job.brandId);
   const zipName = `${brand.id}_carousel_${job.id}.zip`;
 
   res.setHeader('Content-Type', 'application/zip');
@@ -1745,7 +1762,7 @@ app.post('/api/download-selected', requireAuth, async (req, res) => {
     return res.status(400).json({ error: 'No filenames provided' });
   }
 
-  const brand = getBrand(brandId || 'athlete-mindset');
+  const brand = getBrand(brandId);
   const zipName = `${brand.id}_slides_${Date.now()}.zip`;
 
   res.setHeader('Content-Type', 'application/zip');

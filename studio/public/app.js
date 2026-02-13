@@ -113,7 +113,7 @@ document.getElementById('sign-out-btn').addEventListener('click', async () => {
 
 // --- State ---
 let brands = [];
-let currentBrand = 'athlete-mindset';
+let currentBrand = null;
 let contentData = null;
 let selectedIdea = null;
 let currentSlideIndex = 0;
@@ -440,7 +440,12 @@ brandDeleteBtn.addEventListener('click', async () => {
     const bRes = await authFetch('/api/brands');
     const bData = await bRes.json();
     brands = bData.brands || [];
-    currentBrand = brands[0]?.id || 'athlete-mindset';
+    currentBrand = brands[0]?.id || null;
+    if (!currentBrand) {
+      renderBrandSelector();
+      renderEmptySidebar();
+      return;
+    }
     renderBrandSelector();
     await loadContentIdeas();
     updateIconPreview();
@@ -1177,6 +1182,10 @@ freeformGenerateBtn.addEventListener('click', async () => {
   const prompt = freeformInput.value.trim();
   if (!prompt) {
     freeformStatus.textContent = 'Please enter a description.';
+    return;
+  }
+  if (!currentBrand) {
+    freeformStatus.textContent = 'Create a brand first.';
     return;
   }
 
