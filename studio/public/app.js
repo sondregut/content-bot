@@ -45,6 +45,22 @@ firebase.auth().onAuthStateChanged(async (user) => {
   }
 });
 
+// Login / Create Account toggle
+let isSignUp = false;
+const loginBtn = document.getElementById('login-btn');
+const authToggleBtn = document.getElementById('auth-toggle-btn');
+const authToggleText = document.getElementById('auth-toggle-text');
+const loginSubtitle = document.getElementById('login-subtitle');
+
+authToggleBtn.addEventListener('click', () => {
+  isSignUp = !isSignUp;
+  loginBtn.textContent = isSignUp ? 'Create Account' : 'Sign In';
+  authToggleBtn.textContent = isSignUp ? 'Sign In' : 'Create Account';
+  authToggleText.textContent = isSignUp ? 'Already have an account?' : "Don't have an account?";
+  loginSubtitle.textContent = isSignUp ? 'Create a new account.' : 'Sign in to continue.';
+  document.getElementById('login-error').textContent = '';
+});
+
 // Login handlers
 document.getElementById('login-form').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -55,7 +71,11 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
   btn.disabled = true;
   errEl.textContent = '';
   try {
-    await firebase.auth().signInWithEmailAndPassword(email, password);
+    if (isSignUp) {
+      await firebase.auth().createUserWithEmailAndPassword(email, password);
+    } else {
+      await firebase.auth().signInWithEmailAndPassword(email, password);
+    }
   } catch (err) {
     errEl.textContent = err.message;
   } finally {

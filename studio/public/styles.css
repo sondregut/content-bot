@@ -137,6 +137,26 @@ body {
   border-color: #d1d5db;
 }
 
+.auth-toggle {
+  margin-top: 16px;
+  font-size: 0.85rem;
+  color: #6b7280;
+}
+
+.auth-toggle-btn {
+  background: none;
+  border: none;
+  color: #072f57;
+  font-family: inherit;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0;
+  margin-left: 4px;
+}
+
+.auth-toggle-btn:hover { text-decoration: underline; }
+
 .error-msg {
   color: #dc2626;
   font-size: 0.85rem;
