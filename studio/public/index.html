@@ -53,6 +53,10 @@
           <h1>Carousel Studio</h1>
         </div>
         <div class="header-right">
+          <button class="tiktok-connect-btn" id="tiktok-connect-btn" title="Connect TikTok">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19.59 6.69a4.83 4.83 0 01-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 01-2.88 2.5 2.89 2.89 0 01-2.89-2.89 2.89 2.89 0 012.89-2.89c.28 0 .54.04.79.1v-3.5a6.37 6.37 0 00-.79-.05A6.34 6.34 0 003.15 15.2a6.34 6.34 0 006.34 6.34 6.34 6.34 0 006.34-6.34V8.73a8.19 8.19 0 004.76 1.52v-3.4a4.85 4.85 0 01-1-.16z"/></svg>
+            <span id="tiktok-btn-text">Connect TikTok</span>
+          </button>
           <div class="badge">gpt-image-1.5 + Claude refinement</div>
           <button class="header-btn" id="settings-btn" title="API Settings">&#9881;</button>
           <button class="sign-out-btn" id="sign-out-btn" title="Sign Out">Sign Out</button>
@@ -426,7 +430,13 @@
             <div class="gallery-section" id="gallery-section" style="display:none">
               <div class="gallery-header">
                 <h3>Generated Slides</h3>
-                <button type="button" class="btn small accent" id="download-all-btn">Download All as ZIP</button>
+                <div class="gallery-actions">
+                  <button type="button" class="btn small accent" id="download-all-btn">Download All as ZIP</button>
+                  <button class="btn small tiktok-post-btn" id="tiktok-post-btn" style="display:none">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19.59 6.69a4.83 4.83 0 01-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 01-2.88 2.5 2.89 2.89 0 01-2.89-2.89 2.89 2.89 0 012.89-2.89c.28 0 .54.04.79.1v-3.5a6.37 6.37 0 00-.79-.05A6.34 6.34 0 003.15 15.2a6.34 6.34 0 006.34 6.34 6.34 6.34 0 006.34-6.34V8.73a8.19 8.19 0 004.76 1.52v-3.4a4.85 4.85 0 01-1-.16z"/></svg>
+                    Post to TikTok
+                  </button>
+                </div>
               </div>
               <div class="gallery-strip" id="gallery-strip"></div>
             </div>
@@ -551,6 +561,72 @@
         </div>
         <div class="modal-footer">
           <button class="btn primary" id="settings-save-btn">Save Keys</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- TikTok Post Modal -->
+    <div class="tiktok-modal-overlay" id="tiktok-modal" style="display:none">
+      <div class="tiktok-modal">
+        <div class="tiktok-modal-header">
+          <h2>Post to TikTok</h2>
+          <button class="tiktok-modal-close" id="tiktok-modal-close">&times;</button>
+        </div>
+        <div class="tiktok-modal-body">
+          <div class="tiktok-slides-preview" id="tiktok-slides-preview"></div>
+
+          <div class="tiktok-field">
+            <label>Caption / Description</label>
+            <textarea id="tiktok-caption" rows="3" placeholder="Write a caption for your post..." maxlength="2200"></textarea>
+            <span class="tiktok-char-count"><span id="tiktok-caption-count">0</span>/2200</span>
+          </div>
+
+          <div class="tiktok-field">
+            <label>Privacy Level</label>
+            <select id="tiktok-privacy">
+              <option value="SELF_ONLY">Private (only me)</option>
+              <option value="MUTUAL_FOLLOW_FRIENDS">Friends</option>
+              <option value="FOLLOWER_OF_CREATOR">Followers</option>
+              <option value="PUBLIC_TO_EVERYONE">Public</option>
+            </select>
+            <p class="tiktok-field-note" id="tiktok-privacy-note">Note: Until your TikTok app is audited, all posts will be set to Private regardless of selection.</p>
+          </div>
+
+          <div class="tiktok-field tiktok-toggle-field">
+            <label class="tiktok-toggle">
+              <input type="checkbox" id="tiktok-auto-music" checked />
+              <span class="tiktok-toggle-label">Add recommended music</span>
+            </label>
+            <p class="tiktok-field-note">TikTok will auto-pick a song. You can change it later in the TikTok app.</p>
+          </div>
+
+          <div class="tiktok-field tiktok-toggle-field">
+            <label class="tiktok-toggle">
+              <input type="checkbox" id="tiktok-disable-comment" />
+              <span class="tiktok-toggle-label">Disable comments</span>
+            </label>
+          </div>
+
+          <div class="tiktok-disclosure-section">
+            <p class="tiktok-section-label">Content disclosure (required by TikTok if applicable)</p>
+            <label class="tiktok-toggle">
+              <input type="checkbox" id="tiktok-brand-content" />
+              <span class="tiktok-toggle-label">Paid partnership / branded content</span>
+            </label>
+            <label class="tiktok-toggle">
+              <input type="checkbox" id="tiktok-brand-organic" />
+              <span class="tiktok-toggle-label">Brand organic (promoting your own brand)</span>
+            </label>
+          </div>
+
+          <div class="tiktok-post-status" id="tiktok-post-status"></div>
+        </div>
+        <div class="tiktok-modal-footer">
+          <button class="btn" id="tiktok-cancel-btn">Cancel</button>
+          <button class="btn primary tiktok-submit-btn" id="tiktok-submit-btn">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19.59 6.69a4.83 4.83 0 01-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 01-2.88 2.5 2.89 2.89 0 01-2.89-2.89 2.89 2.89 0 012.89-2.89c.28 0 .54.04.79.1v-3.5a6.37 6.37 0 00-.79-.05A6.34 6.34 0 003.15 15.2a6.34 6.34 0 006.34 6.34 6.34 6.34 0 006.34-6.34V8.73a8.19 8.19 0 004.76 1.52v-3.4a4.85 4.85 0 01-1-.16z"/></svg>
+            Post to TikTok
+          </button>
         </div>
       </div>
     </div>

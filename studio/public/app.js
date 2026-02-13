@@ -52,6 +52,7 @@ firebase.auth().onAuthStateChanged(async (user) => {
       renderEmptySidebar();
     }
     updateIconPreview();
+    checkTikTokStatus();
   } else {
     overlay.style.display = 'flex';
     appShell.style.display = 'none';
@@ -1217,3 +1218,273 @@ freeformGenerateBtn.addEventListener('click', async () => {
     freeformGenerateBtn.disabled = false;
   }
 });
+
+// --- TikTok Integration ---
+// =============================================
+
+let tiktokConnected = false;
+let tiktokUsername = '';
+let tiktokPostPollTimer = null;
+
+const tiktokConnectBtn = document.getElementById('tiktok-connect-btn');
+const tiktokBtnText = document.getElementById('tiktok-btn-text');
+const tiktokPostBtn = document.getElementById('tiktok-post-btn');
+const tiktokModal = document.getElementById('tiktok-modal');
+const tiktokModalClose = document.getElementById('tiktok-modal-close');
+const tiktokCancelBtn = document.getElementById('tiktok-cancel-btn');
+const tiktokSubmitBtn = document.getElementById('tiktok-submit-btn');
+const tiktokCaption = document.getElementById('tiktok-caption');
+const tiktokCaptionCount = document.getElementById('tiktok-caption-count');
+const tiktokSlidesPreview = document.getElementById('tiktok-slides-preview');
+const tiktokPostStatus = document.getElementById('tiktok-post-status');
+
+// Check TikTok connection status on load
+async function checkTikTokStatus() {
+  try {
+    const res = await authFetch('/api/tiktok/status');
+    if (!res.ok) return;
+    const data = await res.json();
+    tiktokConnected = data.connected;
+    tiktokUsername = data.username || '';
+    updateTikTokUI();
+  } catch {
+    // TikTok status check failed — keep disconnected state
+  }
+}
+
+function updateTikTokUI() {
+  if (tiktokConnected) {
+    tiktokConnectBtn.classList.add('connected');
+    tiktokBtnText.textContent = tiktokUsername || 'Connected';
+    tiktokConnectBtn.title = 'TikTok connected — click to disconnect';
+  } else {
+    tiktokConnectBtn.classList.remove('connected');
+    tiktokBtnText.textContent = 'Connect TikTok';
+    tiktokConnectBtn.title = 'Connect your TikTok account';
+  }
+
+  // Show/hide post button in gallery
+  const hasSlides = Object.keys(generatedImages).length > 0;
+  if (tiktokPostBtn) {
+    tiktokPostBtn.style.display = (tiktokConnected && hasSlides) ? 'inline-flex' : 'none';
+  }
+}
+
+// Connect/disconnect button handler
+tiktokConnectBtn.addEventListener('click', async () => {
+  if (tiktokConnected) {
+    // Disconnect
+    if (!confirm('Disconnect your TikTok account?')) return;
+    try {
+      await authFetch('/api/tiktok/disconnect', { method: 'POST' });
+      tiktokConnected = false;
+      tiktokUsername = '';
+      updateTikTokUI();
+    } catch (err) {
+      console.error('TikTok disconnect failed:', err);
+    }
+    return;
+  }
+
+  // Connect — get auth URL and open popup
+  try {
+    const res = await authFetch('/api/tiktok/auth');
+    const data = await res.json();
+    if (!data.url) throw new Error('No auth URL returned');
+
+    const popup = window.open(data.url, 'tiktok-auth', 'width=600,height=700,left=200,top=100');
+
+    // Listen for callback message from popup
+    const messageHandler = async (event) => {
+      if (!event.data?.type?.startsWith('tiktok-')) return;
+
+      window.removeEventListener('message', messageHandler);
+
+      if (event.data.type === 'tiktok-success') {
+        // Save tokens to server
+        try {
+          await authFetch('/api/tiktok/save-tokens', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              access_token: event.data.access_token,
+              refresh_token: event.data.refresh_token,
+              open_id: event.data.open_id,
+              expires_in: event.data.expires_in,
+              username: event.data.username,
+            }),
+          });
+
+          tiktokConnected = true;
+          tiktokUsername = event.data.username || '';
+          updateTikTokUI();
+        } catch (err) {
+          console.error('Failed to save TikTok tokens:', err);
+        }
+      } else if (event.data.type === 'tiktok-error') {
+        alert(`TikTok connection failed: ${event.data.error}`);
+      }
+    };
+
+    window.addEventListener('message', messageHandler);
+  } catch (err) {
+    console.error('TikTok auth error:', err);
+  }
+});
+
+// Caption character count
+tiktokCaption.addEventListener('input', () => {
+  tiktokCaptionCount.textContent = tiktokCaption.value.length;
+});
+
+// Open post modal
+tiktokPostBtn.addEventListener('click', openTikTokModal);
+
+function openTikTokModal() {
+  // Populate slide previews
+  const keys = Object.keys(generatedImages).sort((a, b) => a - b);
+  tiktokSlidesPreview.innerHTML = keys.map((key) => {
+    const gen = generatedImages[key];
+    return `<img src="${gen.url}" alt="Slide ${parseInt(key) + 1}" />`;
+  }).join('');
+
+  // Reset form
+  tiktokCaption.value = '';
+  tiktokCaptionCount.textContent = '0';
+  tiktokPostStatus.textContent = '';
+  tiktokPostStatus.className = 'tiktok-post-status';
+  tiktokSubmitBtn.disabled = false;
+
+  document.getElementById('tiktok-auto-music').checked = true;
+  document.getElementById('tiktok-disable-comment').checked = false;
+  document.getElementById('tiktok-brand-content').checked = false;
+  document.getElementById('tiktok-brand-organic').checked = false;
+  document.getElementById('tiktok-privacy').value = 'SELF_ONLY';
+
+  tiktokModal.style.display = 'flex';
+}
+
+function closeTikTokModal() {
+  tiktokModal.style.display = 'none';
+  if (tiktokPostPollTimer) {
+    clearInterval(tiktokPostPollTimer);
+    tiktokPostPollTimer = null;
+  }
+}
+
+tiktokModalClose.addEventListener('click', closeTikTokModal);
+tiktokCancelBtn.addEventListener('click', closeTikTokModal);
+
+// Close modal on backdrop click
+tiktokModal.addEventListener('click', (e) => {
+  if (e.target === tiktokModal) closeTikTokModal();
+});
+
+// Submit post
+tiktokSubmitBtn.addEventListener('click', postToTikTok);
+
+async function postToTikTok() {
+  const keys = Object.keys(generatedImages).sort((a, b) => a - b);
+  if (keys.length === 0) return;
+
+  const imageUrls = keys.map((key) => generatedImages[key].url);
+  const caption = tiktokCaption.value.trim();
+  const privacyLevel = document.getElementById('tiktok-privacy').value;
+  const autoAddMusic = document.getElementById('tiktok-auto-music').checked;
+  const disableComment = document.getElementById('tiktok-disable-comment').checked;
+  const brandContentToggle = document.getElementById('tiktok-brand-content').checked;
+  const brandOrganicToggle = document.getElementById('tiktok-brand-organic').checked;
+
+  tiktokSubmitBtn.disabled = true;
+  tiktokSubmitBtn.textContent = 'Uploading...';
+  tiktokPostStatus.textContent = `Converting ${imageUrls.length} slides and uploading to TikTok...`;
+  tiktokPostStatus.className = 'tiktok-post-status processing';
+
+  try {
+    const res = await authFetch('/api/tiktok/post', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        imageUrls,
+        caption,
+        privacyLevel,
+        autoAddMusic,
+        disableComment,
+        brandContentToggle,
+        brandOrganicToggle,
+      }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Post failed');
+
+    tiktokPostStatus.textContent = 'Processing on TikTok...';
+    tiktokPostStatus.className = 'tiktok-post-status processing';
+
+    // Poll for status
+    pollTikTokPostStatus(data.publishId);
+  } catch (err) {
+    tiktokPostStatus.textContent = `Error: ${err.message}`;
+    tiktokPostStatus.className = 'tiktok-post-status error';
+    tiktokSubmitBtn.disabled = false;
+    tiktokSubmitBtn.innerHTML = `
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19.59 6.69a4.83 4.83 0 01-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 01-2.88 2.5 2.89 2.89 0 01-2.89-2.89 2.89 2.89 0 012.89-2.89c.28 0 .54.04.79.1v-3.5a6.37 6.37 0 00-.79-.05A6.34 6.34 0 003.15 15.2a6.34 6.34 0 006.34 6.34 6.34 6.34 0 006.34-6.34V8.73a8.19 8.19 0 004.76 1.52v-3.4a4.85 4.85 0 01-1-.16z"/></svg>
+      Retry
+    `;
+  }
+}
+
+function pollTikTokPostStatus(publishId) {
+  let attempts = 0;
+  const maxAttempts = 30; // 60 seconds max
+
+  tiktokPostPollTimer = setInterval(async () => {
+    attempts++;
+    if (attempts > maxAttempts) {
+      clearInterval(tiktokPostPollTimer);
+      tiktokPostPollTimer = null;
+      tiktokPostStatus.textContent = 'Post is still processing. Check your TikTok app for status.';
+      tiktokPostStatus.className = 'tiktok-post-status processing';
+      tiktokSubmitBtn.disabled = false;
+      tiktokSubmitBtn.textContent = 'Done';
+      tiktokSubmitBtn.onclick = closeTikTokModal;
+      return;
+    }
+
+    try {
+      const res = await authFetch(`/api/tiktok/post-status/${publishId}`);
+      const data = await res.json();
+
+      if (data.status === 'PUBLISH_COMPLETE') {
+        clearInterval(tiktokPostPollTimer);
+        tiktokPostPollTimer = null;
+        tiktokPostStatus.textContent = 'Posted successfully! Check your TikTok profile.';
+        tiktokPostStatus.className = 'tiktok-post-status success';
+        tiktokSubmitBtn.disabled = false;
+        tiktokSubmitBtn.textContent = 'Done';
+        tiktokSubmitBtn.onclick = closeTikTokModal;
+      } else if (data.status === 'FAILED') {
+        clearInterval(tiktokPostPollTimer);
+        tiktokPostPollTimer = null;
+        tiktokPostStatus.textContent = `Post failed: ${data.failReason || 'Unknown error'}`;
+        tiktokPostStatus.className = 'tiktok-post-status error';
+        tiktokSubmitBtn.disabled = false;
+        tiktokSubmitBtn.innerHTML = `
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19.59 6.69a4.83 4.83 0 01-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 01-2.88 2.5 2.89 2.89 0 01-2.89-2.89 2.89 2.89 0 012.89-2.89c.28 0 .54.04.79.1v-3.5a6.37 6.37 0 00-.79-.05A6.34 6.34 0 003.15 15.2a6.34 6.34 0 006.34 6.34 6.34 6.34 0 006.34-6.34V8.73a8.19 8.19 0 004.76 1.52v-3.4a4.85 4.85 0 01-1-.16z"/></svg>
+          Retry
+        `;
+      } else {
+        tiktokPostStatus.textContent = `Processing on TikTok... (${data.status || 'uploading'})`;
+      }
+    } catch {
+      // Polling error — continue trying
+    }
+  }, 2000);
+}
+
+// Hook into gallery updates to show/hide post button
+const _originalUpdateGallery = updateGallery;
+updateGallery = function () {
+  _originalUpdateGallery();
+  updateTikTokUI();
+};

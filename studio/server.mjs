@@ -30,6 +30,45 @@ if (!claudeEnabled) {
   console.warn('Missing ANTHROPIC_API_KEY. Prompt refinement will be skipped.');
 }
 
+// --- Fal.ai (Flux Kontext Pro for face-consistent generation) ---
+const FAL_API_KEY = process.env.FAL_API_KEY;
+const falEnabled = Boolean(FAL_API_KEY);
+if (!falEnabled) console.warn('Missing FAL_API_KEY. Face personalization will use GPT fallback.');
+
+async function generateWithFlux(faceImagePath, prompt, { aspectRatio = '9:16' } = {}) {
+  const imageBuffer = await fs.readFile(faceImagePath);
+  const base64Image = imageBuffer.toString('base64');
+  const mimeType = faceImagePath.endsWith('.png') ? 'image/png' : 'image/jpeg';
+  const imageUrl = `data:${mimeType};base64,${base64Image}`;
+
+  const response = await fetch('https://queue.fal.run/fal-ai/flux-pro/kontext', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Key ${FAL_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      prompt,
+      image_url: imageUrl,
+      num_images: 1,
+      output_format: 'png',
+      aspect_ratio: aspectRatio,
+    }),
+  });
+
+  if (!response.ok) {
+    const err = await response.text();
+    throw new Error(`Flux API error: ${err}`);
+  }
+
+  const data = await response.json();
+  const imgUrl = data.images?.[0]?.url;
+  if (!imgUrl) throw new Error('No image returned from Flux');
+
+  const imgRes = await fetch(imgUrl);
+  return Buffer.from(await imgRes.arrayBuffer());
+}
+
 // --- Firebase Admin ---
 let bucket = null;
 let db = null;
@@ -927,6 +966,23 @@ function buildPhotoPrompt(data, brand) {
     .join('\n');
 }
 
+function buildPersonalizedPrompt(data, brand) {
+  const sport = data.sport || 'athletics';
+  const setting = data.setting || 'training facility';
+  const action = data.action || 'focused and determined';
+  const mood = data.mood || 'intense concentration';
+
+  return [
+    `Create a professional sports photo featuring the person from the reference image as a ${sport} athlete.`,
+    `Setting: ${setting}. The athlete is ${action}.`,
+    `Mood: ${mood}. Photorealistic, natural lighting, shallow depth of field.`,
+    `The person's face, features, and identity must be clearly preserved from the reference photo.`,
+    `Shot on iPhone 15 Pro, 50mm equivalent. Natural skin texture, authentic gear (no brand logos).`,
+    `Leave space in the bottom third for text overlay.`,
+    brand.name !== 'My Brand' ? `Brand: ${brand.name}.` : '',
+  ].filter(Boolean).join('\n');
+}
+
 async function addAppIconOverlay(baseBuffer, configKey = 'bottom-right', brandId = 'generic') {
   const cfg = ICON_OVERLAY_CONFIGS[configKey] || ICON_OVERLAY_CONFIGS['bottom-right'];
   const brand = getBrand(brandId);
@@ -1782,6 +1838,378 @@ app.post('/api/download-selected', requireAuth, async (req, res) => {
   }
 
   await archive.finalize();
+});
+
+// --- TikTok Integration ---
+
+const TIKTOK_CLIENT_KEY = process.env.TIKTOK_CLIENT_KEY;
+const TIKTOK_CLIENT_SECRET = process.env.TIKTOK_CLIENT_SECRET;
+const tiktokEnabled = Boolean(TIKTOK_CLIENT_KEY && TIKTOK_CLIENT_SECRET);
+
+if (!tiktokEnabled) {
+  console.warn('Missing TIKTOK_CLIENT_KEY or TIKTOK_CLIENT_SECRET — TikTok posting disabled.');
+}
+
+function getTikTokRedirectUri(req) {
+  const proto = req.headers['x-forwarded-proto'] || req.protocol;
+  const host = req.headers['x-forwarded-host'] || req.headers.host;
+  return `${proto}://${host}/api/tiktok/callback`;
+}
+
+async function getTikTokTokens(userId) {
+  if (!db) return null;
+  const doc = await db.collection('tiktok_tokens').doc(userId).get();
+  return doc.exists ? doc.data() : null;
+}
+
+async function saveTikTokTokens(userId, tokens) {
+  if (!db) return;
+  await db.collection('tiktok_tokens').doc(userId).set(tokens, { merge: true });
+}
+
+async function deleteTikTokTokens(userId) {
+  if (!db) return;
+  await db.collection('tiktok_tokens').doc(userId).delete();
+}
+
+async function refreshTikTokToken(userId) {
+  const tokens = await getTikTokTokens(userId);
+  if (!tokens?.refresh_token) throw new Error('No refresh token available');
+
+  const resp = await fetch('https://open.tiktokapis.com/v2/oauth/token/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_key: TIKTOK_CLIENT_KEY,
+      client_secret: TIKTOK_CLIENT_SECRET,
+      grant_type: 'refresh_token',
+      refresh_token: tokens.refresh_token,
+    }),
+  });
+
+  const data = await resp.json();
+  if (data.error || !data.access_token) {
+    throw new Error(data.error_description || 'Token refresh failed');
+  }
+
+  const updated = {
+    access_token: data.access_token,
+    refresh_token: data.refresh_token,
+    open_id: data.open_id || tokens.open_id,
+    expires_at: Date.now() + (data.expires_in * 1000),
+  };
+  await saveTikTokTokens(userId, updated);
+  return updated;
+}
+
+async function getValidTikTokToken(userId) {
+  let tokens = await getTikTokTokens(userId);
+  if (!tokens) throw new Error('TikTok not connected');
+
+  // Refresh if expired or expiring within 5 minutes
+  if (tokens.expires_at && tokens.expires_at < Date.now() + 300000) {
+    console.log('[TikTok] Token expired, refreshing...');
+    tokens = await refreshTikTokToken(userId);
+  }
+
+  return tokens;
+}
+
+// OAuth: Redirect to TikTok authorization
+app.get('/api/tiktok/auth', requireAuth, (req, res) => {
+  if (!tiktokEnabled) return res.status(500).json({ error: 'TikTok not configured' });
+
+  const csrfState = crypto.randomUUID();
+  const redirectUri = getTikTokRedirectUri(req);
+
+  const params = new URLSearchParams({
+    client_key: TIKTOK_CLIENT_KEY,
+    scope: 'user.info.basic,video.publish',
+    response_type: 'code',
+    redirect_uri: redirectUri,
+    state: csrfState,
+  });
+
+  res.json({ url: `https://www.tiktok.com/v2/auth/authorize/?${params}` });
+});
+
+// OAuth: Callback — exchange code for token
+app.get('/api/tiktok/callback', async (req, res) => {
+  if (!tiktokEnabled) return res.status(500).send('TikTok not configured');
+
+  const { code, error, error_description } = req.query;
+  if (error) {
+    return res.send(`<script>window.opener?.postMessage({type:'tiktok-error',error:'${error_description || error}'},'*');window.close();</script>`);
+  }
+  if (!code) {
+    return res.send('<script>window.opener?.postMessage({type:"tiktok-error",error:"No authorization code"},"*");window.close();</script>');
+  }
+
+  try {
+    const redirectUri = getTikTokRedirectUri(req);
+    const tokenResp = await fetch('https://open.tiktokapis.com/v2/oauth/token/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_key: TIKTOK_CLIENT_KEY,
+        client_secret: TIKTOK_CLIENT_SECRET,
+        code,
+        grant_type: 'authorization_code',
+        redirect_uri: redirectUri,
+      }),
+    });
+
+    const tokenData = await tokenResp.json();
+    if (tokenData.error || !tokenData.access_token) {
+      throw new Error(tokenData.error_description || 'Token exchange failed');
+    }
+
+    // Fetch TikTok user info
+    let tiktokUsername = '';
+    try {
+      const userResp = await fetch('https://open.tiktokapis.com/v2/user/info/?fields=display_name,username', {
+        headers: { Authorization: `Bearer ${tokenData.access_token}` },
+      });
+      const userData = await userResp.json();
+      tiktokUsername = userData.data?.user?.display_name || userData.data?.user?.username || '';
+    } catch { /* ignore — username is optional */ }
+
+    // Return HTML that posts message to opener with token data for storage
+    res.send(`<script>
+      window.opener?.postMessage({
+        type: 'tiktok-success',
+        access_token: '${tokenData.access_token}',
+        refresh_token: '${tokenData.refresh_token}',
+        open_id: '${tokenData.open_id}',
+        expires_in: ${tokenData.expires_in},
+        username: '${tiktokUsername.replace(/'/g, "\\'")}'
+      }, '*');
+      window.close();
+    </script>`);
+  } catch (err) {
+    console.error('[TikTok] Callback error:', err);
+    res.send(`<script>window.opener?.postMessage({type:'tiktok-error',error:'${err.message.replace(/'/g, "\\'")}'},'*');window.close();</script>`);
+  }
+});
+
+// Save tokens from frontend (after popup callback)
+app.post('/api/tiktok/save-tokens', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user?.uid;
+    if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+
+    const { access_token, refresh_token, open_id, expires_in, username } = req.body;
+    if (!access_token) return res.status(400).json({ error: 'Missing access_token' });
+
+    await saveTikTokTokens(userId, {
+      access_token,
+      refresh_token,
+      open_id,
+      expires_at: Date.now() + (expires_in * 1000),
+      tiktok_username: username || '',
+    });
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[TikTok] Save tokens error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Account status
+app.get('/api/tiktok/status', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user?.uid;
+    if (!userId) return res.json({ connected: false });
+
+    const tokens = await getTikTokTokens(userId);
+    if (!tokens?.access_token) return res.json({ connected: false });
+
+    // Try to get fresh user info
+    let username = tokens.tiktok_username || '';
+    try {
+      const validTokens = await getValidTikTokToken(userId);
+      const userResp = await fetch('https://open.tiktokapis.com/v2/user/info/?fields=display_name,username', {
+        headers: { Authorization: `Bearer ${validTokens.access_token}` },
+      });
+      const userData = await userResp.json();
+      username = userData.data?.user?.display_name || userData.data?.user?.username || username;
+
+      if (username && username !== tokens.tiktok_username) {
+        await saveTikTokTokens(userId, { tiktok_username: username });
+      }
+    } catch { /* use cached username */ }
+
+    res.json({ connected: true, username });
+  } catch (err) {
+    console.error('[TikTok] Status error:', err);
+    res.json({ connected: false });
+  }
+});
+
+// Disconnect TikTok
+app.post('/api/tiktok/disconnect', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user?.uid;
+    if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+
+    await deleteTikTokTokens(userId);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[TikTok] Disconnect error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Post carousel to TikTok
+app.post('/api/tiktok/post', requireAuth, async (req, res) => {
+  if (!tiktokEnabled) return res.status(500).json({ error: 'TikTok not configured' });
+
+  try {
+    const userId = req.user?.uid;
+    if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+
+    const { imageUrls, caption, privacyLevel, autoAddMusic, disableComment, disableDuet, disableStitch, brandContentToggle, brandOrganicToggle } = req.body;
+
+    if (!imageUrls || !Array.isArray(imageUrls) || imageUrls.length === 0) {
+      return res.status(400).json({ error: 'No images provided' });
+    }
+    if (imageUrls.length > 35) {
+      return res.status(400).json({ error: 'TikTok supports max 35 images per photo post' });
+    }
+
+    const tokens = await getValidTikTokToken(userId);
+
+    // Convert PNG images to JPG
+    console.log(`[TikTok] Converting ${imageUrls.length} images to JPG...`);
+    const jpgBuffers = [];
+    for (const url of imageUrls) {
+      const imgRes = await fetch(url);
+      if (!imgRes.ok) throw new Error(`Failed to fetch image: ${url}`);
+      const imgBuffer = Buffer.from(await imgRes.arrayBuffer());
+      const jpgBuffer = await sharp(imgBuffer).jpeg({ quality: 95 }).toBuffer();
+      jpgBuffers.push(jpgBuffer);
+    }
+
+    // Initialize photo post on TikTok
+    console.log('[TikTok] Initializing photo post...');
+    const postInfo = {
+      title: caption || '',
+      privacy_level: privacyLevel || 'SELF_ONLY',
+      disable_comment: disableComment || false,
+      disable_duet: disableDuet || false,
+      disable_stitch: disableStitch || false,
+      auto_add_music: autoAddMusic !== false,
+    };
+
+    if (brandContentToggle) postInfo.brand_content_toggle = true;
+    if (brandOrganicToggle) postInfo.brand_organic_toggle = true;
+
+    const publishResp = await fetch('https://open.tiktokapis.com/v2/post/publish/', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${tokens.access_token}`,
+        'Content-Type': 'application/json; charset=UTF-8',
+      },
+      body: JSON.stringify({
+        post_info: postInfo,
+        source_info: {
+          source: 'FILE_UPLOAD',
+          photo_cover_index: 0,
+          photo_images: jpgBuffers.map((_, i) => `image_${i}`),
+        },
+        media_type: 'PHOTO',
+        post_mode: 'DIRECT_POST',
+      }),
+    });
+
+    const publishData = await publishResp.json();
+    console.log('[TikTok] Publish response:', JSON.stringify(publishData));
+
+    if (publishData.error?.code) {
+      throw new Error(publishData.error.message || `TikTok API error: ${publishData.error.code}`);
+    }
+
+    const publishId = publishData.data?.publish_id;
+    const uploadUrl = publishData.data?.upload_url;
+
+    if (!publishId) {
+      throw new Error('No publish_id returned from TikTok');
+    }
+
+    // Upload images to TikTok
+    if (uploadUrl) {
+      console.log(`[TikTok] Uploading ${jpgBuffers.length} images...`);
+      for (let i = 0; i < jpgBuffers.length; i++) {
+        const uploadResp = await fetch(uploadUrl, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'image/jpeg',
+            'Content-Range': `bytes 0-${jpgBuffers[i].length - 1}/${jpgBuffers[i].length}`,
+          },
+          body: jpgBuffers[i],
+        });
+        if (!uploadResp.ok) {
+          console.error(`[TikTok] Image ${i + 1} upload failed:`, uploadResp.status);
+        }
+      }
+    }
+
+    // Save post record to Firestore
+    if (db) {
+      await db.collection('tiktok_posts').doc(publishId).set({
+        userId,
+        publishId,
+        status: 'processing',
+        slideCount: imageUrls.length,
+        caption: caption || '',
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    }
+
+    res.json({ ok: true, publishId });
+  } catch (err) {
+    console.error('[TikTok] Post error:', err);
+    res.status(500).json({ error: err.message || 'Post failed' });
+  }
+});
+
+// Poll post status
+app.get('/api/tiktok/post-status/:publishId', requireAuth, async (req, res) => {
+  if (!tiktokEnabled) return res.status(500).json({ error: 'TikTok not configured' });
+
+  try {
+    const userId = req.user?.uid;
+    if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+
+    const tokens = await getValidTikTokToken(userId);
+
+    const statusResp = await fetch('https://open.tiktokapis.com/v2/post/publish/status/fetch/', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${tokens.access_token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ publish_id: req.params.publishId }),
+    });
+
+    const statusData = await statusResp.json();
+
+    // Update Firestore record
+    const status = statusData.data?.status;
+    if (db && status) {
+      await db.collection('tiktok_posts').doc(req.params.publishId).update({ status: status.toLowerCase() }).catch(() => {});
+    }
+
+    res.json({
+      publishId: req.params.publishId,
+      status: status || 'PROCESSING_UPLOAD',
+      failReason: statusData.data?.fail_reason,
+    });
+  } catch (err) {
+    console.error('[TikTok] Status check error:', err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Start server (only when run directly, not on Vercel)
