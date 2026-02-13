@@ -34,12 +34,16 @@ const anthropic = claudeEnabled ? new Anthropic({ apiKey: ANTHROPIC_KEY }) : nul
 const app = express();
 const PORT = process.env.PORT || 4545;
 
-const outputDir = path.join(__dirname, 'output');
-await fs.mkdir(outputDir, { recursive: true });
+const isVercel = process.env.VERCEL === '1';
+const outputDir = isVercel ? '/tmp/output' : path.join(__dirname, 'output');
+const uploadsDir = isVercel ? '/tmp/uploads' : path.join(__dirname, 'uploads');
 
-// File upload for reference images
-const uploadsDir = path.join(__dirname, 'uploads');
-await fs.mkdir(uploadsDir, { recursive: true });
+try {
+  await fs.mkdir(outputDir, { recursive: true });
+  await fs.mkdir(uploadsDir, { recursive: true });
+} catch (err) {
+  console.warn('Could not create dirs:', err.message);
+}
 const upload = multer({
   dest: uploadsDir,
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
