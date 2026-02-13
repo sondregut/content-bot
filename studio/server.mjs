@@ -114,7 +114,7 @@ try {
 }
 
 const ALLOWED_EMAILS = (process.env.ALLOWED_EMAILS || '').split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
-const ADMIN_EMAILS = ['sondre@athletemindset.app', 'sondregut@gmail.com'];
+const ADMIN_EMAILS = ['sondre@athletemindset.app', 'sondregut@gmail.com', 'sondreg600@gmail.com'];
 
 const openai = apiEnabled ? new OpenAI({ apiKey: API_KEY }) : null;
 const anthropic = claudeEnabled ? new Anthropic({ apiKey: ANTHROPIC_KEY }) : null;
@@ -293,8 +293,40 @@ const ICON_OVERLAY_CONFIGS = {
 // --- Mockup (Sharp-rendered) Slide Constants & Helpers ---
 
 const MOCKUP_CANVAS = { width: 1080, height: 1920 };
+const MOCKUP_ASPECT_RATIOS = {
+  '9:16': { width: 1080, height: 1920 },
+  '4:5':  { width: 1080, height: 1350 },
+  '1:1':  { width: 1080, height: 1080 },
+};
 const MOCKUP_SAFE_ZONE = { top: 120, bottom: 200, left: 90, right: 90 };
 const MOCKUP_FONT_FAMILY = 'Helvetica, Arial, sans-serif';
+const MOCKUP_AVAILABLE_FONTS = ['Helvetica', 'Arial', 'Georgia', 'Times New Roman', 'Courier', 'Impact'];
+
+function getCanvasDimensions(aspectRatio) {
+  return MOCKUP_ASPECT_RATIOS[aspectRatio] || MOCKUP_ASPECT_RATIOS['9:16'];
+}
+
+function getSafeZone(canvasHeight) {
+  // Scale safe zones proportionally for shorter canvases
+  const scale = canvasHeight / 1920;
+  return {
+    top: Math.round(120 * scale),
+    bottom: Math.round(200 * scale),
+    left: 90,
+    right: 90,
+  };
+}
+
+function clampOffset(val, min, max) {
+  return Math.max(min, Math.min(max, parseInt(val) || 0));
+}
+
+function resolveFontFamily(requested) {
+  if (requested && MOCKUP_AVAILABLE_FONTS.includes(requested)) {
+    return `${requested}, ${MOCKUP_FONT_FAMILY}`;
+  }
+  return MOCKUP_FONT_FAMILY;
+}
 
 const MOCKUP_THEMES = {
   dark: (brand) => ({
@@ -340,11 +372,12 @@ function wrapText(text, fontSize, maxWidth, isBold = false) {
   return lines;
 }
 
-function svgTextLines(lines, { x, startY, fontSize, fontWeight, fill, lineHeight, letterSpacing }) {
+function svgTextLines(lines, { x, startY, fontSize, fontWeight, fill, lineHeight, letterSpacing, fontFamily }) {
+  const ff = fontFamily || MOCKUP_FONT_FAMILY;
   return lines.map((line, i) => {
     const y = startY + i * (fontSize * (lineHeight || 1.3));
     const ls = letterSpacing ? ` letter-spacing="${letterSpacing}"` : '';
-    return `<text x="${x}" y="${y}" font-family="${MOCKUP_FONT_FAMILY}" font-size="${fontSize}" font-weight="${fontWeight || 'normal'}" fill="${fill}"${ls}>${escapeXml(line)}</text>`;
+    return `<text x="${x}" y="${y}" font-family="${ff}" font-size="${fontSize}" font-weight="${fontWeight || 'normal'}" fill="${fill}"${ls}>${escapeXml(line)}</text>`;
   }).join('\n');
 }
 
@@ -486,8 +519,9 @@ async function createFigureElement({ imagePath, maxWidth, maxHeight, borderRadiu
   return buf;
 }
 
-async function createBackgroundImage(imagePath, overlayOpacity) {
-  const { width, height } = MOCKUP_CANVAS;
+async function createBackgroundImage(imagePath, overlayOpacity, canvasWidth, canvasHeight) {
+  const width = canvasWidth || MOCKUP_CANVAS.width;
+  const height = canvasHeight || MOCKUP_CANVAS.height;
   const fullPath = path.join(uploadsDir, imagePath);
   try {
     await fs.access(fullPath);
@@ -552,15 +586,22 @@ function buildTextSvg({ width, height, bgFill, textX, textMaxWidth, microLabel, 
 }
 
 async function renderPhoneRight(data, brand, theme) {
-  const { width, height } = MOCKUP_CANVAS;
-  const safe = MOCKUP_SAFE_ZONE;
+  const { width, height } = getCanvasDimensions(data.aspectRatio);
+  const safe = getSafeZone(height);
   const imageUsage = data.imageUsage || 'phone';
+  const fontFamily = resolveFontFamily(data.fontFamily);
 
   const micro = data.microLabel || brand.defaultMicroLabel;
   const headline = data.headline || 'Your headline here';
   const body = data.body || '';
   const highlight = data.highlightPhrase || '';
   const highlightOpacity = data.highlightStyle === 'bold' ? 0.4 : 0.28;
+
+  // Color overrides
+  const microColor = data.microColor || theme.microColor;
+  const textFill = data.textColor || (imageUsage === 'background' ? '#FFFFFF' : theme.textColor);
+  const subtextFill = data.subtextColor || (imageUsage === 'background' ? 'rgba(255,255,255,0.75)' : theme.subtextColor);
+  const highlightColor = data.microColor || theme.highlightColor;
 
   // Determine base layer + composites based on imageUsage
   let baseBuffer = null;
@@ -571,7 +612,7 @@ async function renderPhoneRight(data, brand, theme) {
   const microFontSize = 24;
 
   if (imageUsage === 'background' && data.screenshotImage) {
-    baseBuffer = await createBackgroundImage(data.screenshotImage, parseFloat(data.bgOverlayOpacity) || 0.55);
+    baseBuffer = await createBackgroundImage(data.screenshotImage, parseFloat(data.bgOverlayOpacity) || 0.55, width, height);
     textMaxWidth = width - safe.left - safe.right;
   } else if (imageUsage === 'figure' && data.screenshotImage) {
     const figSizeMap = { small: 280, medium: 380, large: 500 };
@@ -612,37 +653,58 @@ async function renderPhoneRight(data, brand, theme) {
   const headlineLines = wrapText(headline, headlineFontSize, textMaxWidth, true);
   const bodyLines = body ? wrapText(body, bodyFontSize, textMaxWidth) : [];
 
-  let textY = safe.top + 60;
-  const userOffsetX = Math.max(-500, Math.min(500, parseInt(data.textOffsetX) || 0));
-  const userOffsetY = Math.max(-800, Math.min(800, parseInt(data.textOffsetY) || 0));
-  textY += userOffsetY;
-  const textX = safe.left + userOffsetX;
-  // For background images, use white text always
-  const textFill = imageUsage === 'background' ? '#FFFFFF' : theme.textColor;
-  const subtextFill = imageUsage === 'background' ? 'rgba(255,255,255,0.75)' : theme.subtextColor;
+  // Per-element offsets (fall back to legacy textOffsetX/Y)
+  const fallbackX = parseInt(data.textOffsetX) || 0;
+  const fallbackY = parseInt(data.textOffsetY) || 0;
 
-  const microSvg = svgTextLines([micro], { x: textX, startY: textY, fontSize: microFontSize, fontWeight: '700', fill: theme.microColor, letterSpacing: '4' });
-  textY += microFontSize + headlineFontSize + 16;
+  // Base positions
+  let baseY = safe.top + 60;
+  const baseX = safe.left;
 
-  const highlightSvg = svgHighlightBars(headlineLines, highlight, { x: textX, startY: textY, fontSize: headlineFontSize, lineHeight: 1.25, color: theme.highlightColor, opacity: highlightOpacity });
-  const headlineSvg = svgTextLines(headlineLines, { x: textX, startY: textY, fontSize: headlineFontSize, fontWeight: 'bold', fill: textFill, lineHeight: 1.25 });
-  textY += headlineLines.length * headlineFontSize * 1.25 + 30;
+  // Micro position
+  const microX = baseX + clampOffset(data.microOffsetX || fallbackX, -500, 500);
+  const microY = baseY + clampOffset(data.microOffsetY || fallbackY, -800, 800);
 
-  const bodySvg = bodyLines.length ? svgTextLines(bodyLines, { x: textX, startY: textY, fontSize: bodyFontSize, fill: subtextFill, lineHeight: 1.5 }) : '';
+  // Headline base position
+  const headlineBaseY = baseY + microFontSize + headlineFontSize + 16;
+  const headlineX = baseX + clampOffset(data.headlineOffsetX || fallbackX, -500, 500);
+  const headlineY = headlineBaseY + clampOffset(data.headlineOffsetY || fallbackY, -800, 800);
+
+  // Body base position
+  const bodyBaseY = headlineBaseY + headlineLines.length * headlineFontSize * 1.25 + 30;
+  const bodyX = baseX + clampOffset(data.bodyOffsetX || fallbackX, -500, 500);
+  const bodyY = bodyBaseY + clampOffset(data.bodyOffsetY || fallbackY, -800, 800);
+
+  const microSvg = svgTextLines([micro], { x: microX, startY: microY, fontSize: microFontSize, fontWeight: '700', fill: microColor, letterSpacing: '4', fontFamily });
+
+  const highlightSvg = svgHighlightBars(headlineLines, highlight, { x: headlineX, startY: headlineY, fontSize: headlineFontSize, lineHeight: 1.25, color: highlightColor, opacity: highlightOpacity });
+  const headlineSvg = svgTextLines(headlineLines, { x: headlineX, startY: headlineY, fontSize: headlineFontSize, fontWeight: 'bold', fill: textFill, lineHeight: 1.25, fontFamily });
+
+  const bodySvg = bodyLines.length ? svgTextLines(bodyLines, { x: bodyX, startY: bodyY, fontSize: bodyFontSize, fill: subtextFill, lineHeight: 1.5, fontFamily }) : '';
+
+  // Overlay darken (for non-background modes)
+  const overlayDarken = parseFloat(data.overlayDarken) || 0;
+  const darkenRect = (!baseBuffer && overlayDarken > 0) ? `<rect width="${width}" height="${height}" fill="#000" opacity="${overlayDarken}"/>` : '';
 
   if (baseBuffer) {
-    // Background mode: overlay text SVG on image
+    const composites = [];
+    if (overlayDarken > 0) {
+      const darkenSvg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg"><rect width="${width}" height="${height}" fill="#000" opacity="${overlayDarken}"/></svg>`;
+      composites.push({ input: Buffer.from(darkenSvg) });
+    }
     const textSvg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
       ${microSvg}
       ${highlightSvg}
       ${headlineSvg}
       ${bodySvg}
     </svg>`;
-    return sharp(baseBuffer).composite([{ input: Buffer.from(textSvg) }]).png().toBuffer();
+    composites.push({ input: Buffer.from(textSvg) });
+    return sharp(baseBuffer).composite(composites).png().toBuffer();
   }
 
   const svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
     <rect width="${width}" height="${height}" fill="${theme.background}"/>
+    ${darkenRect}
     ${microSvg}
     ${highlightSvg}
     ${headlineSvg}
@@ -656,9 +718,10 @@ async function renderPhoneRight(data, brand, theme) {
 }
 
 async function renderPhoneLeft(data, brand, theme) {
-  const { width, height } = MOCKUP_CANVAS;
-  const safe = MOCKUP_SAFE_ZONE;
+  const { width, height } = getCanvasDimensions(data.aspectRatio);
+  const safe = getSafeZone(height);
   const imageUsage = data.imageUsage || 'phone';
+  const fontFamily = resolveFontFamily(data.fontFamily);
 
   const micro = data.microLabel || brand.defaultMicroLabel;
   const headline = data.headline || 'Your headline here';
@@ -666,17 +729,23 @@ async function renderPhoneLeft(data, brand, theme) {
   const highlight = data.highlightPhrase || '';
   const highlightOpacity = data.highlightStyle === 'bold' ? 0.4 : 0.28;
 
+  // Color overrides
+  const microColor = data.microColor || theme.microColor;
+  const textFill = data.textColor || (imageUsage === 'background' ? '#FFFFFF' : theme.textColor);
+  const subtextFill = data.subtextColor || (imageUsage === 'background' ? 'rgba(255,255,255,0.75)' : theme.subtextColor);
+  const highlightColor = data.microColor || theme.highlightColor;
+
   let baseBuffer = null;
   let imageComposite = null;
-  let textX;
+  let baseTextX;
   let textMaxWidth;
   const headlineFontSize = 62;
   const bodyFontSize = 30;
   const microFontSize = 22;
 
   if (imageUsage === 'background' && data.screenshotImage) {
-    baseBuffer = await createBackgroundImage(data.screenshotImage, parseFloat(data.bgOverlayOpacity) || 0.55);
-    textX = safe.left;
+    baseBuffer = await createBackgroundImage(data.screenshotImage, parseFloat(data.bgOverlayOpacity) || 0.55, width, height);
+    baseTextX = safe.left;
     textMaxWidth = width - safe.left - safe.right;
   } else if (imageUsage === 'figure' && data.screenshotImage) {
     const figSizeMap = { small: 280, medium: 380, large: 500 };
@@ -691,11 +760,11 @@ async function renderPhoneLeft(data, brand, theme) {
       const figMeta = await sharp(figBuf).metadata();
       const pos = getFigurePosition(data.figurePosition || 'center-left', figMeta, width, height, 60);
       imageComposite = { input: figBuf, left: pos.left, top: pos.top };
-      textX = pos.left + (figMeta.width || maxW) + 40;
+      baseTextX = pos.left + (figMeta.width || maxW) + 40;
     } else {
-      textX = safe.left;
+      baseTextX = safe.left;
     }
-    textMaxWidth = Math.max(width - textX - safe.right, 300);
+    textMaxWidth = Math.max(width - baseTextX - safe.right, 300);
   } else {
     // Phone frame (default)
     const phoneSizeMap = { small: 340, medium: 400, large: 480 };
@@ -714,40 +783,59 @@ async function renderPhoneLeft(data, brand, theme) {
     const phoneLeft = safe.left - 20;
     const phoneTop = Math.round((height - (phoneMeta.height || ph)) / 2);
     imageComposite = { input: phoneMockup, left: Math.max(0, phoneLeft), top: Math.max(0, phoneTop) };
-    textX = (phoneMeta.width || pw) + safe.left + 40;
-    textMaxWidth = Math.max(width - textX - safe.right, 300);
+    baseTextX = (phoneMeta.width || pw) + safe.left + 40;
+    textMaxWidth = Math.max(width - baseTextX - safe.right, 300);
   }
 
   const headlineLines = wrapText(headline, headlineFontSize, textMaxWidth, true);
   const bodyLines = body ? wrapText(body, bodyFontSize, textMaxWidth) : [];
 
-  let textY = Math.round(height * 0.30);
-  textY += Math.max(-800, Math.min(800, parseInt(data.textOffsetY) || 0));
-  textX += Math.max(-500, Math.min(500, parseInt(data.textOffsetX) || 0));
-  const textFill = imageUsage === 'background' ? '#FFFFFF' : theme.textColor;
-  const subtextFill = imageUsage === 'background' ? 'rgba(255,255,255,0.75)' : theme.subtextColor;
+  // Per-element offsets (fall back to legacy textOffsetX/Y)
+  const fallbackX = parseInt(data.textOffsetX) || 0;
+  const fallbackY = parseInt(data.textOffsetY) || 0;
 
-  const microSvg = svgTextLines([micro], { x: textX, startY: textY, fontSize: microFontSize, fontWeight: '700', fill: theme.microColor, letterSpacing: '4' });
-  textY += microFontSize + headlineFontSize + 12;
+  const baseY = Math.round(height * 0.30);
 
-  const highlightSvg = svgHighlightBars(headlineLines, highlight, { x: textX, startY: textY, fontSize: headlineFontSize, lineHeight: 1.25, color: theme.highlightColor, opacity: highlightOpacity });
-  const headlineSvg = svgTextLines(headlineLines, { x: textX, startY: textY, fontSize: headlineFontSize, fontWeight: 'bold', fill: textFill, lineHeight: 1.25 });
-  textY += headlineLines.length * headlineFontSize * 1.25 + 20;
+  const microX = baseTextX + clampOffset(data.microOffsetX || fallbackX, -500, 500);
+  const microY = baseY + clampOffset(data.microOffsetY || fallbackY, -800, 800);
 
-  const bodySvg = bodyLines.length ? svgTextLines(bodyLines, { x: textX, startY: textY, fontSize: bodyFontSize, fill: subtextFill, lineHeight: 1.5 }) : '';
+  const headlineBaseY = baseY + microFontSize + headlineFontSize + 12;
+  const headlineX = baseTextX + clampOffset(data.headlineOffsetX || fallbackX, -500, 500);
+  const headlineY = headlineBaseY + clampOffset(data.headlineOffsetY || fallbackY, -800, 800);
+
+  const bodyBaseY = headlineBaseY + headlineLines.length * headlineFontSize * 1.25 + 20;
+  const bodyX = baseTextX + clampOffset(data.bodyOffsetX || fallbackX, -500, 500);
+  const bodyY = bodyBaseY + clampOffset(data.bodyOffsetY || fallbackY, -800, 800);
+
+  const microSvg = svgTextLines([micro], { x: microX, startY: microY, fontSize: microFontSize, fontWeight: '700', fill: microColor, letterSpacing: '4', fontFamily });
+
+  const highlightSvg = svgHighlightBars(headlineLines, highlight, { x: headlineX, startY: headlineY, fontSize: headlineFontSize, lineHeight: 1.25, color: highlightColor, opacity: highlightOpacity });
+  const headlineSvg = svgTextLines(headlineLines, { x: headlineX, startY: headlineY, fontSize: headlineFontSize, fontWeight: 'bold', fill: textFill, lineHeight: 1.25, fontFamily });
+
+  const bodySvg = bodyLines.length ? svgTextLines(bodyLines, { x: bodyX, startY: bodyY, fontSize: bodyFontSize, fill: subtextFill, lineHeight: 1.5, fontFamily }) : '';
+
+  const overlayDarken = parseFloat(data.overlayDarken) || 0;
+  const darkenRect = (!baseBuffer && overlayDarken > 0) ? `<rect width="${width}" height="${height}" fill="#000" opacity="${overlayDarken}"/>` : '';
 
   if (baseBuffer) {
+    const composites = [];
+    if (overlayDarken > 0) {
+      const darkenSvg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg"><rect width="${width}" height="${height}" fill="#000" opacity="${overlayDarken}"/></svg>`;
+      composites.push({ input: Buffer.from(darkenSvg) });
+    }
     const textSvg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
       ${microSvg}
       ${highlightSvg}
       ${headlineSvg}
       ${bodySvg}
     </svg>`;
-    return sharp(baseBuffer).composite([{ input: Buffer.from(textSvg) }]).png().toBuffer();
+    composites.push({ input: Buffer.from(textSvg) });
+    return sharp(baseBuffer).composite(composites).png().toBuffer();
   }
 
   const svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
     <rect width="${width}" height="${height}" fill="${theme.background}"/>
+    ${darkenRect}
     ${microSvg}
     ${highlightSvg}
     ${headlineSvg}
@@ -761,9 +849,10 @@ async function renderPhoneLeft(data, brand, theme) {
 }
 
 async function renderTextStatement(data, brand, theme) {
-  const { width, height } = MOCKUP_CANVAS;
-  const safe = MOCKUP_SAFE_ZONE;
+  const { width, height } = getCanvasDimensions(data.aspectRatio);
+  const safe = getSafeZone(height);
   const imageUsage = data.imageUsage || 'none';
+  const fontFamily = resolveFontFamily(data.fontFamily);
 
   const micro = data.microLabel || brand.defaultMicroLabel;
   const headline = data.headline || 'Your headline here';
@@ -771,11 +860,17 @@ async function renderTextStatement(data, brand, theme) {
   const highlight = data.highlightPhrase || '';
   const highlightOpacity = data.highlightStyle === 'bold' ? 0.5 : 0.3;
 
+  // Color overrides
+  const microColor = data.microColor || theme.microColor;
+  const textFill = data.textColor || (imageUsage === 'background' ? '#FFFFFF' : theme.textColor);
+  const subtextFill = data.subtextColor || (imageUsage === 'background' ? 'rgba(255,255,255,0.75)' : theme.subtextColor);
+  const highlightColor = data.microColor || theme.highlightColor;
+
   let baseBuffer = null;
   let imageComposite = null;
 
   if (imageUsage === 'background' && data.screenshotImage) {
-    baseBuffer = await createBackgroundImage(data.screenshotImage, parseFloat(data.bgOverlayOpacity) || 0.6);
+    baseBuffer = await createBackgroundImage(data.screenshotImage, parseFloat(data.bgOverlayOpacity) || 0.6, width, height);
   } else if (imageUsage === 'figure' && data.screenshotImage) {
     const figSizeMap = { small: 240, medium: 340, large: 460 };
     const maxW = figSizeMap[data.figureSize] || 340;
@@ -804,38 +899,55 @@ async function renderTextStatement(data, brand, theme) {
   const bodyBlockH = bodyLines.length ? bodyLines.length * bodyFontSize * 1.5 + 30 : 0;
   const microBlockH = microFontSize + headlineFontSize + 16;
   const totalH = microBlockH + headlineBlockH + bodyBlockH;
-  let textY = Math.round((height - totalH) / 2);
-  const userOffsetX = Math.max(-500, Math.min(500, parseInt(data.textOffsetX) || 0));
-  const userOffsetY = Math.max(-800, Math.min(800, parseInt(data.textOffsetY) || 0));
-  textY += userOffsetY;
-  const textX = safe.left + userOffsetX;
 
-  const textFill = (imageUsage === 'background') ? '#FFFFFF' : theme.textColor;
-  const subtextFill = (imageUsage === 'background') ? 'rgba(255,255,255,0.75)' : theme.subtextColor;
+  // Per-element offsets (fall back to legacy textOffsetX/Y)
+  const fallbackX = parseInt(data.textOffsetX) || 0;
+  const fallbackY = parseInt(data.textOffsetY) || 0;
 
-  const microSvg = svgTextLines([micro], { x: textX, startY: textY, fontSize: microFontSize, fontWeight: '700', fill: theme.microColor, letterSpacing: '5' });
-  textY += microBlockH;
+  const baseY = Math.round((height - totalH) / 2);
+  const baseX = safe.left;
 
-  const highlightSvg = svgHighlightBars(headlineLines, highlight, { x: textX, startY: textY, fontSize: headlineFontSize, lineHeight: 1.25, color: theme.highlightColor, opacity: highlightOpacity });
-  const headlineSvg = svgTextLines(headlineLines, { x: textX, startY: textY, fontSize: headlineFontSize, fontWeight: 'bold', fill: textFill, lineHeight: 1.25 });
-  textY += headlineBlockH + 30;
+  const microX = baseX + clampOffset(data.microOffsetX || fallbackX, -500, 500);
+  const microY = baseY + clampOffset(data.microOffsetY || fallbackY, -800, 800);
 
-  const bodySvg = bodyLines.length ? svgTextLines(bodyLines, { x: textX, startY: textY, fontSize: bodyFontSize, fill: subtextFill, lineHeight: 1.5 }) : '';
+  const headlineBaseY = baseY + microBlockH;
+  const headlineX = baseX + clampOffset(data.headlineOffsetX || fallbackX, -500, 500);
+  const headlineY = headlineBaseY + clampOffset(data.headlineOffsetY || fallbackY, -800, 800);
+
+  const bodyBaseY = headlineBaseY + headlineBlockH + 30;
+  const bodyX = baseX + clampOffset(data.bodyOffsetX || fallbackX, -500, 500);
+  const bodyY = bodyBaseY + clampOffset(data.bodyOffsetY || fallbackY, -800, 800);
+
+  const microSvg = svgTextLines([micro], { x: microX, startY: microY, fontSize: microFontSize, fontWeight: '700', fill: microColor, letterSpacing: '5', fontFamily });
+
+  const highlightSvg = svgHighlightBars(headlineLines, highlight, { x: headlineX, startY: headlineY, fontSize: headlineFontSize, lineHeight: 1.25, color: highlightColor, opacity: highlightOpacity });
+  const headlineSvg = svgTextLines(headlineLines, { x: headlineX, startY: headlineY, fontSize: headlineFontSize, fontWeight: 'bold', fill: textFill, lineHeight: 1.25, fontFamily });
+
+  const bodySvg = bodyLines.length ? svgTextLines(bodyLines, { x: bodyX, startY: bodyY, fontSize: bodyFontSize, fill: subtextFill, lineHeight: 1.5, fontFamily }) : '';
+
+  const overlayDarken = parseFloat(data.overlayDarken) || 0;
+  const darkenRect = (!baseBuffer && overlayDarken > 0) ? `<rect width="${width}" height="${height}" fill="#000" opacity="${overlayDarken}"/>` : '';
 
   if (baseBuffer) {
+    const composites = [];
+    if (overlayDarken > 0) {
+      const darkenSvg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg"><rect width="${width}" height="${height}" fill="#000" opacity="${overlayDarken}"/></svg>`;
+      composites.push({ input: Buffer.from(darkenSvg) });
+    }
     const textSvg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
       ${microSvg}
       ${highlightSvg}
       ${headlineSvg}
       ${bodySvg}
     </svg>`;
-    const composites = [{ input: Buffer.from(textSvg) }];
+    composites.push({ input: Buffer.from(textSvg) });
     if (imageComposite) composites.push(imageComposite);
     return sharp(baseBuffer).composite(composites).png().toBuffer();
   }
 
   const svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
     <rect width="${width}" height="${height}" fill="${theme.background}"/>
+    ${darkenRect}
     ${microSvg}
     ${highlightSvg}
     ${headlineSvg}
@@ -868,7 +980,10 @@ async function generateMockupSlide(data, brand) {
   }
 
   if (data.includeOwl) {
-    buffer = await addAppIconOverlay(buffer, data.owlPosition, brand.id);
+    buffer = await addAppIconOverlay(buffer, data.owlPosition, brand.id, {
+      iconOffsetX: data.iconOffsetX,
+      iconOffsetY: data.iconOffsetY,
+    });
   }
 
   return buffer;
@@ -1010,7 +1125,7 @@ function buildPersonalizedPrompt(data, brand) {
   ].filter(Boolean).join('\n');
 }
 
-async function addAppIconOverlay(baseBuffer, configKey = 'bottom-right', brandId = 'generic') {
+async function addAppIconOverlay(baseBuffer, configKey = 'bottom-right', brandId = 'generic', { iconOffsetX = 0, iconOffsetY = 0 } = {}) {
   const cfg = ICON_OVERLAY_CONFIGS[configKey] || ICON_OVERLAY_CONFIGS['bottom-right'];
   const brand = getBrand(brandId);
   const base = sharp(baseBuffer);
@@ -1085,20 +1200,23 @@ async function addAppIconOverlay(baseBuffer, configKey = 'bottom-right', brandId
   };
 
   const pos = positionMap[cfg.position] || positionMap['bottom-right'];
-  const iconLeft = pos.left + Math.round((totalWidth - iconSize) / 2);
-  const textLeft = pos.left + Math.round((totalWidth - textMeta.width) / 2);
+  const ofsX = clampOffset(iconOffsetX, -500, 500);
+  const ofsY = clampOffset(iconOffsetY, -500, 500);
+  const iconLeft = pos.left + Math.round((totalWidth - iconSize) / 2) + ofsX;
+  const textLeft = pos.left + Math.round((totalWidth - textMeta.width) / 2) + ofsX;
+  const iconTop = pos.top + ofsY;
 
   const composed = await base
     .composite([
       {
         input: iconBuffer,
         left: Math.max(0, iconLeft),
-        top: Math.max(0, pos.top),
+        top: Math.max(0, iconTop),
       },
       {
         input: textBuffer,
         left: Math.max(0, textLeft),
-        top: Math.max(0, pos.top + iconSize + textGap),
+        top: Math.max(0, iconTop + iconSize + textGap),
       },
     ])
     .png()
