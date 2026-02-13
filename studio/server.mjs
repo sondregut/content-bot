@@ -58,6 +58,7 @@ try {
 }
 
 const ALLOWED_EMAILS = (process.env.ALLOWED_EMAILS || '').split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
+const ADMIN_EMAILS = ['sondre@athletemindset.app', 'sondregut@gmail.com'];
 
 const openai = apiEnabled ? new OpenAI({ apiKey: API_KEY }) : null;
 const anthropic = claudeEnabled ? new Anthropic({ apiKey: ANTHROPIC_KEY }) : null;
@@ -1125,16 +1126,19 @@ function parseContentIdeas(markdown, brandId, brandName) {
 
 // --- API Routes ---
 
-// List available brands (hardcoded + user's Firestore brands)
+// List available brands (hardcoded for admins only + user's Firestore brands)
 app.get('/api/brands', requireAuth, async (req, res) => {
   try {
-    const hardcoded = Object.values(BRANDS).map((b) => ({
-      id: b.id,
-      name: b.name,
-      website: b.website,
-      colors: b.colors,
-      isDefault: true,
-    }));
+    const isAdmin = ADMIN_EMAILS.includes(req.user?.email?.toLowerCase());
+    const hardcoded = isAdmin
+      ? Object.values(BRANDS).map((b) => ({
+          id: b.id,
+          name: b.name,
+          website: b.website,
+          colors: b.colors,
+          isDefault: true,
+        }))
+      : [];
     let userBrands = [];
     if (db && req.user?.uid) {
       const snap = await db.collection('carousel_brands')
@@ -1146,7 +1150,7 @@ app.get('/api/brands', requireAuth, async (req, res) => {
     res.json({ brands: [...userBrands, ...hardcoded] });
   } catch (err) {
     console.error('[Brands]', err);
-    res.json({ brands: Object.values(BRANDS).map((b) => ({ id: b.id, name: b.name, website: b.website, colors: b.colors, isDefault: true })) });
+    res.json({ brands: [] });
   }
 });
 

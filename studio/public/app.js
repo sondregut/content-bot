@@ -35,18 +35,22 @@ firebase.auth().onAuthStateChanged(async (user) => {
       brands = data.brands || [];
       if (brands.length > 0) {
         currentBrand = brands[0].id;
+      } else {
+        currentBrand = null;
       }
       renderBrandSelector();
-      // Auto-open brand creation for new users with no custom brands
-      const hasCustomBrands = brands.some((b) => !b.isDefault);
-      if (!hasCustomBrands && typeof openBrandModal === 'function') {
-        // Small delay so the app shell renders first
+      // Auto-open brand creation for new users with no brands
+      if (brands.length === 0 && typeof openBrandModal === 'function') {
         setTimeout(() => openBrandModal(), 300);
       }
     } catch (err) {
       console.error('Failed to load brands:', err);
     }
-    await loadContentIdeas();
+    if (currentBrand) {
+      await loadContentIdeas();
+    } else {
+      renderEmptySidebar();
+    }
     updateIconPreview();
   } else {
     overlay.style.display = 'flex';
@@ -256,9 +260,13 @@ settingsSaveBtn.addEventListener('click', async () => {
 
 // --- Brand Selector ---
 function renderBrandSelector() {
-  brandSelector.innerHTML = brands
-    .map((b) => `<option value="${b.id}" ${b.id === currentBrand ? 'selected' : ''}>${b.name}</option>`)
-    .join('');
+  if (brands.length === 0) {
+    brandSelector.innerHTML = '<option value="" disabled selected>No brands yet</option>';
+  } else {
+    brandSelector.innerHTML = brands
+      .map((b) => `<option value="${b.id}" ${b.id === currentBrand ? 'selected' : ''}>${b.name}</option>`)
+      .join('');
+  }
   // Show edit button only for user-created brands
   const selected = brands.find((b) => b.id === currentBrand);
   const editBtn = document.getElementById('edit-brand-btn');
@@ -443,7 +451,16 @@ brandDeleteBtn.addEventListener('click', async () => {
   }
 });
 
+function renderEmptySidebar() {
+  sidebar.innerHTML = '<div class="sidebar-loading" style="text-align:center;padding:32px 16px;opacity:0.6;">Create a brand to get started</div>';
+  ideaCount.textContent = '0 ideas';
+}
+
 async function loadContentIdeas() {
+  if (!currentBrand || brands.length === 0) {
+    renderEmptySidebar();
+    return;
+  }
   try {
     sidebar.innerHTML = '<div class="sidebar-loading">Loading ideas...</div>';
     const res = await authFetch(`/api/content-ideas?brand=${currentBrand}`);
