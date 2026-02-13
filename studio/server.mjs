@@ -1026,17 +1026,21 @@ function buildPhotoPrompt(data, brand) {
 }
 
 function buildPersonalizedPrompt(data, brand) {
-  const sport = data.sport || 'athletics';
-  const setting = data.setting || 'training facility';
-  const action = data.action || 'focused and determined';
-  const mood = data.mood || 'intense concentration';
+  const sport = data.sport;
+  const setting = data.setting || 'professional environment';
+  const action = data.action || 'looking confident and engaged';
+  const mood = data.mood || 'confident professionalism';
+
+  const subjectLine = sport
+    ? `Create a professional photo featuring the person from the reference image as a ${sport} athlete.`
+    : `Create a professional photo featuring the person from the reference image.`;
 
   return [
-    `Create a professional sports photo featuring the person from the reference image as a ${sport} athlete.`,
-    `Setting: ${setting}. The athlete is ${action}.`,
+    subjectLine,
+    `Setting: ${setting}. The person is ${action}.`,
     `Mood: ${mood}. Photorealistic, natural lighting, shallow depth of field.`,
     `The person's face, features, and identity must be clearly preserved from the reference photo.`,
-    `Shot on iPhone 15 Pro, 50mm equivalent. Natural skin texture, authentic gear (no brand logos).`,
+    `Shot on iPhone 15 Pro, 50mm equivalent. Natural skin texture, no brand logos.`,
     `Leave space in the bottom third for text overlay.`,
     brand.name !== 'My Brand' ? `Brand: ${brand.name}.` : '',
   ].filter(Boolean).join('\n');
@@ -2113,6 +2117,68 @@ Rules:
   } catch (error) {
     console.error('[Freeform]', error);
     res.status(500).json({ error: error.message });
+  }
+});
+
+// --- Personalized Scenario Generation ---
+
+const personalizeScenarioCache = new Map();
+
+app.post('/api/personalize-scenarios', requireAuth, async (req, res) => {
+  try {
+    const brandId = req.body?.brand;
+    if (!brandId) return res.status(400).json({ error: 'Missing brand' });
+
+    const brand = await getBrandAsync(brandId, req.user?.uid);
+
+    // Check cache
+    const cached = personalizeScenarioCache.get(brand.id);
+    if (cached && Date.now() - cached.ts < 30 * 60 * 1000) {
+      return res.json({ scenarios: cached.scenarios });
+    }
+
+    if (!anthropic) {
+      return res.status(500).json({ error: 'Claude API not configured' });
+    }
+
+    const brandContext = [
+      `Brand: ${brand.name}`,
+      brand.website ? `Website: ${brand.website}` : '',
+      brand.systemPrompt ? `About: ${brand.systemPrompt}` : '',
+      brand.defaultBackground ? `Visual style: ${brand.defaultBackground}` : '',
+    ].filter(Boolean).join('\n');
+
+    const response = await anthropic.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 1024,
+      messages: [{
+        role: 'user',
+        content: `Given this brand:\n${brandContext}\n\nGenerate exactly 8 photo scenarios for personalized images featuring a person (the user). Each scenario should be relevant to this brand's industry, niche, and identity.\n\nReturn a JSON array with exactly 8 objects, each having:\n- id: URL-safe slug (e.g. "morning-routine")\n- title: 2-3 word title\n- category: 1 word category\n- setting: scene/environment description (10-20 words)\n- action: what the person is doing (5-10 words)\n- mood: emotional tone (2-4 words)\n\nRespond with ONLY the JSON array, no other text.`
+      }],
+    });
+
+    const text = response.content[0]?.text || '';
+    let scenarios;
+    try {
+      const jsonMatch = text.match(/\[[\s\S]*\]/);
+      scenarios = JSON.parse(jsonMatch ? jsonMatch[0] : text);
+    } catch {
+      throw new Error('Failed to parse Claude scenario response');
+    }
+
+    if (!Array.isArray(scenarios) || scenarios.length === 0) {
+      throw new Error('Invalid scenario response');
+    }
+
+    // Cache for 30 minutes
+    personalizeScenarioCache.set(brand.id, { scenarios, ts: Date.now() });
+    setTimeout(() => personalizeScenarioCache.delete(brand.id), 30 * 60 * 1000);
+
+    console.log(`[Scenarios] Generated ${scenarios.length} scenarios for ${brand.name}`);
+    res.json({ scenarios });
+  } catch (error) {
+    console.error('[Scenarios]', error);
+    res.status(500).json({ error: error.message || 'Scenario generation failed' });
   }
 });
 

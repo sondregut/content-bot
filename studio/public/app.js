@@ -318,6 +318,7 @@ brandSelector.addEventListener('change', async () => {
   renderBrandSelector(); // update edit button visibility
   await loadContentIdeas();
   updateIconPreview();
+  loadPersonalizeScenarios(currentBrand);
 });
 
 // --- Brand Creation / Edit Modal ---
@@ -2236,16 +2237,19 @@ freeformGenerateBtn.addEventListener('click', async () => {
 // --- Face Personalization (Full-Page View) ---
 // =============================================
 
-const PERSONALIZED_SCENARIOS = [
-  { id: 'victory-podium', title: 'Victory Podium', category: 'Achievement', setting: 'gold medal podium, stadium crowd', action: 'standing triumphant, arms raised', mood: 'euphoric celebration' },
-  { id: 'training-rain', title: 'Training in Rain', category: 'Training', setting: 'outdoor track in heavy rain', action: 'sprinting through rain', mood: 'determination, grit' },
-  { id: 'pre-game-focus', title: 'Pre-Game Focus', category: 'Mental', setting: 'empty locker room', action: 'sitting with eyes closed, breathing', mood: 'calm intensity, deep focus' },
-  { id: 'gym-session', title: 'Gym Session', category: 'Training', setting: 'weight room, morning light', action: 'lifting weights', mood: 'disciplined effort' },
-  { id: 'stretching', title: 'Recovery Stretch', category: 'Recovery', setting: 'yoga mat in sunlit room', action: 'deep stretching', mood: 'peaceful recovery' },
-  { id: 'game-day', title: 'Game Day', category: 'Competition', setting: 'stadium tunnel entrance', action: 'walking onto the field', mood: 'confident, ready' },
-  { id: 'celebration', title: 'Team Celebration', category: 'Achievement', setting: 'field after winning', action: 'celebrating with fist pump', mood: 'pure joy' },
-  { id: 'morning-run', title: 'Morning Run', category: 'Lifestyle', setting: 'city street at sunrise', action: 'running at easy pace', mood: 'peaceful discipline' },
+const FALLBACK_SCENARIOS = [
+  { id: 'professional-portrait', title: 'Professional Portrait', category: 'Business', setting: 'modern office with natural window light', action: 'looking confident at camera', mood: 'professional confidence' },
+  { id: 'urban-walk', title: 'Urban Walk', category: 'Lifestyle', setting: 'city sidewalk, golden hour', action: 'walking casually', mood: 'relaxed confidence' },
+  { id: 'creative-workspace', title: 'Creative Workspace', category: 'Work', setting: 'bright studio or desk setup', action: 'working on a project', mood: 'focused creativity' },
+  { id: 'coffee-meeting', title: 'Coffee Meeting', category: 'Social', setting: 'upscale cafe, warm lighting', action: 'having a conversation', mood: 'friendly engagement' },
+  { id: 'outdoor-portrait', title: 'Outdoor Portrait', category: 'Lifestyle', setting: 'park or garden, soft light', action: 'standing relaxed', mood: 'calm authenticity' },
+  { id: 'stage-presence', title: 'Stage Presence', category: 'Leadership', setting: 'conference stage or podium', action: 'speaking to an audience', mood: 'commanding authority' },
+  { id: 'team-moment', title: 'Team Moment', category: 'Social', setting: 'collaborative workspace', action: 'laughing with colleagues', mood: 'genuine connection' },
+  { id: 'morning-routine', title: 'Morning Routine', category: 'Lifestyle', setting: 'sunlit room, early morning', action: 'starting the day', mood: 'peaceful energy' },
 ];
+
+let personalizedScenarios = [];
+const scenarioCache = new Map(); // client-side cache by brandId
 
 let faceImageFiles = []; // array of File objects (max 5)
 let selectedScenario = null;
@@ -2267,6 +2271,10 @@ function openPersonalizeView() {
   emptyState.style.display = 'none';
   editorArea.style.display = 'none';
   personalizeView.style.display = 'block';
+  // Load brand-specific scenarios if not already loaded
+  if (currentBrand && personalizedScenarios.length === 0 && !scenarioCache.has(currentBrand)) {
+    loadPersonalizeScenarios(currentBrand);
+  }
 }
 
 function closePersonalizeView() {
@@ -2284,7 +2292,8 @@ document.getElementById('personalize-back-btn').addEventListener('click', closeP
 
 // Render scenario grid
 function renderScenarioGrid() {
-  scenarioGrid.innerHTML = PERSONALIZED_SCENARIOS.map((s) =>
+  const scenarios = personalizedScenarios.length > 0 ? personalizedScenarios : FALLBACK_SCENARIOS;
+  scenarioGrid.innerHTML = scenarios.map((s) =>
     `<div class="scenario-card ${selectedScenario === s.id ? 'active' : ''}" data-id="${s.id}">
       <div class="scenario-title">${s.title}</div>
       <div class="scenario-category">${s.category}</div>
@@ -2298,6 +2307,45 @@ function renderScenarioGrid() {
     });
   });
 }
+
+async function loadPersonalizeScenarios(brandId) {
+  if (!brandId) {
+    personalizedScenarios = [];
+    renderScenarioGrid();
+    return;
+  }
+
+  // Check client-side cache
+  const cached = scenarioCache.get(brandId);
+  if (cached) {
+    personalizedScenarios = cached;
+    selectedScenario = null;
+    renderScenarioGrid();
+    return;
+  }
+
+  // Show loading state
+  selectedScenario = null;
+  scenarioGrid.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:var(--text-secondary);padding:24px;">Generating brand scenarios...</div>';
+
+  try {
+    const res = await authFetch('/api/personalize-scenarios', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ brand: brandId }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to load scenarios');
+
+    personalizedScenarios = data.scenarios;
+    scenarioCache.set(brandId, data.scenarios);
+  } catch (err) {
+    console.warn('[Scenarios] Falling back to defaults:', err.message);
+    personalizedScenarios = [];
+  }
+  renderScenarioGrid();
+}
+
 renderScenarioGrid();
 
 // Multi-photo upload
@@ -2368,7 +2416,8 @@ personalizeGenerateBtn.addEventListener('click', async () => {
   const model = document.getElementById('personalize-model').value;
   const sport = document.getElementById('personalize-sport').value.trim();
   const custom = document.getElementById('personalize-custom').value.trim();
-  const scenario = selectedScenario ? PERSONALIZED_SCENARIOS.find((s) => s.id === selectedScenario) : null;
+  const scenarios = personalizedScenarios.length > 0 ? personalizedScenarios : FALLBACK_SCENARIOS;
+  const scenario = selectedScenario ? scenarios.find((s) => s.id === selectedScenario) : null;
 
   if (!scenario && !custom) {
     personalizeStatus.textContent = 'Select a scenario or write a custom one.';
@@ -2395,7 +2444,7 @@ personalizeGenerateBtn.addEventListener('click', async () => {
     if (custom) {
       fd.append('prompt', custom);
     } else if (scenario) {
-      fd.append('sport', sport || 'athletics');
+      if (sport) fd.append('sport', sport);
       fd.append('setting', scenario.setting);
       fd.append('action', scenario.action);
       fd.append('mood', scenario.mood);
@@ -2421,12 +2470,13 @@ personalizeGenerateBtn.addEventListener('click', async () => {
       if (custom) {
         slides.push({ prompt: custom });
       } else if (scenario) {
-        slides.push({
-          sport: sport || 'athletics',
+        const slideData = {
           setting: scenario.setting,
           action: scenario.action,
           mood: scenario.mood,
-        });
+        };
+        if (sport) slideData.sport = sport;
+        slides.push(slideData);
       }
     }
 
