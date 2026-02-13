@@ -4,7 +4,7 @@
     {
       "src": "studio/server.mjs",
       "use": "@vercel/node",
-      "config": { "includeFiles": ["studio/public/**", "brands/**"] }
+      "config": { "includeFiles": ["studio/public/**", "studio/brands/**"] }
     }
   ],
   "routes": [
