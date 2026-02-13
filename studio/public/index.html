@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Carousel Studio</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="app-header">
+        <div class="header-left">
+          <select id="brand-selector" class="app-dropdown"></select>
+          <h1>Carousel Studio</h1>
+        </div>
+        <div class="header-right">
+          <div class="badge">gpt-image-1.5 + Claude refinement</div>
+          <button class="header-btn" id="settings-btn" title="API Settings">&#9881;</button>
+        </div>
+      </header>
+
+      <div class="app-body">
+        <aside class="sidebar" id="sidebar">
+          <div class="sidebar-header">
+            <h2>Content Ideas</h2>
+            <span class="idea-count" id="idea-count">0 ideas</span>
+          </div>
+          <div class="sidebar-list" id="ideas-list">
+            <div class="sidebar-loading">Loading ideas...</div>
+          </div>
+        </aside>
+
+        <main class="main-area">
+          <div class="empty-state" id="empty-state">
+            <div class="empty-icon">&#9998;</div>
+            <h2>Select a content idea or use freeform</h2>
+            <p>Choose an idea from the sidebar, or describe what you want below.</p>
+
+            <!-- Freeform Section -->
+            <div class="freeform-section" id="freeform-section">
+              <h3>Freeform AI Generation</h3>
+              <p class="freeform-hint">Describe your carousel and Claude will generate all slide content for you to review.</p>
+              <textarea class="freeform-input" id="freeform-input" rows="3" placeholder="e.g. Create a 6 slide carousel about the benefits of sprint training with our brand colors, highlighting speed improvement stats"></textarea>
+              <div class="freeform-controls">
+                <div class="form-group" style="width:100px">
+                  <label class="label">Slides</label>
+                  <input type="number" id="freeform-slide-count" min="1" max="20" value="7" />
+                </div>
+                <button type="button" class="btn primary" id="freeform-generate-btn">Generate Content with AI</button>
+              </div>
+              <div class="freeform-status" id="freeform-status"></div>
+            </div>
+          </div>
+
+          <div class="editor-area" id="editor-area" style="display:none">
+            <div class="idea-header" id="idea-header">
+              <span class="idea-badge" id="idea-badge">1.1</span>
+              <h2 id="idea-title">Idea Title</h2>
+            </div>
+
+            <div class="slide-tabs" id="slide-tabs"></div>
+
+            <!-- Slide Preview (HTML mockup) -->
+            <div class="slide-preview-panel" id="slide-preview-panel">
+              <div class="preview-mockup" id="preview-mockup">
+                <div class="mockup-micro" id="mockup-micro">BRAND</div>
+                <div class="mockup-headline" id="mockup-headline">Headline</div>
+                <div class="mockup-body" id="mockup-body">Body text</div>
+                <div class="mockup-photo-placeholder" id="mockup-photo-placeholder" style="display:none">
+                  <span>Photo will be generated here</span>
+                </div>
+                <div class="mockup-icon" id="mockup-icon">
+                  <img id="mockup-icon-img" src="" alt="" />
+                </div>
+              </div>
+            </div>
+
+            <form id="slide-form" class="slide-form">
+              <div class="form-row">
+                <div class="form-group">
+                  <label class="label">Slide Type</label>
+                  <select name="slideType" id="slideType">
+                    <option value="photo">Photo-led</option>
+                    <option value="text">Text-only</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label class="label">Label</label>
+                  <input name="slideLabel" id="slideLabel" type="text" placeholder="Hook, Define, CTA..." />
+                </div>
+              </div>
+
+              <div class="form-section" id="photo-fields" style="display:none">
+                <div class="form-row">
+                  <div class="form-group">
+                    <label class="label">Sport</label>
+                    <input name="sport" type="text" placeholder="track, soccer..." />
+                  </div>
+                  <div class="form-group">
+                    <label class="label">Setting</label>
+                    <input name="setting" type="text" placeholder="stadium, gym..." />
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label class="label">Action / Moment</label>
+                    <input name="action" type="text" placeholder="kneeling, eyes closed..." />
+                  </div>
+                  <div class="form-group">
+                    <label class="label">Mood</label>
+                    <input name="mood" type="text" placeholder="calm intensity..." />
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label class="label">Overlay Style</label>
+                    <select name="overlayStyle">
+                      <option value="dark gradient">Dark gradient</option>
+                      <option value="frosted glass card">Frosted glass</option>
+                      <option value="solid dark bar">Solid dark bar</option>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label class="label">Overlay Placement</label>
+                    <select name="overlayPlacement">
+                      <option value="bottom third">Bottom third</option>
+                      <option value="left side">Left side</option>
+                      <option value="lower-left">Lower-left</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div class="form-section" id="text-fields" style="display:none">
+                <div class="form-row">
+                  <div class="form-group">
+                    <label class="label">Background</label>
+                    <input name="backgroundStyle" type="text" value="dark premium navy/near-black with very subtle grain" />
+                  </div>
+                  <div class="form-group">
+                    <label class="label">Layout</label>
+                    <select name="layoutTemplate">
+                      <option value="Layout A - Classic Left Lane">Layout A</option>
+                      <option value="Layout B - High Hook">Layout B</option>
+                      <option value="Layout C - Center Weighted">Layout C</option>
+                      <option value="Layout D - Bottom Emphasis">Layout D</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div class="form-section">
+                <div class="form-row">
+                  <div class="form-group">
+                    <label class="label">Micro-label</label>
+                    <input name="microLabel" type="text" placeholder="BRAND NAME" />
+                  </div>
+                  <div class="form-group">
+                    <label class="label">Highlight Phrase</label>
+                    <input name="highlightPhrase" type="text" placeholder="phrase to highlight" />
+                  </div>
+                </div>
+                <div class="form-group full">
+                  <label class="label">Headline</label>
+                  <textarea name="headline" rows="2" placeholder="Main headline text"></textarea>
+                </div>
+                <div class="form-group full">
+                  <label class="label">Body</label>
+                  <textarea name="body" rows="2" placeholder="Supporting body text"></textarea>
+                </div>
+              </div>
+
+              <!-- Reference Image Upload -->
+              <div class="form-section ref-section">
+                <label class="label">Reference Image (optional)</label>
+                <div class="ref-upload-row">
+                  <input type="file" id="ref-image-input" accept="image/*" style="display:none" />
+                  <button type="button" class="btn small" id="ref-upload-btn">Upload Image</button>
+                  <span class="ref-filename" id="ref-filename">No image</span>
+                  <button type="button" class="btn small danger" id="ref-clear-btn" style="display:none">Clear</button>
+                </div>
+                <img id="ref-preview" class="ref-preview-img" style="display:none" />
+                <div id="ref-options" style="display:none">
+                  <div class="form-row" style="margin-top:8px">
+                    <div class="form-group">
+                      <label class="label">Usage</label>
+                      <select name="referenceUsage" id="referenceUsage">
+                        <option value="background image with dark overlay">Background + dark overlay</option>
+                        <option value="background inspiration">Background inspiration</option>
+                        <option value="style reference">Style reference</option>
+                        <option value="composite element">Composite element</option>
+                      </select>
+                    </div>
+                    <div class="form-group">
+                      <label class="label">Extra instructions</label>
+                      <input name="referenceInstructions" type="text" placeholder="e.g., darken and blur the background..." />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Icon & Watermark Settings -->
+              <div class="form-section icon-section">
+                <label class="label">App Icon Watermark</label>
+                <div class="icon-settings-row">
+                  <div class="icon-preview-box" id="icon-preview-box">
+                    <img id="icon-preview-img" src="" alt="App Icon" />
+                    <button type="button" class="btn small" id="icon-upload-btn">Change Icon</button>
+                    <input type="file" id="icon-file-input" accept="image/*" style="display:none" />
+                  </div>
+                  <div class="icon-controls">
+                    <label class="checkbox">
+                      <input type="checkbox" name="includeOwl" checked />
+                      Show watermark
+                    </label>
+                    <div class="corner-picker" id="corner-picker">
+                      <div class="corner-grid">
+                        <button type="button" class="corner-btn" data-pos="top-left" title="Top Left">TL</button>
+                        <button type="button" class="corner-btn" data-pos="top-right" title="Top Right">TR</button>
+                        <button type="button" class="corner-btn" data-pos="bottom-left" title="Bottom Left">BL</button>
+                        <button type="button" class="corner-btn active" data-pos="bottom-right" title="Bottom Right">BR</button>
+                      </div>
+                    </div>
+                    <input type="hidden" name="owlPosition" id="owlPosition" value="bottom-right" />
+                  </div>
+                </div>
+              </div>
+
+              <div class="form-section controls-row">
+                <div class="form-row">
+                  <div class="form-group">
+                    <label class="label">Quality</label>
+                    <select name="quality">
+                      <option value="high">High</option>
+                      <option value="medium">Medium</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div class="action-buttons">
+                <button type="submit" class="btn primary">Generate This Slide</button>
+                <button type="button" class="btn accent" id="generate-all-btn">Generate All Slides</button>
+              </div>
+            </form>
+
+            <div class="preview-section">
+              <div class="status" id="status">Ready.</div>
+              <div class="preview-frame" id="preview-frame">
+                <img id="preview-image" alt="Generated slide" />
+              </div>
+              <div class="download-buttons" id="download-buttons" style="display:none">
+                <button type="button" class="btn small primary" id="download-single-btn">Download This Slide</button>
+              </div>
+            </div>
+
+            <div class="gallery-section" id="gallery-section" style="display:none">
+              <div class="gallery-header">
+                <h3>Generated Slides</h3>
+                <button type="button" class="btn small accent" id="download-all-btn">Download All as ZIP</button>
+              </div>
+              <div class="gallery-strip" id="gallery-strip"></div>
+            </div>
+
+            <div class="progress-section" id="progress-section" style="display:none">
+              <div class="progress-label" id="progress-label">Generating...</div>
+              <div class="progress-bar">
+                <div class="progress-fill" id="progress-fill"></div>
+              </div>
+            </div>
+          </div>
+        </main>
+      </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div class="modal-overlay" id="settings-modal" style="display:none">
+      <div class="modal">
+        <div class="modal-header">
+          <h3>API Settings</h3>
+          <button class="modal-close" id="settings-close">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group full">
+            <label class="label">OpenAI API Key (image generation)</label>
+            <input type="password" id="settings-openai-key" placeholder="sk-..." />
+            <span class="field-hint">Used for gpt-image-1.5 slide generation</span>
+          </div>
+          <div class="form-group full">
+            <label class="label">Anthropic API Key (text/prompt refinement)</label>
+            <input type="password" id="settings-anthropic-key" placeholder="sk-ant-..." />
+            <span class="field-hint">Used for Claude prompt refinement and freeform content generation</span>
+          </div>
+          <div class="settings-status" id="settings-status"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn primary" id="settings-save-btn">Save Keys</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

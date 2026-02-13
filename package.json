@@ -1,0 +1,14 @@
+{
+  "name": "content-bot",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Multi-brand carousel content generator — AI-powered slide creation for TikTok/Instagram",
+  "scripts": {
+    "dev": "cd studio && node server.mjs",
+    "start": "cd studio && node server.mjs"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.74.0",
+    "openai": "^4.77.3"
+  }
+}
