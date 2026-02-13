@@ -1139,9 +1139,9 @@ app.get('/api/brands', requireAuth, async (req, res) => {
     if (db && req.user?.uid) {
       const snap = await db.collection('carousel_brands')
         .where('createdBy', '==', req.user.uid)
-        .orderBy('createdAt', 'desc')
         .get();
       userBrands = snap.docs.map((d) => ({ id: d.id, ...d.data(), isDefault: false }));
+      userBrands.sort((a, b) => (b.createdAt?._seconds || 0) - (a.createdAt?._seconds || 0));
     }
     res.json({ brands: [...userBrands, ...hardcoded] });
   } catch (err) {
