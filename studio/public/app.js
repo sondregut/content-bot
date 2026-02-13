@@ -459,6 +459,9 @@ async function analyzeWebsite(url) {
 
   setAnalysisStep('fetch', 'active');
 
+  const stepTimers = [];
+  let responseReceived = false;
+
   try {
     await new Promise(r => setTimeout(r, 300));
     if (signal.aborted) return;
@@ -469,22 +472,22 @@ async function analyzeWebsite(url) {
       signal,
     });
 
-    setTimeout(() => {
-      if (!signal.aborted) {
+    stepTimers.push(setTimeout(() => {
+      if (!signal.aborted && !responseReceived) {
         setAnalysisStep('fetch', 'done');
         setAnalysisStep('analyze', 'active');
       }
-    }, 1200);
+    }, 1200));
 
-    setTimeout(() => {
-      if (!signal.aborted) {
+    stepTimers.push(setTimeout(() => {
+      if (!signal.aborted && !responseReceived) {
         setAnalysisStep('analyze', 'done');
         setAnalysisStep('images', 'active');
       }
-    }, 2400);
+    }, 2400));
 
-    setTimeout(() => {
-      if (!signal.aborted) {
+    stepTimers.push(setTimeout(() => {
+      if (!signal.aborted && !responseReceived) {
         setAnalysisStep('images', 'done');
         setAnalysisStep('generate', 'active');
         // Show "Almost ready..." during the final generate step
@@ -492,9 +495,11 @@ async function analyzeWebsite(url) {
         analysisStatusText.textContent = 'Almost ready...';
         analysisStatusLine.className = 'analysis-status-line pending';
       }
-    }, 3600);
+    }, 3600));
 
     const res = await fetchPromise;
+    responseReceived = true;
+    stepTimers.forEach(t => clearTimeout(t));
     if (signal.aborted) return;
     const data = await res.json();
 
@@ -575,6 +580,8 @@ async function analyzeWebsite(url) {
     }
 
   } catch (err) {
+    responseReceived = true;
+    stepTimers.forEach(t => clearTimeout(t));
     if (err.name === 'AbortError') return;
     brandAnalysisSteps.querySelectorAll('.analysis-step.active').forEach(el => {
       el.className = 'analysis-step error';
@@ -1025,6 +1032,19 @@ slideTypeSelect.addEventListener('change', () => {
   updatePreviewMockup();
 });
 
+// Background + Text shortcut button
+const bgTextShortcutBtn = document.getElementById('bg-text-shortcut-btn');
+bgTextShortcutBtn.addEventListener('click', () => {
+  slideTypeSelect.value = 'mockup';
+  toggleTypeFields();
+  imageUsageSelect.value = 'background';
+  toggleMockupPhoneOptions();
+  if (!screenshotImageFilename) {
+    screenshotImageInput.click();
+  }
+  updatePreviewMockup();
+});
+
 mockupLayoutSelect.addEventListener('change', () => {
   toggleMockupPhoneOptions();
   updatePreviewMockup();
@@ -1036,6 +1056,8 @@ imageUsageSelect.addEventListener('change', () => {
   toggleMockupPhoneOptions();
   updatePreviewMockup();
 });
+
+document.getElementById('bgOverlayOpacity').addEventListener('change', updatePreviewMockup);
 
 // Live preview update on form input
 ['microLabel', 'headline', 'body', 'highlightPhrase', 'slideLabel'].forEach((name) => {
@@ -1070,8 +1092,19 @@ function updatePreviewMockup() {
   } else if (isMockup) {
     previewMockup.classList.remove('photo-type');
     const mockupTheme = mockupThemeSelect.value || 'dark';
-    previewMockup.style.background = mockupTheme === 'light' ? '#F5F3EF' : primaryColor;
-    mockupPhotoPlaceholder.style.display = 'none';
+    const isBackground = imageUsageSelect.value === 'background';
+    if (isBackground && screenshotImageFilename) {
+      const opacity = form.elements.bgOverlayOpacity?.value || '0.55';
+      previewMockup.style.background = `linear-gradient(rgba(0,0,0,${opacity}), rgba(0,0,0,${opacity})), url('/uploads/${screenshotImageFilename}') center/cover no-repeat`;
+      mockupPhotoPlaceholder.style.display = 'none';
+    } else if (isBackground && !screenshotImageFilename) {
+      previewMockup.style.background = `linear-gradient(135deg, #1e293b 0%, #334155 100%)`;
+      mockupPhotoPlaceholder.style.display = 'flex';
+      mockupPhotoPlaceholder.querySelector('span').textContent = 'Upload a background image';
+    } else {
+      previewMockup.style.background = mockupTheme === 'light' ? '#F5F3EF' : primaryColor;
+      mockupPhotoPlaceholder.style.display = 'none';
+    }
   } else {
     previewMockup.classList.remove('photo-type');
     previewMockup.style.background = primaryColor;
@@ -1577,6 +1610,7 @@ screenshotImageInput.addEventListener('change', async () => {
       screenshotPreview.style.display = 'block';
       screenshotClearBtn.style.display = 'inline-block';
       screenshotWarning.style.display = 'none';
+      updatePreviewMockup();
     } else {
       screenshotFilename.textContent = 'Upload failed';
     }
@@ -1592,6 +1626,7 @@ screenshotClearBtn.addEventListener('click', () => {
   screenshotClearBtn.style.display = 'none';
   screenshotImageInput.value = '';
   toggleMockupPhoneOptions();
+  updatePreviewMockup();
 });
 
 // --- Freeform AI Generation ---
@@ -1876,10 +1911,9 @@ personalizeGenerateBtn.addEventListener('click', async () => {
 
 function renderPersonalizeResults() {
   if (personalizeResults.length === 0) {
-    personalizeResultsSection.style.display = 'none';
+    personalizeResultsGrid.innerHTML = '<div class="personalize-empty-results">Generated images will appear here</div>';
     return;
   }
-  personalizeResultsSection.style.display = 'block';
   personalizeResultsGrid.innerHTML = personalizeResults.map((r) =>
     `<div class="personalize-result-thumb">
       <img src="${r.url}" alt="Personalized" />

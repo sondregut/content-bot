@@ -119,19 +119,16 @@
             </div>
 
             <div class="personalize-layout">
-              <!-- Left column: Photos -->
-              <div class="personalize-photos-col">
+              <!-- Left column: Photos + Scenario + Generate -->
+              <div class="personalize-controls-col">
                 <label class="label">Your Photos <span class="face-photo-count" id="face-photo-count">0 / 5</span></label>
                 <p class="freeform-hint" style="margin:0 0 8px">Multiple angles give better face consistency.</p>
                 <div class="face-photos-grid" id="face-photos-grid">
                   <input type="file" id="face-image-input" accept="image/*" multiple style="display:none" />
                   <button type="button" class="face-add-btn" id="face-add-btn" title="Add photo">+</button>
                 </div>
-              </div>
 
-              <!-- Right column: Scenario + Generate -->
-              <div class="personalize-controls-col">
-                <label class="label">Choose a Scenario</label>
+                <label class="label" style="margin-top:16px">Choose a Scenario</label>
                 <div class="scenario-grid" id="scenario-grid"></div>
 
                 <div class="form-row" style="margin-top:12px">
@@ -162,12 +159,12 @@
                 <button type="button" class="btn primary" id="personalize-generate-btn">Generate Personalized Image</button>
                 <div class="freeform-status" id="personalize-status"></div>
               </div>
-            </div>
 
-            <!-- Results Section -->
-            <div id="personalize-results" style="display:none">
-              <label class="label" style="margin-top:16px">Generated Results</label>
-              <div class="personalize-results-grid" id="personalize-results-grid"></div>
+              <!-- Right column: Results -->
+              <div class="personalize-results-col" id="personalize-results">
+                <label class="label">Generated Results</label>
+                <div class="personalize-results-grid" id="personalize-results-grid"></div>
+              </div>
             </div>
           </div>
 
@@ -209,6 +206,11 @@
                   <input name="slideLabel" id="slideLabel" type="text" placeholder="Hook, Define, CTA..." />
                 </div>
               </div>
+
+              <button type="button" class="bg-text-shortcut-btn" id="bg-text-shortcut-btn">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="15" x2="21" y2="15"/><polyline points="8 9 12 5 16 9"/></svg>
+                Background + Text (no AI)
+              </button>
 
               <div class="form-section" id="photo-fields" style="display:none">
                 <div class="form-row">

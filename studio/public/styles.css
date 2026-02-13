@@ -800,6 +800,36 @@ input:focus, select:focus, textarea:focus {
   border-color: var(--navy);
 }
 
+/* Background + Text Shortcut Button */
+
+.bg-text-shortcut-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 8px;
+  border: 1px dashed var(--cyan);
+  background: rgba(115, 166, 209, 0.08);
+  color: var(--navy);
+  font-family: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+  margin-bottom: 12px;
+}
+
+.bg-text-shortcut-btn:hover {
+  background: rgba(115, 166, 209, 0.18);
+  border-color: var(--navy);
+  border-style: solid;
+}
+
+.bg-text-shortcut-btn svg {
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
 /* Mockup Fields */
 
 #mockup-screenshot-section {
@@ -1149,13 +1179,9 @@ input:focus, select:focus, textarea:focus {
 
 .personalize-layout {
   display: grid;
-  grid-template-columns: 260px 1fr;
+  grid-template-columns: 1fr 340px;
   gap: 24px;
-  margin-bottom: 20px;
-}
-
-.personalize-photos-col {
-  min-width: 0;
+  min-height: 0;
 }
 
 .face-photo-count {
@@ -1167,7 +1193,7 @@ input:focus, select:focus, textarea:focus {
 
 .face-photos-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
   gap: 8px;
 }
 
@@ -1231,6 +1257,19 @@ input:focus, select:focus, textarea:focus {
 
 .personalize-controls-col {
   min-width: 0;
+  overflow-y: auto;
+}
+
+.personalize-results-col {
+  background: var(--panel);
+  border-radius: var(--radius);
+  padding: 16px;
+  border: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  align-self: start;
+  max-height: calc(100vh - 180px);
+  overflow-y: auto;
 }
 
 .scenario-grid {
@@ -1283,21 +1322,18 @@ input:focus, select:focus, textarea:focus {
 }
 
 .personalize-results-grid {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
   gap: 10px;
-  overflow-x: auto;
-  padding: 4px 0 8px;
-  margin-top: 6px;
+  margin-top: 8px;
 }
 
 .personalize-result-thumb {
   position: relative;
-  width: 120px;
-  height: 180px;
+  aspect-ratio: 2/3;
   border-radius: 10px;
   overflow: hidden;
   border: 2px solid var(--border);
-  flex-shrink: 0;
   cursor: pointer;
   transition: border-color 0.15s;
 }
@@ -1333,6 +1369,14 @@ input:focus, select:focus, textarea:focus {
 
 .personalize-result-thumb:hover .result-download {
   opacity: 1;
+}
+
+.personalize-empty-results {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 40px 16px;
+  color: #9ca3af;
+  font-size: 0.85rem;
 }
 
 .personalize-progress {
