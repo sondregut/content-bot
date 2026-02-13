@@ -613,18 +613,22 @@ async function renderPhoneRight(data, brand, theme) {
   const bodyLines = body ? wrapText(body, bodyFontSize, textMaxWidth) : [];
 
   let textY = safe.top + 60;
+  const userOffsetX = Math.max(-500, Math.min(500, parseInt(data.textOffsetX) || 0));
+  const userOffsetY = Math.max(-800, Math.min(800, parseInt(data.textOffsetY) || 0));
+  textY += userOffsetY;
+  const textX = safe.left + userOffsetX;
   // For background images, use white text always
   const textFill = imageUsage === 'background' ? '#FFFFFF' : theme.textColor;
   const subtextFill = imageUsage === 'background' ? 'rgba(255,255,255,0.75)' : theme.subtextColor;
 
-  const microSvg = svgTextLines([micro], { x: safe.left, startY: textY, fontSize: microFontSize, fontWeight: '700', fill: theme.microColor, letterSpacing: '4' });
+  const microSvg = svgTextLines([micro], { x: textX, startY: textY, fontSize: microFontSize, fontWeight: '700', fill: theme.microColor, letterSpacing: '4' });
   textY += microFontSize + headlineFontSize + 16;
 
-  const highlightSvg = svgHighlightBars(headlineLines, highlight, { x: safe.left, startY: textY, fontSize: headlineFontSize, lineHeight: 1.25, color: theme.highlightColor, opacity: highlightOpacity });
-  const headlineSvg = svgTextLines(headlineLines, { x: safe.left, startY: textY, fontSize: headlineFontSize, fontWeight: 'bold', fill: textFill, lineHeight: 1.25 });
+  const highlightSvg = svgHighlightBars(headlineLines, highlight, { x: textX, startY: textY, fontSize: headlineFontSize, lineHeight: 1.25, color: theme.highlightColor, opacity: highlightOpacity });
+  const headlineSvg = svgTextLines(headlineLines, { x: textX, startY: textY, fontSize: headlineFontSize, fontWeight: 'bold', fill: textFill, lineHeight: 1.25 });
   textY += headlineLines.length * headlineFontSize * 1.25 + 30;
 
-  const bodySvg = bodyLines.length ? svgTextLines(bodyLines, { x: safe.left, startY: textY, fontSize: bodyFontSize, fill: subtextFill, lineHeight: 1.5 }) : '';
+  const bodySvg = bodyLines.length ? svgTextLines(bodyLines, { x: textX, startY: textY, fontSize: bodyFontSize, fill: subtextFill, lineHeight: 1.5 }) : '';
 
   if (baseBuffer) {
     // Background mode: overlay text SVG on image
@@ -718,6 +722,8 @@ async function renderPhoneLeft(data, brand, theme) {
   const bodyLines = body ? wrapText(body, bodyFontSize, textMaxWidth) : [];
 
   let textY = Math.round(height * 0.30);
+  textY += Math.max(-800, Math.min(800, parseInt(data.textOffsetY) || 0));
+  textX += Math.max(-500, Math.min(500, parseInt(data.textOffsetX) || 0));
   const textFill = imageUsage === 'background' ? '#FFFFFF' : theme.textColor;
   const subtextFill = imageUsage === 'background' ? 'rgba(255,255,255,0.75)' : theme.subtextColor;
 
@@ -799,18 +805,22 @@ async function renderTextStatement(data, brand, theme) {
   const microBlockH = microFontSize + headlineFontSize + 16;
   const totalH = microBlockH + headlineBlockH + bodyBlockH;
   let textY = Math.round((height - totalH) / 2);
+  const userOffsetX = Math.max(-500, Math.min(500, parseInt(data.textOffsetX) || 0));
+  const userOffsetY = Math.max(-800, Math.min(800, parseInt(data.textOffsetY) || 0));
+  textY += userOffsetY;
+  const textX = safe.left + userOffsetX;
 
   const textFill = (imageUsage === 'background') ? '#FFFFFF' : theme.textColor;
   const subtextFill = (imageUsage === 'background') ? 'rgba(255,255,255,0.75)' : theme.subtextColor;
 
-  const microSvg = svgTextLines([micro], { x: safe.left, startY: textY, fontSize: microFontSize, fontWeight: '700', fill: theme.microColor, letterSpacing: '5' });
+  const microSvg = svgTextLines([micro], { x: textX, startY: textY, fontSize: microFontSize, fontWeight: '700', fill: theme.microColor, letterSpacing: '5' });
   textY += microBlockH;
 
-  const highlightSvg = svgHighlightBars(headlineLines, highlight, { x: safe.left, startY: textY, fontSize: headlineFontSize, lineHeight: 1.25, color: theme.highlightColor, opacity: highlightOpacity });
-  const headlineSvg = svgTextLines(headlineLines, { x: safe.left, startY: textY, fontSize: headlineFontSize, fontWeight: 'bold', fill: textFill, lineHeight: 1.25 });
+  const highlightSvg = svgHighlightBars(headlineLines, highlight, { x: textX, startY: textY, fontSize: headlineFontSize, lineHeight: 1.25, color: theme.highlightColor, opacity: highlightOpacity });
+  const headlineSvg = svgTextLines(headlineLines, { x: textX, startY: textY, fontSize: headlineFontSize, fontWeight: 'bold', fill: textFill, lineHeight: 1.25 });
   textY += headlineBlockH + 30;
 
-  const bodySvg = bodyLines.length ? svgTextLines(bodyLines, { x: safe.left, startY: textY, fontSize: bodyFontSize, fill: subtextFill, lineHeight: 1.5 }) : '';
+  const bodySvg = bodyLines.length ? svgTextLines(bodyLines, { x: textX, startY: textY, fontSize: bodyFontSize, fill: subtextFill, lineHeight: 1.5 }) : '';
 
   if (baseBuffer) {
     const textSvg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">

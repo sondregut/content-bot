@@ -212,6 +212,11 @@ const mockupHeadline = document.getElementById('mockup-headline');
 const mockupBody = document.getElementById('mockup-body');
 const mockupPhotoPlaceholder = document.getElementById('mockup-photo-placeholder');
 const mockupIconImg = document.getElementById('mockup-icon-img');
+const mockupTextGroup = document.getElementById('mockup-text-group');
+const mockupTextReset = document.getElementById('mockup-text-reset');
+
+// --- Text Offset (drag to move) ---
+let textOffset = { x: 0, y: 0 };
 
 // --- Init (handled by onAuthStateChanged above) ---
 
@@ -937,6 +942,10 @@ function loadSlideIntoForm(index) {
   if (form.elements.figureBorderRadius) form.elements.figureBorderRadius.value = slide.figureBorderRadius || '24';
   if (form.elements.bgOverlayOpacity) form.elements.bgOverlayOpacity.value = slide.bgOverlayOpacity || '0.55';
 
+  // Restore text offset
+  textOffset = { x: slide.textOffsetX || 0, y: slide.textOffsetY || 0 };
+  applyTextOffset();
+
   // Restore screenshot state
   if (slide.screenshotImage) {
     screenshotImageFilename = slide.screenshotImage;
@@ -1005,6 +1014,8 @@ function saveCurrentSlideEdits() {
     slide.figureBorderRadius = form.elements.figureBorderRadius?.value || '24';
     slide.bgOverlayOpacity = form.elements.bgOverlayOpacity?.value || '0.55';
     slide.screenshotImage = screenshotImageFilename || null;
+    slide.textOffsetX = textOffset.x;
+    slide.textOffsetY = textOffset.y;
   }
 }
 
@@ -1047,6 +1058,8 @@ bgTextShortcutBtn.addEventListener('click', () => {
 
 mockupLayoutSelect.addEventListener('change', () => {
   toggleMockupPhoneOptions();
+  // Reset text offset when layout changes (each layout has different default positions)
+  textOffset = { x: 0, y: 0 };
   updatePreviewMockup();
 });
 
@@ -1115,12 +1128,17 @@ function updatePreviewMockup() {
   mockupMicro.textContent = microLabel;
   mockupMicro.style.color = accentColor;
 
-  // Headline with highlight
+  // Headline with highlight (safe DOM construction)
   if (highlight && headline.includes(highlight)) {
     const parts = headline.split(highlight);
-    mockupHeadline.innerHTML = parts[0] +
-      `<span class="highlight" style="color:${accentColor}">${highlight}</span>` +
-      (parts[1] || '');
+    mockupHeadline.textContent = '';
+    mockupHeadline.appendChild(document.createTextNode(parts[0]));
+    const span = document.createElement('span');
+    span.className = 'highlight';
+    span.style.color = accentColor;
+    span.textContent = highlight;
+    mockupHeadline.appendChild(span);
+    if (parts[1]) mockupHeadline.appendChild(document.createTextNode(parts[1]));
   } else {
     mockupHeadline.textContent = headline;
   }
@@ -1134,7 +1152,137 @@ function updatePreviewMockup() {
   mockupIcon.style.bottom = pos.includes('bottom') ? '8px' : '';
   mockupIcon.style.left = pos.includes('left') ? '8px' : '';
   mockupIcon.style.right = pos.includes('right') ? '8px' : '';
+
+  // Re-apply text offset transform
+  applyTextOffset();
 }
+
+// --- Drag to Move Text ---
+function applyTextOffset() {
+  // Preview is 5x smaller than canvas (1080/216 ≈ 5)
+  const scale = 5;
+  mockupTextGroup.style.transform = `translate(${textOffset.x / scale}px, ${textOffset.y / scale}px)`;
+  mockupTextReset.style.display = (textOffset.x !== 0 || textOffset.y !== 0) ? 'block' : 'none';
+}
+
+function resetTextOffset() {
+  textOffset = { x: 0, y: 0 };
+  applyTextOffset();
+  saveCurrentSlideEdits();
+  saveSession();
+}
+
+mockupTextReset.addEventListener('click', resetTextOffset);
+
+// Drag handlers (mouse + touch)
+{
+  const scale = 5;
+  let dragging = false;
+  let startX, startY, startOffsetX, startOffsetY;
+
+  function isEditing() {
+    return mockupTextGroup.querySelector('[contenteditable="true"]') !== null;
+  }
+
+  function startDrag(clientX, clientY) {
+    if (isEditing()) return;
+    const isMockup = (slideTypeSelect.value || slideEdits[currentSlideIndex]?.type) === 'mockup';
+    if (!isMockup) return;
+    dragging = true;
+    startX = clientX;
+    startY = clientY;
+    startOffsetX = textOffset.x;
+    startOffsetY = textOffset.y;
+    mockupTextGroup.classList.add('dragging');
+  }
+
+  function moveDrag(clientX, clientY) {
+    if (!dragging) return;
+    const dx = (clientX - startX) * scale;
+    const dy = (clientY - startY) * scale;
+    textOffset.x = Math.max(-500, Math.min(500, startOffsetX + dx));
+    textOffset.y = Math.max(-800, Math.min(800, startOffsetY + dy));
+    applyTextOffset();
+  }
+
+  function endDrag() {
+    if (!dragging) return;
+    dragging = false;
+    mockupTextGroup.classList.remove('dragging');
+    saveCurrentSlideEdits();
+    saveSession();
+  }
+
+  // Mouse
+  mockupTextGroup.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    startDrag(e.clientX, e.clientY);
+  });
+  window.addEventListener('mousemove', (e) => moveDrag(e.clientX, e.clientY));
+  window.addEventListener('mouseup', endDrag);
+
+  // Touch
+  mockupTextGroup.addEventListener('touchstart', (e) => {
+    if (isEditing()) return;
+    const t = e.touches[0];
+    startDrag(t.clientX, t.clientY);
+  }, { passive: true });
+  window.addEventListener('touchmove', (e) => {
+    if (!dragging) return;
+    const t = e.touches[0];
+    moveDrag(t.clientX, t.clientY);
+  }, { passive: true });
+  window.addEventListener('touchend', endDrag);
+}
+
+// --- Inline Text Editing (double-click) ---
+function setupInlineEdit(el, formFieldName) {
+  el.addEventListener('dblclick', (e) => {
+    const isMockup = (slideTypeSelect.value || slideEdits[currentSlideIndex]?.type) === 'mockup';
+    if (!isMockup) return;
+    e.stopPropagation();
+    el.contentEditable = 'true';
+    el.classList.add('inline-editing');
+    el.focus();
+    // Select all text
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  });
+
+  function commitEdit() {
+    if (el.contentEditable !== 'true') return;
+    el.contentEditable = 'false';
+    el.classList.remove('inline-editing');
+    // Read plain text (strips highlight spans)
+    const text = el.textContent.trim();
+    const formField = form.elements[formFieldName];
+    if (formField) formField.value = text;
+    saveCurrentSlideEdits();
+    saveSession();
+    updatePreviewMockup(); // Re-applies highlights
+  }
+
+  el.addEventListener('blur', commitEdit);
+  el.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      el.blur();
+    } else if (e.key === 'Escape') {
+      // Cancel: restore from form field
+      el.contentEditable = 'false';
+      el.classList.remove('inline-editing');
+      updatePreviewMockup();
+    }
+  });
+}
+
+setupInlineEdit(mockupMicro, 'microLabel');
+setupInlineEdit(mockupHeadline, 'headline');
+setupInlineEdit(mockupBody, 'body');
 
 // --- Icon Upload & Corner Picker ---
 function updateIconPreview() {
@@ -1292,6 +1440,8 @@ function buildSlidePayload(slide, slideIndex) {
     payload.figureBorderRadius = slide.figureBorderRadius || form.elements.figureBorderRadius?.value || '24';
     payload.bgOverlayOpacity = slide.bgOverlayOpacity || form.elements.bgOverlayOpacity?.value || '0.55';
     payload.screenshotImage = slide.screenshotImage || screenshotImageFilename || null;
+    payload.textOffsetX = slide.textOffsetX || 0;
+    payload.textOffsetY = slide.textOffsetY || 0;
   } else {
     payload.backgroundStyle = form.elements.backgroundStyle?.value || 'dark premium navy/near-black with very subtle grain';
     payload.layoutTemplate = form.elements.layoutTemplate?.value || 'Layout A - Classic Left Lane';
