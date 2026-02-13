@@ -57,7 +57,11 @@
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19.59 6.69a4.83 4.83 0 01-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 01-2.88 2.5 2.89 2.89 0 01-2.89-2.89 2.89 2.89 0 012.89-2.89c.28 0 .54.04.79.1v-3.5a6.37 6.37 0 00-.79-.05A6.34 6.34 0 003.15 15.2a6.34 6.34 0 006.34 6.34 6.34 6.34 0 006.34-6.34V8.73a8.19 8.19 0 004.76 1.52v-3.4a4.85 4.85 0 01-1-.16z"/></svg>
             <span id="tiktok-btn-text">Connect TikTok</span>
           </button>
-          <div class="badge">gpt-image-1.5 + Claude refinement</div>
+          <select class="app-dropdown" id="image-model-select">
+            <option value="gpt-image-1.5">GPT Image 1.5</option>
+            <option value="gpt-image-1">GPT Image 1</option>
+            <option value="dall-e-3">DALL-E 3</option>
+          </select>
           <button class="header-btn" id="settings-btn" title="API Settings">&#9881;</button>
           <button class="sign-out-btn" id="sign-out-btn" title="Sign Out">Sign Out</button>
         </div>
@@ -93,6 +97,58 @@
                 <button type="button" class="btn primary" id="freeform-generate-btn">Generate Content with AI</button>
               </div>
               <div class="freeform-status" id="freeform-status"></div>
+            </div>
+
+            <!-- Face Personalization Section -->
+            <div class="freeform-section" id="personalize-section">
+              <h3>Personalize with Your Face</h3>
+              <p class="freeform-hint">Upload a clear face photo, pick a scenario, and generate images of yourself as an athlete.</p>
+
+              <div class="face-upload-area" id="face-upload-area">
+                <input type="file" id="face-image-input" accept="image/*" style="display:none" />
+                <button type="button" class="btn small" id="face-upload-btn">Upload Face Photo</button>
+                <span id="face-filename" class="ref-filename">No photo</span>
+                <button type="button" class="btn small danger" id="face-clear-btn" style="display:none">Clear</button>
+              </div>
+              <img id="face-preview" class="ref-preview-img" style="display:none" />
+
+              <div id="scenario-templates" style="display:none">
+                <label class="label">Choose a Scenario</label>
+                <div class="scenario-grid" id="scenario-grid"></div>
+
+                <div class="form-row" style="margin-top:12px">
+                  <div class="form-group">
+                    <label class="label">Sport</label>
+                    <input type="text" id="personalize-sport" placeholder="e.g. basketball, soccer, track..." />
+                  </div>
+                  <div class="form-group">
+                    <label class="label">Or write custom scenario</label>
+                    <input type="text" id="personalize-custom" placeholder="e.g. celebrating a championship win..." />
+                  </div>
+                </div>
+
+                <div class="form-row" style="margin-top:8px">
+                  <div class="form-group">
+                    <label class="label">Model</label>
+                    <select id="personalize-model">
+                      <option value="flux">Flux Kontext Pro (best faces)</option>
+                      <option value="gpt">GPT Image 1.5 (fallback)</option>
+                    </select>
+                  </div>
+                  <div class="form-group" style="max-width:100px">
+                    <label class="label">Count</label>
+                    <input type="number" id="personalize-count" min="1" max="10" value="1" />
+                  </div>
+                </div>
+
+                <button type="button" class="btn primary" id="personalize-generate-btn">Generate Personalized Image</button>
+                <div class="freeform-status" id="personalize-status"></div>
+
+                <div id="personalize-results" style="display:none">
+                  <label class="label" style="margin-top:12px">Results</label>
+                  <div class="personalize-results-grid" id="personalize-results-grid"></div>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -413,6 +469,13 @@
               </div>
             </form>
 
+            <div class="edit-section" id="edit-section" style="display:none">
+              <div class="edit-bar">
+                <input type="text" id="edit-instructions" placeholder="e.g. make background darker, change text color to gold..." />
+                <button type="button" class="btn primary small" id="apply-edit-btn">Apply Edit</button>
+              </div>
+            </div>
+
             <div class="preview-section">
               <div class="status" id="status">Ready.</div>
               <div class="preview-frame" id="preview-frame">
@@ -450,6 +513,20 @@
           </div>
         </main>
       </div>
+    </div>
+
+    <!-- Photo Vault -->
+    <button class="vault-toggle-btn" id="vault-toggle-btn">
+      <span>Vault</span>
+      <span class="vault-count" id="vault-count">0</span>
+    </button>
+    <div class="vault-backdrop" id="vault-backdrop"></div>
+    <div class="vault-panel" id="vault-panel">
+      <div class="vault-header">
+        <h3>Photo Vault</h3>
+        <button class="vault-close-btn" id="vault-close-btn">&times;</button>
+      </div>
+      <div class="vault-grid" id="vault-grid"></div>
     </div>
 
     <!-- Settings Modal -->
@@ -556,6 +633,11 @@
             <label class="label">Anthropic API Key (text/prompt refinement)</label>
             <input type="password" id="settings-anthropic-key" placeholder="sk-ant-..." />
             <span class="field-hint">Used for Claude prompt refinement and freeform content generation</span>
+          </div>
+          <div class="form-group full">
+            <label class="label">Fal.ai API Key (face personalization)</label>
+            <input type="password" id="settings-fal-key" placeholder="fal-..." />
+            <span class="field-hint">Used for Flux Kontext Pro face-consistent image generation. Get one at <a href="https://fal.ai/dashboard/keys" target="_blank" style="color:var(--cyan)">fal.ai/dashboard/keys</a></span>
           </div>
           <div class="settings-status" id="settings-status"></div>
         </div>

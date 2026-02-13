@@ -25,7 +25,7 @@ firebase.auth().onAuthStateChanged(async (user) => {
   const appShell = document.getElementById('app-shell');
 
   if (user) {
-    overlay.style.display = 'none';
+    overlay.classList.remove('visible');
     appShell.style.display = 'flex';
     // Init app
     loadApiKeysFromStorage();
@@ -48,13 +48,15 @@ firebase.auth().onAuthStateChanged(async (user) => {
     }
     if (currentBrand) {
       await loadContentIdeas();
+      restoreSession();
     } else {
       renderEmptySidebar();
     }
     updateIconPreview();
     checkTikTokStatus();
+    updateVaultCount();
   } else {
-    overlay.style.display = 'flex';
+    overlay.classList.add('visible');
     appShell.style.display = 'none';
   }
 });
@@ -109,6 +111,7 @@ document.getElementById('google-login-btn').addEventListener('click', async () =
 });
 
 document.getElementById('sign-out-btn').addEventListener('click', async () => {
+  clearSession();
   await firebase.auth().signOut();
 });
 
@@ -186,6 +189,12 @@ const iconFileInput = document.getElementById('icon-file-input');
 const cornerPicker = document.getElementById('corner-picker');
 const owlPositionInput = document.getElementById('owlPosition');
 
+// Image model selector
+const imageModelSelect = document.getElementById('image-model-select');
+function getSelectedImageModel() {
+  return imageModelSelect ? imageModelSelect.value : 'gpt-image-1.5';
+}
+
 // Loading spinner refs
 const loadingSpinner = document.getElementById('loading-spinner');
 const spinnerText = document.getElementById('spinner-text');
@@ -201,11 +210,15 @@ const mockupIconImg = document.getElementById('mockup-icon-img');
 // --- Init (handled by onAuthStateChanged above) ---
 
 // --- API Key Settings ---
+const settingsFalKey = document.getElementById('settings-fal-key');
+
 function loadApiKeysFromStorage() {
   const openai = localStorage.getItem('carousel_openai_key') || '';
   const anthropic = localStorage.getItem('carousel_anthropic_key') || '';
+  const fal = localStorage.getItem('carousel_fal_key') || '';
   settingsOpenaiKey.value = openai;
   settingsAnthropicKey.value = anthropic;
+  if (settingsFalKey) settingsFalKey.value = fal;
 }
 
 // Headers are now handled by authFetch — these are kept for localStorage key storage only
@@ -230,6 +243,7 @@ settingsModal.addEventListener('click', (e) => {
 settingsSaveBtn.addEventListener('click', async () => {
   const openaiKey = settingsOpenaiKey.value.trim();
   const anthropicKey = settingsAnthropicKey.value.trim();
+  const falKey = settingsFalKey ? settingsFalKey.value.trim() : '';
 
   if (openaiKey) localStorage.setItem('carousel_openai_key', openaiKey);
   else localStorage.removeItem('carousel_openai_key');
@@ -237,11 +251,14 @@ settingsSaveBtn.addEventListener('click', async () => {
   if (anthropicKey) localStorage.setItem('carousel_anthropic_key', anthropicKey);
   else localStorage.removeItem('carousel_anthropic_key');
 
+  if (falKey) localStorage.setItem('carousel_fal_key', falKey);
+  else localStorage.removeItem('carousel_fal_key');
+
   // Send to server to update .env
   try {
     const res = await authFetch('/api/settings', {
       method: 'POST',
-      body: JSON.stringify({ openaiKey, anthropicKey }),
+      body: JSON.stringify({ openaiKey, anthropicKey, falKey }),
     });
     const data = await res.json();
     if (data.ok) {
@@ -543,6 +560,7 @@ function selectIdea(ideaId) {
   updatePreviewMockup();
   updateGallery();
   progressSection.style.display = 'none';
+  saveSession();
 }
 
 // --- Load freeform-generated content as idea ---
@@ -572,6 +590,7 @@ function loadFreeformContent(data) {
   updatePreviewMockup();
   updateGallery();
   progressSection.style.display = 'none';
+  saveSession();
 }
 
 // --- Slide Tabs ---
@@ -655,6 +674,7 @@ function loadSlideIntoForm(index) {
     downloadButtons.style.display = 'none';
     statusEl.textContent = 'Ready.';
   }
+  updateEditSection();
 }
 
 function saveCurrentSlideEdits() {
@@ -885,6 +905,7 @@ function buildSlidePayload(slide) {
     owlPosition: owlPositionInput.value,
     quality: form.elements.quality.value,
     brand: currentBrand,
+    imageModel: getSelectedImageModel(),
   };
 
   if (payload.slideType === 'photo') {
@@ -953,9 +974,66 @@ form.addEventListener('submit', async (e) => {
 
     renderSlideTabs();
     updateGallery();
+    updateEditSection();
+    saveSession();
+    addToVault(data.url, data.filename);
   } catch (err) {
     statusEl.textContent = `Error: ${err.message}`;
   } finally {
+    loadingSpinner.classList.remove('active');
+  }
+});
+
+// --- Edit Slide ---
+const editSection = document.getElementById('edit-section');
+const editInstructions = document.getElementById('edit-instructions');
+const applyEditBtn = document.getElementById('apply-edit-btn');
+
+function updateEditSection() {
+  if (editSection) {
+    editSection.style.display = generatedImages[currentSlideIndex] ? 'block' : 'none';
+  }
+}
+
+applyEditBtn.addEventListener('click', async () => {
+  const instructions = editInstructions.value.trim();
+  if (!instructions) return;
+  const gen = generatedImages[currentSlideIndex];
+  if (!gen) return;
+
+  applyEditBtn.disabled = true;
+  statusEl.textContent = 'Editing slide...';
+  loadingSpinner.classList.add('active');
+  spinnerText.textContent = 'Applying edit...';
+
+  try {
+    const res = await authFetch('/api/edit-slide', {
+      method: 'POST',
+      body: JSON.stringify({
+        imageUrl: gen.url,
+        instructions,
+        quality: form.elements.quality.value,
+        imageModel: getSelectedImageModel(),
+        brand: currentBrand,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Edit failed');
+
+    generatedImages[currentSlideIndex] = { url: data.url, filename: data.filename };
+    previewImg.src = data.url;
+    previewImg.style.display = 'block';
+    statusEl.textContent = `Slide ${currentSlideIndex + 1} edited.`;
+    editInstructions.value = '';
+
+    renderSlideTabs();
+    updateGallery();
+    saveSession();
+    addToVault(data.url, data.filename);
+  } catch (err) {
+    statusEl.textContent = `Edit error: ${err.message}`;
+  } finally {
+    applyEditBtn.disabled = false;
     loadingSpinner.classList.remove('active');
   }
 });
@@ -1016,6 +1094,7 @@ generateAllBtn.addEventListener('click', async () => {
     owlPosition: owlPositionInput.value,
     quality: form.elements.quality.value,
     brand: currentBrand,
+    imageModel: getSelectedImageModel(),
   };
 
   progressSection.style.display = 'block';
@@ -1060,11 +1139,13 @@ async function pollBatchStatus() {
     for (const slide of job.slides) {
       if (slide.ok && slide.url) {
         const idx = slide.slideNumber - 1;
+        if (!generatedImages[idx]) addToVault(slide.url, slide.filename);
         generatedImages[idx] = { url: slide.url, filename: slide.filename };
       }
     }
     renderSlideTabs();
     updateGallery();
+    saveSession();
 
     if (generatedImages[currentSlideIndex]) {
       previewImg.src = generatedImages[currentSlideIndex].url;
@@ -1218,6 +1299,235 @@ freeformGenerateBtn.addEventListener('click', async () => {
     freeformGenerateBtn.disabled = false;
   }
 });
+
+// --- Face Personalization ---
+// =============================================
+
+const PERSONALIZED_SCENARIOS = [
+  { id: 'victory-podium', title: 'Victory Podium', category: 'Achievement', setting: 'gold medal podium, stadium crowd', action: 'standing triumphant, arms raised', mood: 'euphoric celebration' },
+  { id: 'training-rain', title: 'Training in Rain', category: 'Training', setting: 'outdoor track in heavy rain', action: 'sprinting through rain', mood: 'determination, grit' },
+  { id: 'pre-game-focus', title: 'Pre-Game Focus', category: 'Mental', setting: 'empty locker room', action: 'sitting with eyes closed, breathing', mood: 'calm intensity, deep focus' },
+  { id: 'gym-session', title: 'Gym Session', category: 'Training', setting: 'weight room, morning light', action: 'lifting weights', mood: 'disciplined effort' },
+  { id: 'stretching', title: 'Recovery Stretch', category: 'Recovery', setting: 'yoga mat in sunlit room', action: 'deep stretching', mood: 'peaceful recovery' },
+  { id: 'game-day', title: 'Game Day', category: 'Competition', setting: 'stadium tunnel entrance', action: 'walking onto the field', mood: 'confident, ready' },
+  { id: 'celebration', title: 'Team Celebration', category: 'Achievement', setting: 'field after winning', action: 'celebrating with fist pump', mood: 'pure joy' },
+  { id: 'morning-run', title: 'Morning Run', category: 'Lifestyle', setting: 'city street at sunrise', action: 'running at easy pace', mood: 'peaceful discipline' },
+];
+
+let faceImageFile = null;
+let selectedScenario = null;
+let personalizeResults = [];
+
+const faceImageInput = document.getElementById('face-image-input');
+const faceUploadBtn = document.getElementById('face-upload-btn');
+const faceFilename = document.getElementById('face-filename');
+const faceClearBtn = document.getElementById('face-clear-btn');
+const facePreview = document.getElementById('face-preview');
+const scenarioTemplates = document.getElementById('scenario-templates');
+const scenarioGrid = document.getElementById('scenario-grid');
+const personalizeGenerateBtn = document.getElementById('personalize-generate-btn');
+const personalizeStatus = document.getElementById('personalize-status');
+const personalizeResultsSection = document.getElementById('personalize-results');
+const personalizeResultsGrid = document.getElementById('personalize-results-grid');
+
+// Render scenario grid
+function renderScenarioGrid() {
+  scenarioGrid.innerHTML = PERSONALIZED_SCENARIOS.map((s) =>
+    `<div class="scenario-card ${selectedScenario === s.id ? 'active' : ''}" data-id="${s.id}">
+      <div class="scenario-title">${s.title}</div>
+      <div class="scenario-category">${s.category}</div>
+    </div>`
+  ).join('');
+
+  scenarioGrid.querySelectorAll('.scenario-card').forEach((card) => {
+    card.addEventListener('click', () => {
+      selectedScenario = selectedScenario === card.dataset.id ? null : card.dataset.id;
+      renderScenarioGrid();
+    });
+  });
+}
+renderScenarioGrid();
+
+// Face upload
+faceUploadBtn.addEventListener('click', () => faceImageInput.click());
+
+faceImageInput.addEventListener('change', () => {
+  const file = faceImageInput.files[0];
+  if (!file) return;
+
+  faceImageFile = file;
+  faceFilename.textContent = file.name;
+  faceClearBtn.style.display = 'inline-block';
+  scenarioTemplates.style.display = 'block';
+
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    facePreview.src = e.target.result;
+    facePreview.style.display = 'block';
+  };
+  reader.readAsDataURL(file);
+});
+
+faceClearBtn.addEventListener('click', () => {
+  faceImageFile = null;
+  faceFilename.textContent = 'No photo';
+  facePreview.style.display = 'none';
+  faceClearBtn.style.display = 'none';
+  scenarioTemplates.style.display = 'none';
+  faceImageInput.value = '';
+  personalizeResultsSection.style.display = 'none';
+  personalizeResults = [];
+});
+
+// Generate personalized image(s)
+personalizeGenerateBtn.addEventListener('click', async () => {
+  if (!faceImageFile) {
+    personalizeStatus.textContent = 'Upload a face photo first.';
+    return;
+  }
+  if (!currentBrand) {
+    personalizeStatus.textContent = 'Create a brand first.';
+    return;
+  }
+
+  const count = parseInt(document.getElementById('personalize-count').value) || 1;
+  const model = document.getElementById('personalize-model').value;
+  const sport = document.getElementById('personalize-sport').value.trim();
+  const custom = document.getElementById('personalize-custom').value.trim();
+  const scenario = selectedScenario ? PERSONALIZED_SCENARIOS.find((s) => s.id === selectedScenario) : null;
+
+  if (!scenario && !custom) {
+    personalizeStatus.textContent = 'Select a scenario or write a custom one.';
+    return;
+  }
+
+  personalizeGenerateBtn.disabled = true;
+
+  if (count === 1) {
+    // Single image
+    personalizeStatus.textContent = 'Generating personalized image...';
+
+    const fd = new FormData();
+    fd.append('faceImage', faceImageFile);
+    fd.append('brand', currentBrand);
+    fd.append('model', model);
+
+    if (custom) {
+      fd.append('prompt', custom);
+    } else if (scenario) {
+      fd.append('sport', sport || 'athletics');
+      fd.append('setting', scenario.setting);
+      fd.append('action', scenario.action);
+      fd.append('mood', scenario.mood);
+    }
+
+    try {
+      const res = await authFetch('/api/generate-personalized', { method: 'POST', body: fd });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Generation failed');
+
+      personalizeResults = [data];
+      renderPersonalizeResults();
+      personalizeStatus.textContent = `Done! Generated with ${data.model === 'flux' ? 'Flux Kontext Pro' : 'GPT Image 1.5'}.`;
+    } catch (err) {
+      personalizeStatus.textContent = `Error: ${err.message}`;
+    } finally {
+      personalizeGenerateBtn.disabled = false;
+    }
+  } else {
+    // Batch — build slides array for multiple scenarios
+    const slides = [];
+    for (let i = 0; i < count; i++) {
+      if (custom) {
+        slides.push({ prompt: custom });
+      } else if (scenario) {
+        slides.push({
+          sport: sport || 'athletics',
+          setting: scenario.setting,
+          action: scenario.action,
+          mood: scenario.mood,
+        });
+      }
+    }
+
+    personalizeStatus.textContent = `Starting batch generation (${count} images)...`;
+
+    const fd = new FormData();
+    fd.append('faceImage', faceImageFile);
+    fd.append('brand', currentBrand);
+    fd.append('model', model);
+    fd.append('slides', JSON.stringify(slides));
+
+    try {
+      const res = await authFetch('/api/generate-personalized-carousel', { method: 'POST', body: fd });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Batch start failed');
+
+      const pJobId = data.jobId;
+      personalizeResults = [];
+      renderPersonalizeResults();
+
+      // Poll for results
+      const pollInterval = setInterval(async () => {
+        try {
+          const sRes = await authFetch(`/api/carousel-status/${pJobId}`);
+          const job = await sRes.json();
+
+          personalizeResults = job.slides.filter((s) => s.ok).map((s) => ({ url: s.url, filename: s.filename }));
+          renderPersonalizeResults();
+          personalizeStatus.textContent = `Generating image ${job.current} of ${job.total}... (${job.completed} done)`;
+
+          if (job.status === 'done') {
+            clearInterval(pollInterval);
+            const succeeded = job.slides.filter((s) => s.ok).length;
+            personalizeStatus.textContent = `Done! ${succeeded}/${job.total} images generated.`;
+            personalizeGenerateBtn.disabled = false;
+          }
+        } catch {
+          // polling error, keep trying
+        }
+      }, 2000);
+    } catch (err) {
+      personalizeStatus.textContent = `Error: ${err.message}`;
+      personalizeGenerateBtn.disabled = false;
+    }
+  }
+});
+
+function renderPersonalizeResults() {
+  if (personalizeResults.length === 0) {
+    personalizeResultsSection.style.display = 'none';
+    return;
+  }
+  personalizeResultsSection.style.display = 'block';
+  personalizeResultsGrid.innerHTML = personalizeResults.map((r) =>
+    `<div class="personalize-result-thumb">
+      <img src="${r.url}" alt="Personalized" />
+      <button class="result-download" data-url="${r.url}" data-filename="${r.filename}" title="Download">&#8681;</button>
+    </div>`
+  ).join('');
+
+  personalizeResultsGrid.querySelectorAll('.result-download').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const a = document.createElement('a');
+      a.href = btn.dataset.url;
+      a.download = btn.dataset.filename || 'personalized.png';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    });
+  });
+
+  // Click on thumbnail to open full size
+  personalizeResultsGrid.querySelectorAll('.personalize-result-thumb').forEach((thumb) => {
+    thumb.addEventListener('click', (e) => {
+      if (e.target.classList.contains('result-download')) return;
+      const img = thumb.querySelector('img');
+      if (img) window.open(img.src, '_blank');
+    });
+  });
+}
 
 // --- TikTok Integration ---
 // =============================================
@@ -1488,3 +1798,141 @@ updateGallery = function () {
   _originalUpdateGallery();
   updateTikTokUI();
 };
+
+// --- Session Persistence (localStorage) ---
+// =============================================
+
+const SESSION_KEY = 'carousel-studio-session';
+
+function saveSession() {
+  try {
+    const session = {
+      generatedImages,
+      slideEdits,
+      selectedIdeaId: selectedIdea?.id || null,
+      selectedIdeaTitle: selectedIdea?.title || null,
+      currentBrand,
+      currentSlideIndex,
+    };
+    localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+  } catch { /* quota exceeded — ignore */ }
+}
+
+function restoreSession() {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    if (!raw) return;
+    const session = JSON.parse(raw);
+    if (session.currentBrand !== currentBrand) return; // brand changed
+    if (session.generatedImages && Object.keys(session.generatedImages).length > 0) {
+      generatedImages = session.generatedImages;
+    }
+    if (session.slideEdits && session.slideEdits.length > 0) {
+      slideEdits = session.slideEdits;
+      // Reconstruct selectedIdea from saved data
+      if (session.selectedIdeaId) {
+        selectedIdea = {
+          id: session.selectedIdeaId,
+          title: session.selectedIdeaTitle || 'Restored Session',
+          slides: session.slideEdits,
+        };
+        emptyState.style.display = 'none';
+        editorArea.style.display = 'block';
+        ideaBadge.textContent = session.selectedIdeaId;
+        ideaTitle.textContent = session.selectedIdeaTitle || 'Restored Session';
+        if (session.currentSlideIndex != null) currentSlideIndex = session.currentSlideIndex;
+        renderSlideTabs();
+        loadSlideIntoForm(currentSlideIndex);
+        updatePreviewMockup();
+        updateGallery();
+      }
+    }
+  } catch { /* parse error — ignore */ }
+}
+
+function clearSession() {
+  localStorage.removeItem(SESSION_KEY);
+}
+
+// --- Photo Vault (localStorage) ---
+// =============================================
+
+const VAULT_KEY = 'carousel-studio-vault';
+
+function loadVault() {
+  try { return JSON.parse(localStorage.getItem(VAULT_KEY) || '[]'); }
+  catch { return []; }
+}
+
+function saveVault(vault) {
+  try { localStorage.setItem(VAULT_KEY, JSON.stringify(vault)); }
+  catch { /* quota exceeded */ }
+}
+
+function addToVault(url, filename) {
+  if (!url) return;
+  const vault = loadVault();
+  if (vault.some(v => v.url === url)) return;
+  vault.unshift({ url, filename, addedAt: Date.now() });
+  saveVault(vault);
+  updateVaultCount();
+}
+
+function updateVaultCount() {
+  const el = document.getElementById('vault-count');
+  if (el) el.textContent = loadVault().length;
+}
+
+function renderVault() {
+  const grid = document.getElementById('vault-grid');
+  if (!grid) return;
+  const vault = loadVault();
+  if (vault.length === 0) {
+    grid.innerHTML = '<div style="padding:24px;text-align:center;color:#9ca3af;font-size:0.9rem;">No images yet. Generate slides to fill your vault.</div>';
+    return;
+  }
+  grid.innerHTML = vault.map((v, i) =>
+    `<div class="vault-item">
+      <img src="${v.url}" alt="${v.filename || 'image'}" loading="lazy" />
+      <div class="vault-item-actions">
+        <a href="${v.url}" download="${v.filename || 'image.png'}" class="vault-dl-btn" title="Download">&#8681;</a>
+        <button class="vault-rm-btn" data-index="${i}" title="Remove">&times;</button>
+      </div>
+    </div>`
+  ).join('');
+
+  grid.querySelectorAll('.vault-rm-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const idx = parseInt(btn.dataset.index);
+      const vault = loadVault();
+      vault.splice(idx, 1);
+      saveVault(vault);
+      updateVaultCount();
+      renderVault();
+    });
+  });
+
+  grid.querySelectorAll('.vault-item img').forEach(img => {
+    img.addEventListener('click', () => window.open(img.src, '_blank'));
+  });
+}
+
+function openVault() {
+  document.getElementById('vault-panel').classList.add('open');
+  document.getElementById('vault-backdrop').classList.add('open');
+  renderVault();
+}
+
+function closeVault() {
+  document.getElementById('vault-panel').classList.remove('open');
+  document.getElementById('vault-backdrop').classList.remove('open');
+}
+
+// Vault event listeners
+document.getElementById('vault-toggle-btn')?.addEventListener('click', openVault);
+document.getElementById('vault-close-btn')?.addEventListener('click', closeVault);
+document.getElementById('vault-backdrop')?.addEventListener('click', closeVault);
+
+// Initial vault count
+updateVaultCount();

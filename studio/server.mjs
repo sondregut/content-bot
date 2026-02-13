@@ -19,7 +19,15 @@ dotenv.config({ path: path.join(__dirname, '.env') });
 
 const API_KEY = process.env.OPENAI_API_KEY;
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
-const IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1.5';
+const DEFAULT_IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1.5';
+const ALLOWED_IMAGE_MODELS = {
+  'gpt-image-1.5': 'GPT Image 1.5',
+  'gpt-image-1': 'GPT Image 1',
+  'dall-e-3': 'DALL-E 3',
+};
+function resolveImageModel(requested) {
+  return (requested && ALLOWED_IMAGE_MODELS[requested]) ? requested : DEFAULT_IMAGE_MODEL;
+}
 const apiEnabled = Boolean(API_KEY);
 const claudeEnabled = Boolean(ANTHROPIC_KEY);
 
@@ -31,11 +39,16 @@ if (!claudeEnabled) {
 }
 
 // --- Fal.ai (Flux Kontext Pro for face-consistent generation) ---
-const FAL_API_KEY = process.env.FAL_API_KEY;
-const falEnabled = Boolean(FAL_API_KEY);
-if (!falEnabled) console.warn('Missing FAL_API_KEY. Face personalization will use GPT fallback.');
+if (!process.env.FAL_API_KEY) console.warn('Missing FAL_API_KEY. Face personalization will use GPT fallback.');
+
+function isFalEnabled() {
+  return Boolean(process.env.FAL_API_KEY);
+}
 
 async function generateWithFlux(faceImagePath, prompt, { aspectRatio = '9:16' } = {}) {
+  const falKey = process.env.FAL_API_KEY;
+  if (!falKey) throw new Error('FAL_API_KEY not configured. Add it in Settings.');
+
   const imageBuffer = await fs.readFile(faceImagePath);
   const base64Image = imageBuffer.toString('base64');
   const mimeType = faceImagePath.endsWith('.png') ? 'image/png' : 'image/jpeg';
@@ -44,7 +57,7 @@ async function generateWithFlux(faceImagePath, prompt, { aspectRatio = '9:16' } 
   const response = await fetch('https://queue.fal.run/fal-ai/flux-pro/kontext', {
     method: 'POST',
     headers: {
-      'Authorization': `Key ${FAL_API_KEY}`,
+      'Authorization': `Key ${falKey}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
@@ -1440,7 +1453,7 @@ app.post('/api/generate', requireAuth, async (req, res) => {
 
     // Build generation params
     const genParams = {
-      model: IMAGE_MODEL,
+      model: resolveImageModel(data.imageModel),
       prompt,
       size: '1024x1536',
       quality: data.quality || 'high',
@@ -1491,11 +1504,48 @@ app.post('/api/generate', requireAuth, async (req, res) => {
   }
 });
 
+// --- Edit existing slide image ---
+app.post('/api/edit-slide', requireAuth, async (req, res) => {
+  try {
+    const { imageUrl, instructions, quality, imageModel, brand: brandId } = req.body;
+    if (!imageUrl || !instructions) return res.status(400).json({ error: 'Missing imageUrl or instructions' });
+    if (!apiEnabled) return res.status(503).json({ error: 'OpenAI API not configured' });
+
+    const brand = await getBrandAsync(brandId, req.user?.uid);
+
+    // Fetch existing image
+    const imgRes = await fetch(imageUrl);
+    if (!imgRes.ok) throw new Error('Failed to fetch source image');
+    const imgBuffer = Buffer.from(await imgRes.arrayBuffer());
+
+    const response = await openai.images.edit({
+      model: resolveImageModel(imageModel),
+      image: new File([imgBuffer], 'slide.png', { type: 'image/png' }),
+      prompt: `Edit this carousel slide for ${brand.name}. Change: ${instructions}. Keep everything else the same.`,
+      size: '1024x1536',
+      quality: quality || 'high',
+    });
+
+    const b64 = response.data?.[0]?.b64_json;
+    if (!b64) throw new Error('No image returned from edit API');
+
+    let buffer = Buffer.from(b64, 'base64');
+    const slug = crypto.randomUUID().slice(0, 8);
+    const filename = `edit_${brandId}_${Date.now()}_${slug}.png`;
+    const url = await uploadToStorage(buffer, filename);
+
+    res.json({ ok: true, filename, url });
+  } catch (error) {
+    console.error('[Edit Slide]', error);
+    res.status(500).json({ error: error.message || 'Edit failed' });
+  }
+});
+
 // Batch carousel generation
 const carouselJobs = new Map();
 
 app.post('/api/generate-carousel', requireAuth, async (req, res) => {
-  const { slides, includeOwl, owlPosition, quality, brand: brandId } = req.body || {};
+  const { slides, includeOwl, owlPosition, quality, brand: brandId, imageModel } = req.body || {};
   if (!slides || !Array.isArray(slides) || slides.length === 0) {
     return res.status(400).json({ error: 'Missing slides array' });
   }
@@ -1547,7 +1597,7 @@ app.post('/api/generate-carousel', requireAuth, async (req, res) => {
         console.log(`[Carousel ${jobId}] ${brand.name} | Slide ${i + 1}/${slides.length}`);
 
         const response = await openai.images.generate({
-          model: IMAGE_MODEL,
+          model: resolveImageModel(imageModel),
           prompt,
           size: '1024x1536',
           quality: slideData.quality || 'high',
@@ -1695,6 +1745,136 @@ Rules:
   }
 });
 
+// --- Personalized Image Generation (Face + Scenario) ---
+
+app.post('/api/generate-personalized', requireAuth, upload.single('faceImage'), async (req, res) => {
+  try {
+    const data = req.body || {};
+    const brandId = data.brand;
+    if (!brandId) return res.status(400).json({ error: 'Missing brand' });
+    if (!req.file) return res.status(400).json({ error: 'Missing face image' });
+
+    const brand = await getBrandAsync(brandId, req.user?.uid);
+    const faceImagePath = req.file.path;
+    const model = data.model || 'flux';
+
+    const scenarioPrompt = data.prompt || buildPersonalizedPrompt(data, brand);
+    const refined = await refinePromptWithClaude(scenarioPrompt, 'photo', data, brand);
+    const finalPrompt = refined || scenarioPrompt;
+
+    let buffer;
+    if (model === 'flux' && isFalEnabled()) {
+      buffer = await generateWithFlux(faceImagePath, finalPrompt);
+    } else {
+      // GPT fallback — use reference image
+      const refBuffer = await fs.readFile(faceImagePath);
+      const response = await openai.images.generate({
+        model: resolveImageModel(data.imageModel),
+        prompt: finalPrompt,
+        image: [{ image: refBuffer, detail: 'auto' }],
+        size: '1024x1536',
+        quality: data.quality || 'high',
+        output_format: 'png',
+      });
+      const b64 = response.data?.[0]?.b64_json;
+      if (!b64) throw new Error('No image returned');
+      buffer = Buffer.from(b64, 'base64');
+    }
+
+    // Resize to exact dimensions if needed
+    const meta = await sharp(buffer).metadata();
+    if (meta.width !== 1024 || meta.height !== 1536) {
+      buffer = await sharp(buffer).resize(1024, 1536, { fit: 'cover' }).png().toBuffer();
+    }
+
+    if (data.includeOwl === 'true' || data.includeOwl === true) {
+      buffer = await addAppIconOverlay(buffer, data.owlPosition, brandId);
+    }
+
+    const slug = crypto.randomUUID().slice(0, 8);
+    const filename = `personalized_${brandId}_${Date.now()}_${slug}.png`;
+    const url = await uploadToStorage(buffer, filename);
+
+    res.json({ ok: true, url, filename, model: model === 'flux' && isFalEnabled() ? 'flux' : 'gpt' });
+  } catch (error) {
+    console.error('[Personalized]', error);
+    res.status(500).json({ error: error.message || 'Personalized generation failed' });
+  }
+});
+
+app.post('/api/generate-personalized-carousel', requireAuth, upload.single('faceImage'), async (req, res) => {
+  let { slides, includeOwl, owlPosition, quality, brand: brandId, model } = req.body || {};
+  if (typeof slides === 'string') {
+    try { slides = JSON.parse(slides); } catch { return res.status(400).json({ error: 'Invalid slides JSON' }); }
+  }
+  if (!slides || !Array.isArray(slides) || slides.length === 0) {
+    return res.status(400).json({ error: 'Missing slides array' });
+  }
+  if (!brandId) return res.status(400).json({ error: 'Missing brand' });
+  if (!req.file) return res.status(400).json({ error: 'Missing face image' });
+
+  const brand = await getBrandAsync(brandId, req.user?.uid);
+  const faceImagePath = req.file.path;
+  const useFlux = (model || 'flux') === 'flux' && isFalEnabled();
+
+  const jobId = crypto.randomUUID().slice(0, 12);
+  const job = { id: jobId, brandId: brand.id, total: slides.length, completed: 0, current: 0, slides: [], status: 'running', error: null };
+  carouselJobs.set(jobId, job);
+  res.json({ jobId, total: slides.length });
+
+  (async () => {
+    for (let i = 0; i < slides.length; i++) {
+      job.current = i + 1;
+      const slideData = slides[i];
+      try {
+        const scenarioPrompt = slideData.prompt || buildPersonalizedPrompt(slideData, brand);
+        const refined = await refinePromptWithClaude(scenarioPrompt, 'photo', slideData, brand);
+        const finalPrompt = refined || scenarioPrompt;
+
+        let buffer;
+        if (useFlux) {
+          buffer = await generateWithFlux(faceImagePath, finalPrompt);
+        } else {
+          const refBuffer = await fs.readFile(faceImagePath);
+          const response = await openai.images.generate({
+            model: resolveImageModel(model),
+            prompt: finalPrompt,
+            image: [{ image: refBuffer, detail: 'auto' }],
+            size: '1024x1536',
+            quality: quality || 'high',
+            output_format: 'png',
+          });
+          const b64 = response.data?.[0]?.b64_json;
+          if (!b64) throw new Error('No image returned');
+          buffer = Buffer.from(b64, 'base64');
+        }
+
+        // Resize to exact dimensions if needed
+        const meta = await sharp(buffer).metadata();
+        if (meta.width !== 1024 || meta.height !== 1536) {
+          buffer = await sharp(buffer).resize(1024, 1536, { fit: 'cover' }).png().toBuffer();
+        }
+
+        if (includeOwl === 'true' || includeOwl === true) {
+          buffer = await addAppIconOverlay(buffer, owlPosition, brand.id);
+        }
+        const slug = crypto.randomUUID().slice(0, 8);
+        const filename = `personalized_${brand.id}_${jobId}_s${i + 1}_${slug}.png`;
+        const url = await uploadToStorage(buffer, filename);
+        job.slides.push({ slideNumber: i + 1, url, filename, ok: true });
+        job.completed = i + 1;
+      } catch (err) {
+        console.error(`[Personalized Carousel ${jobId}] Slide ${i + 1} failed:`, err.message);
+        job.slides.push({ slideNumber: i + 1, url: null, error: err.message, ok: false });
+        job.completed = i + 1;
+      }
+    }
+    job.status = 'done';
+    console.log(`[Personalized Carousel ${jobId}] Complete — ${job.slides.filter((s) => s.ok).length}/${job.total} succeeded`);
+    setTimeout(() => carouselJobs.delete(jobId), 30 * 60 * 1000);
+  })();
+});
+
 // --- App Icon Upload ---
 app.post('/api/upload-icon', requireAuth, upload.single('icon'), async (req, res) => {
   try {
@@ -1731,7 +1911,7 @@ app.post('/api/upload-icon', requireAuth, upload.single('icon'), async (req, res
 // --- API Key Settings ---
 app.post('/api/settings', requireAuth, async (req, res) => {
   try {
-    const { openaiKey, anthropicKey } = req.body || {};
+    const { openaiKey, anthropicKey, falKey } = req.body || {};
     const envPath = path.join(__dirname, '.env');
 
     let envContent = '';
@@ -1750,6 +1930,7 @@ app.post('/api/settings', requireAuth, async (req, res) => {
 
     if (openaiKey) envMap['OPENAI_API_KEY'] = openaiKey;
     if (anthropicKey) envMap['ANTHROPIC_API_KEY'] = anthropicKey;
+    if (falKey) envMap['FAL_API_KEY'] = falKey;
 
     const newContent = Object.entries(envMap)
       .map(([k, v]) => `${k}=${v}`)
