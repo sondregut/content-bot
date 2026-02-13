@@ -317,6 +317,31 @@ body {
   font-size: 0.9rem;
 }
 
+.sidebar-footer {
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.sidebar-face-btn {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: linear-gradient(135deg, rgba(7,47,87,0.06), rgba(115,166,209,0.1));
+  color: var(--navy);
+  font-family: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.sidebar-face-btn:hover {
+  background: linear-gradient(135deg, rgba(7,47,87,0.1), rgba(115,166,209,0.18));
+  border-color: var(--cyan);
+}
+
 .category-group { margin-bottom: 4px; }
 
 .category-header {
@@ -1053,13 +1078,141 @@ input:focus, select:focus, textarea:focus {
   min-height: 20px;
 }
 
-/* Face Personalization */
+/* Face Personalization CTA (in empty state) */
 
-.face-upload-area {
+.personalize-cta {
+  margin-top: 16px;
+  padding: 28px 32px;
+  border-radius: 14px;
+  border: 2px dashed var(--border);
+  background: linear-gradient(135deg, rgba(7,47,87,0.03), rgba(115,166,209,0.06));
+  text-align: center;
+  max-width: 500px;
+  width: 100%;
+}
+
+.personalize-cta-icon {
+  font-size: 2.4rem;
+  margin-bottom: 8px;
+}
+
+.personalize-cta h3 {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 1.1rem;
+  color: var(--navy);
+  margin: 0 0 6px;
+}
+
+.personalize-cta p {
+  font-size: 0.85rem;
+  color: #6b7280;
+  margin: 0 0 14px;
+}
+
+/* Full-Page Personalization View */
+
+.personalize-view {
+  padding: 0;
+}
+
+.personalize-header {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 8px;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+.personalize-header h2 {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 1.2rem;
+  color: var(--navy);
+  margin: 0;
+}
+
+.personalize-layout {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  gap: 24px;
+  margin-bottom: 20px;
+}
+
+.personalize-photos-col {
+  min-width: 0;
+}
+
+.face-photo-count {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #9ca3af;
+  margin-left: 6px;
+}
+
+.face-photos-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+.face-photo-thumb {
+  position: relative;
+  aspect-ratio: 1;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 2px solid var(--border);
+}
+
+.face-photo-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.face-photo-thumb .face-photo-remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(220,38,38,0.85);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  font-size: 0.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.15s;
+  line-height: 1;
+}
+
+.face-photo-thumb:hover .face-photo-remove {
+  opacity: 1;
+}
+
+.face-add-btn {
+  aspect-ratio: 1;
+  border-radius: 10px;
+  border: 2px dashed var(--border);
+  background: transparent;
+  color: #9ca3af;
+  font-size: 1.8rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+
+.face-add-btn:hover {
+  border-color: var(--cyan);
+  color: var(--cyan);
+  background: rgba(115,166,209,0.06);
+}
+
+.personalize-controls-col {
+  min-width: 0;
 }
 
 .scenario-grid {
@@ -1121,8 +1274,8 @@ input:focus, select:focus, textarea:focus {
 
 .personalize-result-thumb {
   position: relative;
-  width: 100px;
-  height: 150px;
+  width: 120px;
+  height: 180px;
   border-radius: 10px;
   overflow: hidden;
   border: 2px solid var(--border);

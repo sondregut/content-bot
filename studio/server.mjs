@@ -45,16 +45,21 @@ function isFalEnabled() {
   return Boolean(process.env.FAL_API_KEY);
 }
 
-async function generateWithFlux(faceImagePath, prompt, { aspectRatio = '9:16' } = {}) {
+async function generateWithFlux(faceImagePaths, prompt, { aspectRatio = '9:16' } = {}) {
   const falKey = process.env.FAL_API_KEY;
   if (!falKey) throw new Error('FAL_API_KEY not configured. Add it in Settings.');
 
-  const imageBuffer = await fs.readFile(faceImagePath);
-  const base64Image = imageBuffer.toString('base64');
-  const mimeType = faceImagePath.endsWith('.png') ? 'image/png' : 'image/jpeg';
-  const imageUrl = `data:${mimeType};base64,${base64Image}`;
+  // Support both single path (string) and array of paths
+  const paths = Array.isArray(faceImagePaths) ? faceImagePaths : [faceImagePaths];
 
-  const response = await fetch('https://queue.fal.run/fal-ai/flux-pro/kontext', {
+  // Convert all face images to data URLs
+  const imageUrls = await Promise.all(paths.map(async (p) => {
+    const buf = await fs.readFile(p);
+    const mime = p.endsWith('.png') ? 'image/png' : 'image/jpeg';
+    return `data:${mime};base64,${buf.toString('base64')}`;
+  }));
+
+  const response = await fetch('https://fal.run/fal-ai/flux-pro/kontext/multi', {
     method: 'POST',
     headers: {
       'Authorization': `Key ${falKey}`,
@@ -62,10 +67,9 @@ async function generateWithFlux(faceImagePath, prompt, { aspectRatio = '9:16' } 
     },
     body: JSON.stringify({
       prompt,
-      image_url: imageUrl,
+      image_urls: imageUrls,
       num_images: 1,
       output_format: 'png',
-      aspect_ratio: aspectRatio,
     }),
   });
 
@@ -138,7 +142,7 @@ const upload = multer({
 
 // --- Firebase Auth middleware ---
 async function requireAuth(req, res, next) {
-  if (!admin.apps.length) return next(); // local dev fallback — no auth
+  if (!admin.apps.length) { req.user = { email: ADMIN_EMAILS[0], uid: 'local-dev' }; return next(); } // local dev fallback — mock admin
   const token = req.headers.authorization?.split('Bearer ')[1];
   if (!token) return res.status(401).json({ error: 'Not authenticated' });
   try {
@@ -1119,9 +1123,14 @@ async function refinePromptWithClaude(rawPrompt, slideType, formData, brand) {
 
   try {
     const systemPrompt = `${brand.systemPrompt}\n\n${BASE_REFINEMENT_INSTRUCTIONS}`;
-    const context = slideType === 'photo'
+    let context = slideType === 'photo'
       ? `This is a photo-led slide for ${brand.name} featuring a ${formData.sport || 'athlete'} scene with text overlay.`
       : `This is a text-only minimalist slide for ${brand.name} with a ${formData.backgroundStyle || 'dark premium'} background.`;
+
+    // If reference image is being used, tell Claude the model can see it directly
+    if (rawPrompt.includes('Reference image provided:')) {
+      context += `\n\nIMPORTANT: A reference image will be passed directly to the image model via the edit API. The model can SEE the image — do NOT describe what might be in the reference image. Instead, instruct the model on HOW to use the reference (e.g. "match the color palette", "use the same composition style", "incorporate the background elements").`;
+    }
 
     const response = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
@@ -1460,19 +1469,32 @@ app.post('/api/generate', requireAuth, async (req, res) => {
       output_format: 'png',
     };
 
-    // If reference image provided, use image editing mode
+    // If reference image provided, use images.edit() instead of images.generate()
+    let response;
     if (data.referenceImage) {
       const refPath = path.join(uploadsDir, data.referenceImage);
       try {
         await fs.access(refPath);
         const refBuffer = await fs.readFile(refPath);
-        genParams.image = [{ image: refBuffer, detail: 'auto' }];
-      } catch {
-        console.warn('[Generate] Reference image not found, generating without it');
+        const imageFile = new File([refBuffer], 'reference.png', { type: 'image/png' });
+        response = await openai.images.edit({
+          model: resolveImageModel(data.imageModel),
+          image: imageFile,
+          prompt,
+          size: '1024x1536',
+          quality: data.quality || 'high',
+        });
+      } catch (err) {
+        if (err.code === 'ENOENT' || err.message?.includes('no such file')) {
+          console.warn('[Generate] Reference image not found, falling back to generate');
+          response = await openai.images.generate(genParams);
+        } else {
+          throw err;
+        }
       }
+    } else {
+      response = await openai.images.generate(genParams);
     }
-
-    const response = await openai.images.generate(genParams);
 
     const b64 = response.data?.[0]?.b64_json;
     if (!b64) {
@@ -1545,7 +1567,7 @@ app.post('/api/edit-slide', requireAuth, async (req, res) => {
 const carouselJobs = new Map();
 
 app.post('/api/generate-carousel', requireAuth, async (req, res) => {
-  const { slides, includeOwl, owlPosition, quality, brand: brandId, imageModel } = req.body || {};
+  const { slides, includeOwl, owlPosition, quality, brand: brandId, imageModel, referenceImage, referenceUsage, referenceInstructions } = req.body || {};
   if (!slides || !Array.isArray(slides) || slides.length === 0) {
     return res.status(400).json({ error: 'Missing slides array' });
   }
@@ -1591,18 +1613,54 @@ app.post('/api/generate-carousel', requireAuth, async (req, res) => {
             ? buildPhotoPrompt(slideData, brand)
             : buildTextPrompt(slideData, brand);
 
-        const refinedPrompt = await refinePromptWithClaude(rawPrompt, slideData.slideType, slideData, brand);
-        const prompt = refinedPrompt || rawPrompt;
+        // Append reference instruction if provided
+        let carouselRefInstruction = '';
+        if (referenceImage) {
+          carouselRefInstruction = `\n\nReference image provided: Use it as ${referenceUsage || 'background inspiration'}. ${referenceInstructions || ''}`;
+        }
+
+        const refinedPrompt = await refinePromptWithClaude(rawPrompt + carouselRefInstruction, slideData.slideType, slideData, brand);
+        const prompt = refinedPrompt || (rawPrompt + carouselRefInstruction);
 
         console.log(`[Carousel ${jobId}] ${brand.name} | Slide ${i + 1}/${slides.length}`);
 
-        const response = await openai.images.generate({
-          model: resolveImageModel(imageModel),
-          prompt,
-          size: '1024x1536',
-          quality: slideData.quality || 'high',
-          output_format: 'png',
-        });
+        let response;
+        if (referenceImage) {
+          const refPath = path.join(uploadsDir, referenceImage);
+          try {
+            await fs.access(refPath);
+            const refBuffer = await fs.readFile(refPath);
+            const imageFile = new File([refBuffer], 'reference.png', { type: 'image/png' });
+            response = await openai.images.edit({
+              model: resolveImageModel(imageModel),
+              image: imageFile,
+              prompt,
+              size: '1024x1536',
+              quality: slideData.quality || 'high',
+            });
+          } catch (refErr) {
+            if (refErr.code === 'ENOENT' || refErr.message?.includes('no such file')) {
+              console.warn(`[Carousel ${jobId}] Reference image not found, falling back to generate`);
+              response = await openai.images.generate({
+                model: resolveImageModel(imageModel),
+                prompt,
+                size: '1024x1536',
+                quality: slideData.quality || 'high',
+                output_format: 'png',
+              });
+            } else {
+              throw refErr;
+            }
+          }
+        } else {
+          response = await openai.images.generate({
+            model: resolveImageModel(imageModel),
+            prompt,
+            size: '1024x1536',
+            quality: slideData.quality || 'high',
+            output_format: 'png',
+          });
+        }
 
         const b64 = response.data?.[0]?.b64_json;
         if (!b64) throw new Error('No image returned');
@@ -1747,15 +1805,15 @@ Rules:
 
 // --- Personalized Image Generation (Face + Scenario) ---
 
-app.post('/api/generate-personalized', requireAuth, upload.single('faceImage'), async (req, res) => {
+app.post('/api/generate-personalized', requireAuth, upload.array('faceImages', 5), async (req, res) => {
   try {
     const data = req.body || {};
     const brandId = data.brand;
     if (!brandId) return res.status(400).json({ error: 'Missing brand' });
-    if (!req.file) return res.status(400).json({ error: 'Missing face image' });
+    if (!req.files || req.files.length === 0) return res.status(400).json({ error: 'Missing face image(s)' });
 
     const brand = await getBrandAsync(brandId, req.user?.uid);
-    const faceImagePath = req.file.path;
+    const faceImagePaths = req.files.map(f => f.path);
     const model = data.model || 'flux';
 
     const scenarioPrompt = data.prompt || buildPersonalizedPrompt(data, brand);
@@ -1764,10 +1822,10 @@ app.post('/api/generate-personalized', requireAuth, upload.single('faceImage'), 
 
     let buffer;
     if (model === 'flux' && isFalEnabled()) {
-      buffer = await generateWithFlux(faceImagePath, finalPrompt);
+      buffer = await generateWithFlux(faceImagePaths, finalPrompt);
     } else {
-      // GPT fallback — use reference image
-      const refBuffer = await fs.readFile(faceImagePath);
+      // GPT fallback — use first image only (doesn't support multi-ref)
+      const refBuffer = await fs.readFile(faceImagePaths[0]);
       const response = await openai.images.generate({
         model: resolveImageModel(data.imageModel),
         prompt: finalPrompt,
@@ -1802,7 +1860,7 @@ app.post('/api/generate-personalized', requireAuth, upload.single('faceImage'), 
   }
 });
 
-app.post('/api/generate-personalized-carousel', requireAuth, upload.single('faceImage'), async (req, res) => {
+app.post('/api/generate-personalized-carousel', requireAuth, upload.array('faceImages', 5), async (req, res) => {
   let { slides, includeOwl, owlPosition, quality, brand: brandId, model } = req.body || {};
   if (typeof slides === 'string') {
     try { slides = JSON.parse(slides); } catch { return res.status(400).json({ error: 'Invalid slides JSON' }); }
@@ -1811,10 +1869,10 @@ app.post('/api/generate-personalized-carousel', requireAuth, upload.single('face
     return res.status(400).json({ error: 'Missing slides array' });
   }
   if (!brandId) return res.status(400).json({ error: 'Missing brand' });
-  if (!req.file) return res.status(400).json({ error: 'Missing face image' });
+  if (!req.files || req.files.length === 0) return res.status(400).json({ error: 'Missing face image(s)' });
 
   const brand = await getBrandAsync(brandId, req.user?.uid);
-  const faceImagePath = req.file.path;
+  const faceImagePaths = req.files.map(f => f.path);
   const useFlux = (model || 'flux') === 'flux' && isFalEnabled();
 
   const jobId = crypto.randomUUID().slice(0, 12);
@@ -1833,9 +1891,9 @@ app.post('/api/generate-personalized-carousel', requireAuth, upload.single('face
 
         let buffer;
         if (useFlux) {
-          buffer = await generateWithFlux(faceImagePath, finalPrompt);
+          buffer = await generateWithFlux(faceImagePaths, finalPrompt);
         } else {
-          const refBuffer = await fs.readFile(faceImagePath);
+          const refBuffer = await fs.readFile(faceImagePaths[0]);
           const response = await openai.images.generate({
             model: resolveImageModel(model),
             prompt: finalPrompt,
@@ -2201,10 +2259,12 @@ app.post('/api/tiktok/save-tokens', requireAuth, async (req, res) => {
 app.get('/api/tiktok/status', requireAuth, async (req, res) => {
   try {
     const userId = req.user?.uid;
-    if (!userId) return res.json({ connected: false });
+    if (!userId) return res.json({ connected: false, enabled: tiktokEnabled });
+
+    if (!tiktokEnabled) return res.json({ connected: false, enabled: false });
 
     const tokens = await getTikTokTokens(userId);
-    if (!tokens?.access_token) return res.json({ connected: false });
+    if (!tokens?.access_token) return res.json({ connected: false, enabled: true });
 
     // Try to get fresh user info
     let username = tokens.tiktok_username || '';
@@ -2221,10 +2281,10 @@ app.get('/api/tiktok/status', requireAuth, async (req, res) => {
       }
     } catch { /* use cached username */ }
 
-    res.json({ connected: true, username });
+    res.json({ connected: true, enabled: true, username });
   } catch (err) {
     console.error('[TikTok] Status error:', err);
-    res.json({ connected: false });
+    res.json({ connected: false, enabled: tiktokEnabled });
   }
 });
 

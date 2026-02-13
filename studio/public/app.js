@@ -127,6 +127,7 @@ let batchJobId = null;
 let pollTimer = null;
 let referenceImageFilename = null;
 let screenshotImageFilename = null;
+let slideReferenceImages = {}; // { slideIndex: { filename, displayName } }
 
 // --- DOM refs ---
 const brandSelector = document.getElementById('brand-selector');
@@ -172,6 +173,11 @@ const refFilename = document.getElementById('ref-filename');
 const refClearBtn = document.getElementById('ref-clear-btn');
 const refPreview = document.getElementById('ref-preview');
 const refOptions = document.getElementById('ref-options');
+const slideRefInput = document.getElementById('slide-ref-input');
+const slideRefBtn = document.getElementById('slide-ref-btn');
+const slideRefFilename = document.getElementById('slide-ref-filename');
+const slideRefClear = document.getElementById('slide-ref-clear');
+const slideRefPreview = document.getElementById('slide-ref-preview');
 const freeformInput = document.getElementById('freeform-input');
 const freeformGenerateBtn = document.getElementById('freeform-generate-btn');
 const freeformStatus = document.getElementById('freeform-status');
@@ -298,6 +304,7 @@ brandSelector.addEventListener('change', async () => {
   generatedImages = {};
   slideEdits = [];
   editorArea.style.display = 'none';
+  personalizeView.style.display = 'none';
   emptyState.style.display = 'flex';
   renderBrandSelector(); // update edit button visibility
   await loadContentIdeas();
@@ -546,10 +553,12 @@ function selectIdea(ideaId) {
   currentSlideIndex = 0;
   generatedImages = {};
   batchJobId = null;
+  slideReferenceImages = {};
 
   slideEdits = idea.slides.map((slide) => ({ ...slide }));
 
   emptyState.style.display = 'none';
+  personalizeView.style.display = 'none';
   editorArea.style.display = 'block';
 
   ideaBadge.textContent = idea.id;
@@ -574,12 +583,14 @@ function loadFreeformContent(data) {
   currentSlideIndex = 0;
   generatedImages = {};
   batchJobId = null;
+  slideReferenceImages = {};
 
   slideEdits = data.slides.map((slide) => ({ ...slide }));
 
   sidebar.querySelectorAll('.idea-item').forEach((el) => el.classList.remove('active'));
 
   emptyState.style.display = 'none';
+  personalizeView.style.display = 'none';
   editorArea.style.display = 'block';
 
   ideaBadge.textContent = 'AI';
@@ -601,10 +612,12 @@ function renderSlideTabs() {
     const active = i === currentSlideIndex ? 'active' : '';
     const generated = generatedImages[i] ? 'generated' : '';
     const typeIcon = s.type === 'photo' ? 'P' : s.type === 'mockup' ? 'M' : 'T';
-    html += `<button class="slide-tab ${active} ${generated}" data-index="${i}">`;
+    const hasSlideRef = slideReferenceImages[i] ? 'has-ref' : '';
+    html += `<button class="slide-tab ${active} ${generated} ${hasSlideRef}" data-index="${i}">`;
     html += `<span class="tab-num">${s.number}</span>`;
     html += `<span class="tab-type">${typeIcon}</span>`;
     html += `<span class="tab-label">${s.label || ''}</span>`;
+    if (slideReferenceImages[i]) html += `<span class="tab-ref-dot" title="Has slide image">&#128247;</span>`;
     html += `</button>`;
   }
   slideTabs.innerHTML = html;
@@ -660,6 +673,19 @@ function loadSlideIntoForm(index) {
     screenshotFilename.textContent = 'No screenshot';
     screenshotPreview.style.display = 'none';
     screenshotClearBtn.style.display = 'none';
+  }
+
+  // Restore per-slide reference image state
+  const slideRef = slideReferenceImages[index];
+  if (slideRef) {
+    slideRefFilename.textContent = slideRef.displayName;
+    slideRefPreview.src = `/uploads/${slideRef.filename}`;
+    slideRefPreview.style.display = 'block';
+    slideRefClear.style.display = 'inline-block';
+  } else {
+    slideRefFilename.textContent = 'No image';
+    slideRefPreview.style.display = 'none';
+    slideRefClear.style.display = 'none';
   }
 
   toggleTypeFields();
@@ -894,7 +920,7 @@ refClearBtn.addEventListener('click', () => {
 });
 
 // --- Build payload ---
-function buildSlidePayload(slide) {
+function buildSlidePayload(slide, slideIndex) {
   const payload = {
     slideType: slide.type || 'text',
     microLabel: slide.microLabel || '',
@@ -932,8 +958,11 @@ function buildSlidePayload(slide) {
     payload.layoutTemplate = form.elements.layoutTemplate?.value || 'Layout A - Classic Left Lane';
   }
 
-  if (referenceImageFilename) {
-    payload.referenceImage = referenceImageFilename;
+  // Per-slide image takes priority over global
+  const slideRef = slideIndex != null ? slideReferenceImages[slideIndex] : null;
+  const refImage = slideRef?.filename || referenceImageFilename;
+  if (refImage) {
+    payload.referenceImage = refImage;
     payload.referenceUsage = form.elements.referenceUsage?.value || 'background inspiration';
     payload.referenceInstructions = form.elements.referenceInstructions?.value || '';
   }
@@ -1300,7 +1329,7 @@ freeformGenerateBtn.addEventListener('click', async () => {
   }
 });
 
-// --- Face Personalization ---
+// --- Face Personalization (Full-Page View) ---
 // =============================================
 
 const PERSONALIZED_SCENARIOS = [
@@ -1314,21 +1343,40 @@ const PERSONALIZED_SCENARIOS = [
   { id: 'morning-run', title: 'Morning Run', category: 'Lifestyle', setting: 'city street at sunrise', action: 'running at easy pace', mood: 'peaceful discipline' },
 ];
 
-let faceImageFile = null;
+let faceImageFiles = []; // array of File objects (max 5)
 let selectedScenario = null;
 let personalizeResults = [];
 
+const personalizeView = document.getElementById('personalize-view');
 const faceImageInput = document.getElementById('face-image-input');
-const faceUploadBtn = document.getElementById('face-upload-btn');
-const faceFilename = document.getElementById('face-filename');
-const faceClearBtn = document.getElementById('face-clear-btn');
-const facePreview = document.getElementById('face-preview');
-const scenarioTemplates = document.getElementById('scenario-templates');
+const faceAddBtn = document.getElementById('face-add-btn');
+const facePhotosGrid = document.getElementById('face-photos-grid');
+const facePhotoCount = document.getElementById('face-photo-count');
 const scenarioGrid = document.getElementById('scenario-grid');
 const personalizeGenerateBtn = document.getElementById('personalize-generate-btn');
 const personalizeStatus = document.getElementById('personalize-status');
 const personalizeResultsSection = document.getElementById('personalize-results');
 const personalizeResultsGrid = document.getElementById('personalize-results-grid');
+
+// View navigation
+function openPersonalizeView() {
+  emptyState.style.display = 'none';
+  editorArea.style.display = 'none';
+  personalizeView.style.display = 'block';
+}
+
+function closePersonalizeView() {
+  personalizeView.style.display = 'none';
+  if (selectedIdea) {
+    editorArea.style.display = 'block';
+  } else {
+    emptyState.style.display = 'flex';
+  }
+}
+
+document.getElementById('open-personalize-btn').addEventListener('click', openPersonalizeView);
+document.getElementById('sidebar-face-btn').addEventListener('click', openPersonalizeView);
+document.getElementById('personalize-back-btn').addEventListener('click', closePersonalizeView);
 
 // Render scenario grid
 function renderScenarioGrid() {
@@ -1348,41 +1396,63 @@ function renderScenarioGrid() {
 }
 renderScenarioGrid();
 
-// Face upload
-faceUploadBtn.addEventListener('click', () => faceImageInput.click());
+// Multi-photo upload
+function renderFacePhotos() {
+  // Remove existing thumbnails (keep the add button and hidden input)
+  facePhotosGrid.querySelectorAll('.face-photo-thumb').forEach(el => el.remove());
+
+  faceImageFiles.forEach((file, idx) => {
+    const thumb = document.createElement('div');
+    thumb.className = 'face-photo-thumb';
+    thumb.innerHTML = `
+      <img src="${file._preview}" alt="Face ${idx + 1}" />
+      <button class="face-photo-remove" data-idx="${idx}" title="Remove">&times;</button>
+    `;
+    facePhotosGrid.insertBefore(thumb, faceAddBtn);
+  });
+
+  facePhotoCount.textContent = `${faceImageFiles.length} / 5`;
+  faceAddBtn.style.display = faceImageFiles.length >= 5 ? 'none' : 'flex';
+
+  // Attach remove handlers
+  facePhotosGrid.querySelectorAll('.face-photo-remove').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const idx = parseInt(btn.dataset.idx);
+      faceImageFiles.splice(idx, 1);
+      renderFacePhotos();
+    });
+  });
+}
+
+faceAddBtn.addEventListener('click', () => faceImageInput.click());
 
 faceImageInput.addEventListener('change', () => {
-  const file = faceImageInput.files[0];
-  if (!file) return;
+  const files = Array.from(faceImageInput.files);
+  if (!files.length) return;
 
-  faceImageFile = file;
-  faceFilename.textContent = file.name;
-  faceClearBtn.style.display = 'inline-block';
-  scenarioTemplates.style.display = 'block';
+  const remaining = 5 - faceImageFiles.length;
+  const toAdd = files.slice(0, remaining);
 
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    facePreview.src = e.target.result;
-    facePreview.style.display = 'block';
-  };
-  reader.readAsDataURL(file);
-});
+  let loaded = 0;
+  toAdd.forEach(file => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      file._preview = e.target.result;
+      faceImageFiles.push(file);
+      loaded++;
+      if (loaded === toAdd.length) renderFacePhotos();
+    };
+    reader.readAsDataURL(file);
+  });
 
-faceClearBtn.addEventListener('click', () => {
-  faceImageFile = null;
-  faceFilename.textContent = 'No photo';
-  facePreview.style.display = 'none';
-  faceClearBtn.style.display = 'none';
-  scenarioTemplates.style.display = 'none';
   faceImageInput.value = '';
-  personalizeResultsSection.style.display = 'none';
-  personalizeResults = [];
 });
 
 // Generate personalized image(s)
 personalizeGenerateBtn.addEventListener('click', async () => {
-  if (!faceImageFile) {
-    personalizeStatus.textContent = 'Upload a face photo first.';
+  if (faceImageFiles.length === 0) {
+    personalizeStatus.textContent = 'Upload at least one face photo first.';
     return;
   }
   if (!currentBrand) {
@@ -1403,14 +1473,20 @@ personalizeGenerateBtn.addEventListener('click', async () => {
 
   personalizeGenerateBtn.disabled = true;
 
-  if (count === 1) {
-    // Single image
-    personalizeStatus.textContent = 'Generating personalized image...';
-
+  // Build FormData with all face images
+  function buildFormData() {
     const fd = new FormData();
-    fd.append('faceImage', faceImageFile);
+    faceImageFiles.forEach(file => fd.append('faceImages', file));
     fd.append('brand', currentBrand);
     fd.append('model', model);
+    return fd;
+  }
+
+  if (count === 1) {
+    // Single image
+    personalizeStatus.textContent = `Generating personalized image (${faceImageFiles.length} ref photo${faceImageFiles.length > 1 ? 's' : ''})...`;
+
+    const fd = buildFormData();
 
     if (custom) {
       fd.append('prompt', custom);
@@ -1426,7 +1502,7 @@ personalizeGenerateBtn.addEventListener('click', async () => {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Generation failed');
 
-      personalizeResults = [data];
+      personalizeResults.push(data);
       renderPersonalizeResults();
       personalizeStatus.textContent = `Done! Generated with ${data.model === 'flux' ? 'Flux Kontext Pro' : 'GPT Image 1.5'}.`;
     } catch (err) {
@@ -1450,12 +1526,9 @@ personalizeGenerateBtn.addEventListener('click', async () => {
       }
     }
 
-    personalizeStatus.textContent = `Starting batch generation (${count} images)...`;
+    personalizeStatus.textContent = `Starting batch generation (${count} images, ${faceImageFiles.length} ref photo${faceImageFiles.length > 1 ? 's' : ''})...`;
 
-    const fd = new FormData();
-    fd.append('faceImage', faceImageFile);
-    fd.append('brand', currentBrand);
-    fd.append('model', model);
+    const fd = buildFormData();
     fd.append('slides', JSON.stringify(slides));
 
     try {
@@ -1464,8 +1537,6 @@ personalizeGenerateBtn.addEventListener('click', async () => {
       if (!res.ok) throw new Error(data.error || 'Batch start failed');
 
       const pJobId = data.jobId;
-      personalizeResults = [];
-      renderPersonalizeResults();
 
       // Poll for results
       const pollInterval = setInterval(async () => {
@@ -1473,7 +1544,10 @@ personalizeGenerateBtn.addEventListener('click', async () => {
           const sRes = await authFetch(`/api/carousel-status/${pJobId}`);
           const job = await sRes.json();
 
-          personalizeResults = job.slides.filter((s) => s.ok).map((s) => ({ url: s.url, filename: s.filename }));
+          // Replace batch results in our array
+          const batchResults = job.slides.filter((s) => s.ok).map((s) => ({ url: s.url, filename: s.filename }));
+          // Keep any previous single results, add batch
+          personalizeResults = [...personalizeResults.filter(r => !r._batch), ...batchResults.map(r => ({ ...r, _batch: true }))];
           renderPersonalizeResults();
           personalizeStatus.textContent = `Generating image ${job.current} of ${job.total}... (${job.completed} done)`;
 
@@ -1554,6 +1628,14 @@ async function checkTikTokStatus() {
     const res = await authFetch('/api/tiktok/status');
     if (!res.ok) return;
     const data = await res.json();
+
+    // Hide TikTok button entirely when keys aren't configured
+    if (data.enabled === false) {
+      if (tiktokConnectBtn) tiktokConnectBtn.style.display = 'none';
+      if (tiktokPostBtn) tiktokPostBtn.style.display = 'none';
+      return;
+    }
+
     tiktokConnected = data.connected;
     tiktokUsername = data.username || '';
     updateTikTokUI();
@@ -1837,6 +1919,7 @@ function restoreSession() {
           slides: session.slideEdits,
         };
         emptyState.style.display = 'none';
+        personalizeView.style.display = 'none';
         editorArea.style.display = 'block';
         ideaBadge.textContent = session.selectedIdeaId;
         ideaTitle.textContent = session.selectedIdeaTitle || 'Restored Session';

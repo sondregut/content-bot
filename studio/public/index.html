@@ -76,6 +76,9 @@
           <div class="sidebar-list" id="ideas-list">
             <div class="sidebar-loading">Loading ideas...</div>
           </div>
+          <div class="sidebar-footer">
+            <button type="button" class="sidebar-face-btn" id="sidebar-face-btn">&#128247; Face Studio</button>
+          </div>
         </aside>
 
         <main class="main-area">
@@ -99,20 +102,35 @@
               <div class="freeform-status" id="freeform-status"></div>
             </div>
 
-            <!-- Face Personalization Section -->
-            <div class="freeform-section" id="personalize-section">
+            <!-- Face Personalization CTA -->
+            <div class="personalize-cta" id="personalize-cta">
+              <div class="personalize-cta-icon">&#128247;</div>
               <h3>Personalize with Your Face</h3>
-              <p class="freeform-hint">Upload a clear face photo, pick a scenario, and generate images of yourself as an athlete.</p>
+              <p>Upload face photos, pick a scenario, and generate AI images of yourself as an athlete.</p>
+              <button type="button" class="btn primary" id="open-personalize-btn">Open Face Studio</button>
+            </div>
+          </div>
 
-              <div class="face-upload-area" id="face-upload-area">
-                <input type="file" id="face-image-input" accept="image/*" style="display:none" />
-                <button type="button" class="btn small" id="face-upload-btn">Upload Face Photo</button>
-                <span id="face-filename" class="ref-filename">No photo</span>
-                <button type="button" class="btn small danger" id="face-clear-btn" style="display:none">Clear</button>
+          <!-- Full-Page Personalization View -->
+          <div class="personalize-view" id="personalize-view" style="display:none">
+            <div class="personalize-header">
+              <button type="button" class="btn small" id="personalize-back-btn">&larr; Back</button>
+              <h2>Personalize with Your Face</h2>
+            </div>
+
+            <div class="personalize-layout">
+              <!-- Left column: Photos -->
+              <div class="personalize-photos-col">
+                <label class="label">Your Photos <span class="face-photo-count" id="face-photo-count">0 / 5</span></label>
+                <p class="freeform-hint" style="margin:0 0 8px">Multiple angles give better face consistency.</p>
+                <div class="face-photos-grid" id="face-photos-grid">
+                  <input type="file" id="face-image-input" accept="image/*" multiple style="display:none" />
+                  <button type="button" class="face-add-btn" id="face-add-btn" title="Add photo">+</button>
+                </div>
               </div>
-              <img id="face-preview" class="ref-preview-img" style="display:none" />
 
-              <div id="scenario-templates" style="display:none">
+              <!-- Right column: Scenario + Generate -->
+              <div class="personalize-controls-col">
                 <label class="label">Choose a Scenario</label>
                 <div class="scenario-grid" id="scenario-grid"></div>
 
@@ -143,12 +161,13 @@
 
                 <button type="button" class="btn primary" id="personalize-generate-btn">Generate Personalized Image</button>
                 <div class="freeform-status" id="personalize-status"></div>
-
-                <div id="personalize-results" style="display:none">
-                  <label class="label" style="margin-top:12px">Results</label>
-                  <div class="personalize-results-grid" id="personalize-results-grid"></div>
-                </div>
               </div>
+            </div>
+
+            <!-- Results Section -->
+            <div id="personalize-results" style="display:none">
+              <label class="label" style="margin-top:16px">Generated Results</label>
+              <div class="personalize-results-grid" id="personalize-results-grid"></div>
             </div>
           </div>
 
@@ -395,9 +414,21 @@
                 </div>
               </div>
 
-              <!-- Reference Image Upload -->
+              <!-- Per-Slide Reference Image -->
+              <div class="form-section slide-ref-section">
+                <label class="label">Slide Image (overrides global)</label>
+                <div class="ref-upload-row">
+                  <input type="file" id="slide-ref-input" accept="image/*" style="display:none" />
+                  <button type="button" class="btn small" id="slide-ref-btn">Upload</button>
+                  <span class="ref-filename" id="slide-ref-filename">No image</span>
+                  <button type="button" class="btn small danger" id="slide-ref-clear" style="display:none">Clear</button>
+                </div>
+                <img id="slide-ref-preview" class="ref-preview-img" style="display:none" />
+              </div>
+
+              <!-- Global Background Image Upload -->
               <div class="form-section ref-section">
-                <label class="label">Reference Image (optional)</label>
+                <label class="label">Global Background Image (optional)</label>
                 <div class="ref-upload-row">
                   <input type="file" id="ref-image-input" accept="image/*" style="display:none" />
                   <button type="button" class="btn small" id="ref-upload-btn">Upload Image</button>
