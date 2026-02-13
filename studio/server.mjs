@@ -113,8 +113,6 @@ try {
   console.error('[Firebase] Init failed:', err.message);
 }
 
-const ALLOWED_EMAILS = (process.env.ALLOWED_EMAILS || '').split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
-const ADMIN_EMAILS = ['sondre@athletemindset.app', 'sondregut@gmail.com', 'sondreg600@gmail.com'];
 
 const openai = apiEnabled ? new OpenAI({ apiKey: API_KEY }) : null;
 const anthropic = claudeEnabled ? new Anthropic({ apiKey: ANTHROPIC_KEY }) : null;
@@ -142,15 +140,11 @@ const upload = multer({
 
 // --- Firebase Auth middleware ---
 async function requireAuth(req, res, next) {
-  if (!admin.apps.length) { req.user = { email: ADMIN_EMAILS[0], uid: 'local-dev' }; return next(); } // local dev fallback — mock admin
+  if (!admin.apps.length) { req.user = { email: 'dev@local', uid: 'local-dev' }; return next(); }
   const token = req.headers.authorization?.split('Bearer ')[1];
   if (!token) return res.status(401).json({ error: 'Not authenticated' });
   try {
     const decoded = await admin.auth().verifyIdToken(token);
-    // Only enforce allowlist if explicitly configured
-    if (ALLOWED_EMAILS.length && !ALLOWED_EMAILS.includes(decoded.email?.toLowerCase())) {
-      return res.status(403).json({ error: 'Not authorized — email not in allowlist' });
-    }
     req.user = decoded;
     next();
   } catch {
@@ -179,77 +173,6 @@ app.use('/uploads', express.static(uploadsDir));
 
 // --- Brand Configurations ---
 
-const BRANDS = {
-  'athlete-mindset': {
-    id: 'athlete-mindset',
-    name: 'Athlete Mindset',
-    website: 'athletemindset.app',
-    colors: {
-      primary: '#072F57',
-      accent: '#73A6D1',
-      white: '#FFFFFF',
-      secondary: '#D9D0C2',
-      cta: '#43AA32',
-    },
-    defaultMicroLabel: 'ATHLETE MINDSET',
-    defaultBackground: 'dark premium navy/near-black with very subtle grain',
-    iconOverlayText: 'athletemindset.app',
-    systemPrompt: `You are an expert visual designer and prompt engineer for Athlete Mindset, a premium AI-powered mental performance training app for athletes.
-
-About the app: Athlete Mindset helps athletes unlock peak performance through science-backed visualization, breathwork, and AI voice coaching. Think of it as a sports psychologist in your pocket — accessible, evidence-based, and built for the modern athlete.
-
-Content pillars for social media:
-1. Science-backed visualization benefits — research showing mental rehearsal improves performance
-2. Mental training as competitive edge — the mindset separates good from great
-3. Accessibility — an AI mental performance coach at a fraction of a sports psychologist's cost
-4. CTA slides — "Try free" / "athletemindset.app" / download nudge
-
-Brand palette (use these EXACT hex codes in prompts):
-- Navy: #072F57 (primary background)
-- Cyan: #73A6D1 (highlights, accents)
-- White: #FFFFFF (text)
-- Beige: #D9D0C2 (warm alternate backgrounds)
-- Green: #43AA32 (CTA buttons ONLY — never for general decoration)`,
-  },
-  'trackspeed': {
-    id: 'trackspeed',
-    name: 'TrackSpeed',
-    website: 'trackspeed.app',
-    colors: {
-      primary: '#191919',
-      accent: '#5C8DB8',
-      white: '#FDFDFD',
-      secondary: '#2B2E32',
-      cta: '#22C55E',
-    },
-    defaultMicroLabel: 'TRACKSPEED',
-    defaultBackground: 'deep charcoal #191919 with subtle noise texture',
-    iconOverlayText: 'trackspeed.app',
-    systemPrompt: `You are an expert visual designer and prompt engineer for TrackSpeed, a professional sprint timing app that uses iPhone camera Photo Finish detection.
-
-About the app: TrackSpeed gives coaches and athletes timing gate accuracy using just their phone camera. 120fps Photo Finish detection with sub-frame interpolation — professional sprint timing without expensive equipment. Competitors: VALD SmartSpeed ($2,000+), OVR Sprint ($529), Freelap ($500+).
-
-Content pillars for social media:
-1. Speed Data & Science — sprint biomechanics, what times mean, acceleration vs top speed
-2. Equipment Disruption — $0 vs $529 vs $2,000 comparisons, setup speed, portability
-3. Coaching & Testing — how to run proper speed tests, warm-up protocols, testing day guides
-4. Training Protocols — sprint workouts, weekly splits, speed development tips
-5. Photo Finish Technology — how it works, 120fps detection, sub-frame interpolation
-
-Brand palette (use these EXACT hex codes in prompts):
-- Dark Background: #191919 (deep charcoal)
-- Surface: #2B2E32 (blue-gray elevated surface)
-- Accent Blue: #5C8DB8 (primary accent)
-- Accent Cyan: #73A6D1 (lighter highlight)
-- Success Green: #22C55E (PR/improvement callouts)
-- White: #FDFDFD (primary text on dark)
-- Muted: #9B9A97 (secondary text)
-
-Tone: Technical but accessible, data-driven, provocative (challenge hand-timing culture), confident.
-Typography: Sprint times should be monospace, large, high contrast.`,
-  },
-};
-
 const GENERIC_BRAND = {
   id: 'generic',
   name: 'My Brand',
@@ -261,13 +184,7 @@ const GENERIC_BRAND = {
   systemPrompt: 'You are an expert visual designer and prompt engineer for social media carousel content.',
 };
 
-function getBrand(brandId) {
-  return BRANDS[brandId] || GENERIC_BRAND;
-}
-
-// Async brand lookup — checks hardcoded first, then Firestore
 async function getBrandAsync(brandId, userId) {
-  if (BRANDS[brandId]) return BRANDS[brandId];
   if (!db || !brandId) return GENERIC_BRAND;
   try {
     const doc = await db.collection('carousel_brands').doc(brandId).get();
@@ -980,7 +897,7 @@ async function generateMockupSlide(data, brand) {
   }
 
   if (data.includeOwl) {
-    buffer = await addAppIconOverlay(buffer, data.owlPosition, brand.id, {
+    buffer = await addAppIconOverlay(buffer, data.owlPosition, brand, {
       iconOffsetX: data.iconOffsetX,
       iconOffsetY: data.iconOffsetY,
     });
@@ -1125,9 +1042,9 @@ function buildPersonalizedPrompt(data, brand) {
   ].filter(Boolean).join('\n');
 }
 
-async function addAppIconOverlay(baseBuffer, configKey = 'bottom-right', brandId = 'generic', { iconOffsetX = 0, iconOffsetY = 0 } = {}) {
+async function addAppIconOverlay(baseBuffer, configKey = 'bottom-right', brand = GENERIC_BRAND, { iconOffsetX = 0, iconOffsetY = 0 } = {}) {
   const cfg = ICON_OVERLAY_CONFIGS[configKey] || ICON_OVERLAY_CONFIGS['bottom-right'];
-  const brand = getBrand(brandId);
+  const brandId = brand.id || 'generic';
   const base = sharp(baseBuffer);
   const meta = await base.metadata();
 
@@ -1346,28 +1263,22 @@ function parseContentIdeas(markdown, brandId, brandName) {
 // List available brands (hardcoded for admins only + user's Firestore brands)
 app.get('/api/brands', requireAuth, async (req, res) => {
   try {
-    const isAdmin = ADMIN_EMAILS.includes(req.user?.email?.toLowerCase());
-    const hardcoded = isAdmin
-      ? Object.values(BRANDS).map((b) => ({
-          id: b.id,
-          name: b.name,
-          website: b.website,
-          colors: b.colors,
-          isDefault: true,
-        }))
-      : [];
-    let userBrands = [];
+    let brands = [];
     if (db && req.user?.uid) {
-      const snap = await db.collection('carousel_brands')
-        .where('createdBy', '==', req.user.uid)
-        .get();
-      userBrands = snap.docs.map((d) => ({ id: d.id, ...d.data(), isDefault: false }));
-      userBrands.sort((a, b) => (b.createdAt?._seconds || 0) - (a.createdAt?._seconds || 0));
+      try {
+        const snap = await db.collection('carousel_brands')
+          .where('createdBy', '==', req.user.uid)
+          .get();
+        brands = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        brands.sort((a, b) => (b.createdAt?._seconds || 0) - (a.createdAt?._seconds || 0));
+      } catch (fsErr) {
+        console.error('[Brands] Firestore query failed:', fsErr.message);
+      }
     }
-    res.json({ brands: [...userBrands, ...hardcoded] });
+    res.json({ brands });
   } catch (err) {
     console.error('[Brands]', err);
-    res.json({ brands: [] });
+    res.status(200).json({ brands: [] });
   }
 });
 
@@ -1768,15 +1679,17 @@ app.get('/api/content-ideas', requireAuth, async (req, res) => {
   try {
     const brandId = req.query.brand;
     // Only hardcoded brands have content-ideas.md files
-    if (!brandId || !BRANDS[brandId]) {
-      const brand = brandId ? await getBrandAsync(brandId, req.user?.uid) : GENERIC_BRAND;
+    const brand = brandId ? await getBrandAsync(brandId, req.user?.uid) : GENERIC_BRAND;
+    // Try loading content-ideas.md from disk (works for brands with local markdown files)
+    const mdPath = path.join(rootDir, 'brands', brandId || 'generic', 'content-ideas.md');
+    try {
+      const markdown = await fs.readFile(mdPath, 'utf-8');
+      const appData = parseContentIdeas(markdown, brandId || 'generic', brand.name);
+      return res.json({ apps: [appData] });
+    } catch {
+      // No content-ideas file — return empty categories
       return res.json({ apps: [{ appName: brand.name, brandId: brandId || 'generic', categories: [] }] });
     }
-    const brand = getBrand(brandId);
-    const mdPath = path.join(rootDir, 'brands', brandId, 'content-ideas.md');
-    const markdown = await fs.readFile(mdPath, 'utf-8');
-    const appData = parseContentIdeas(markdown, brandId, brand.name);
-    res.json({ apps: [appData] });
   } catch (error) {
     console.error('[Content Ideas]', error);
     res.status(500).json({ error: error.message });
@@ -1893,7 +1806,7 @@ app.post('/api/generate', requireAuth, async (req, res) => {
     let buffer = Buffer.from(b64, 'base64');
 
     if (data.includeOwl) {
-      buffer = await addAppIconOverlay(buffer, data.owlPosition, brandId);
+      buffer = await addAppIconOverlay(buffer, data.owlPosition, brand);
     }
 
     const slug = crypto.randomUUID().slice(0, 8);
@@ -2067,7 +1980,7 @@ app.post('/api/generate-carousel', requireAuth, async (req, res) => {
 
         let buffer = Buffer.from(b64, 'base64');
         if (slideData.includeOwl) {
-          buffer = await addAppIconOverlay(buffer, slideData.owlPosition, brand.id);
+          buffer = await addAppIconOverlay(buffer, slideData.owlPosition, brand);
         }
 
         const slug = crypto.randomUUID().slice(0, 8);
@@ -2246,7 +2159,7 @@ app.post('/api/generate-personalized', requireAuth, upload.array('faceImages', 5
     }
 
     if (data.includeOwl === 'true' || data.includeOwl === true) {
-      buffer = await addAppIconOverlay(buffer, data.owlPosition, brandId);
+      buffer = await addAppIconOverlay(buffer, data.owlPosition, brand);
     }
 
     const slug = crypto.randomUUID().slice(0, 8);
@@ -2314,7 +2227,7 @@ app.post('/api/generate-personalized-carousel', requireAuth, upload.array('faceI
         }
 
         if (includeOwl === 'true' || includeOwl === true) {
-          buffer = await addAppIconOverlay(buffer, owlPosition, brand.id);
+          buffer = await addAppIconOverlay(buffer, owlPosition, brand);
         }
         const slug = crypto.randomUUID().slice(0, 8);
         const filename = `personalized_${brand.id}_${jobId}_s${i + 1}_${slug}.png`;
@@ -2433,8 +2346,7 @@ app.get('/api/download-carousel/:jobId', requireAuth, async (req, res) => {
     return res.status(404).json({ error: 'No generated slides found' });
   }
 
-  const brand = getBrand(job.brandId);
-  const zipName = `${brand.id}_carousel_${job.id}.zip`;
+  const zipName = `${job.brandId || 'brand'}_carousel_${job.id}.zip`;
 
   res.setHeader('Content-Type', 'application/zip');
   res.setHeader('Content-Disposition', `attachment; filename="${zipName}"`);
@@ -2457,8 +2369,7 @@ app.post('/api/download-selected', requireAuth, async (req, res) => {
     return res.status(400).json({ error: 'No filenames provided' });
   }
 
-  const brand = getBrand(brandId);
-  const zipName = `${brand.id}_slides_${Date.now()}.zip`;
+  const zipName = `${brandId || 'brand'}_slides_${Date.now()}.zip`;
 
   res.setHeader('Content-Type', 'application/zip');
   res.setHeader('Content-Disposition', `attachment; filename="${zipName}"`);
@@ -2857,7 +2768,6 @@ app.get('/api/tiktok/post-status/:publishId', requireAuth, async (req, res) => {
 if (process.env.VERCEL !== '1') {
   app.listen(PORT, () => {
     console.log(`Carousel Studio running on http://localhost:${PORT}`);
-    console.log(`Brands: ${Object.values(BRANDS).map((b) => b.name).join(', ')}`);
   });
 }
 
