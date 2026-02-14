@@ -19,8 +19,6 @@ const rootDir = __dirname; // brands/ lives inside studio/
 
 dotenv.config({ path: path.join(__dirname, '.env') });
 
-const API_KEY = process.env.OPENAI_API_KEY;
-const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
 const DEFAULT_IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1.5';
 const ALLOWED_IMAGE_MODELS = {
   'gpt-image-1.5': 'GPT Image 1.5',
@@ -30,26 +28,25 @@ const ALLOWED_IMAGE_MODELS = {
 function resolveImageModel(requested) {
   return (requested && ALLOWED_IMAGE_MODELS[requested]) ? requested : DEFAULT_IMAGE_MODEL;
 }
-const apiEnabled = Boolean(API_KEY);
-const claudeEnabled = Boolean(ANTHROPIC_KEY);
 
-if (!apiEnabled) {
-  console.warn('Missing OPENAI_API_KEY. UI will load but generation will be disabled.');
+// --- BYOK: Per-request API client helpers ---
+// Users provide their own API keys via request headers (X-OpenAI-Key, X-Anthropic-Key, X-Fal-Key)
+function getOpenAI(req) {
+  const key = req.headers['x-openai-key'];
+  if (!key) return null;
+  return new OpenAI({ apiKey: key });
 }
-if (!claudeEnabled) {
-  console.warn('Missing ANTHROPIC_API_KEY. Prompt refinement will be skipped.');
+function getAnthropic(req) {
+  const key = req.headers['x-anthropic-key'];
+  if (!key) return null;
+  return new Anthropic({ apiKey: key });
+}
+function isFalEnabled(req) {
+  return Boolean(req.headers['x-fal-key']);
 }
 
-// --- Fal.ai (Flux Kontext Pro for face-consistent generation) ---
-if (!process.env.FAL_API_KEY) console.warn('Missing FAL_API_KEY. Face personalization will use GPT fallback.');
-
-function isFalEnabled() {
-  return Boolean(process.env.FAL_API_KEY);
-}
-
-async function generateWithFlux(faceImagePaths, prompt, { aspectRatio = '9:16' } = {}) {
-  const falKey = process.env.FAL_API_KEY;
-  if (!falKey) throw new Error('FAL_API_KEY not configured. Add it in Settings.');
+async function generateWithFlux(faceImagePaths, prompt, { aspectRatio = '9:16', falKey } = {}) {
+  if (!falKey) throw new Error('Fal.ai API key not configured. Add it in Settings.');
 
   // Support both single path (string) and array of paths
   const paths = Array.isArray(faceImagePaths) ? faceImagePaths : [faceImagePaths];
@@ -102,12 +99,18 @@ try {
     if (serviceAccount.private_key) {
       serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
     }
+    const storageBucketName = process.env.FIREBASE_STORAGE_BUCKET?.trim();
     admin.initializeApp({
       credential: admin.credential.cert(serviceAccount),
-      storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
+      ...(storageBucketName && { storageBucket: storageBucketName }),
     });
-    bucket = admin.storage().bucket();
     db = admin.firestore();
+    if (storageBucketName) {
+      bucket = admin.storage().bucket();
+      console.log('[Firebase] Storage bucket configured:', storageBucketName);
+    } else {
+      console.warn('[Firebase] No FIREBASE_STORAGE_BUCKET set — vault uses local disk.');
+    }
     console.log('[Firebase] Admin initialized for project:', serviceAccount.project_id);
   } else {
     console.warn('[Firebase] No valid service account — auth disabled (local dev mode).');
@@ -117,8 +120,7 @@ try {
 }
 
 
-const openai = apiEnabled ? new OpenAI({ apiKey: API_KEY }) : null;
-const anthropic = claudeEnabled ? new Anthropic({ apiKey: ANTHROPIC_KEY }) : null;
+// OpenAI and Anthropic clients are now created per-request via getOpenAI(req) / getAnthropic(req)
 const app = express();
 const PORT = process.env.PORT || 4545;
 
@@ -1376,7 +1378,8 @@ CRITICAL: Respect the brand's visual style direction. Do not override it with ge
 
 Return ONLY the refined prompt text. No preamble, no explanation, no markdown formatting.`;
 
-async function refinePromptWithClaude(rawPrompt, slideType, formData, brand) {
+async function refinePromptWithClaude(rawPrompt, slideType, formData, brand, req) {
+  const anthropic = getAnthropic(req);
   if (!anthropic) return null;
 
   try {
@@ -1685,7 +1688,8 @@ app.post('/api/brands/ai-setup', requireAuth, async (req, res) => {
       }
     }
 
-    if (!anthropic) return res.status(500).json({ error: 'Claude API not configured' });
+    const anthropic = getAnthropic(req);
+    if (!anthropic) return res.status(500).json({ error: 'Add your Anthropic API key in Settings.' });
 
     const msg = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
@@ -1958,7 +1962,8 @@ app.post('/api/brands/full-setup', requireAuth, async (req, res) => {
     // Step 6: Claude generates brand config
     sendSSE('status', { step: 'config', message: 'Generating brand profile...' });
 
-    if (!anthropic) { sendSSE('error', { message: 'Claude API not configured' }); res.end(); return; }
+    const anthropic = getAnthropic(req);
+    if (!anthropic) { sendSSE('error', { message: 'Add your Anthropic API key in Settings.' }); res.end(); return; }
 
     const textContent = html
       .replace(/<script[\s\S]*?<\/script>/gi, '')
@@ -2166,6 +2171,7 @@ Rules:
     sendSSE('status', { step: 'carousel', message: 'Generating first carousel...' });
 
     const brand = { id: brandId, ...brandData };
+    const openai = getOpenAI(req);
     if (contentIdeas.length > 0 && openai) {
       const firstIdea = contentIdeas[0];
       const slides = firstIdea.slides || [];
@@ -2183,7 +2189,7 @@ Rules:
               overlayStyle: 'dark gradient',
               overlayPlacement: 'bottom third',
             }, brand);
-            const refinedPrompt = await refinePromptWithClaude(rawPrompt, 'photo', slide, brand);
+            const refinedPrompt = await refinePromptWithClaude(rawPrompt, 'photo', slide, brand, req);
             const prompt = refinedPrompt || rawPrompt;
             const response = await openai.images.generate({
               model: resolveImageModel(),
@@ -2509,7 +2515,8 @@ app.post('/api/brands/analyze-website', requireAuth, async (req, res) => {
     }
 
     // Send to Claude for brand analysis
-    if (!anthropic) return res.status(500).json({ error: 'Claude API not configured' });
+    const anthropic = getAnthropic(req);
+    if (!anthropic) return res.status(500).json({ error: 'Add your Anthropic API key in Settings.' });
 
     const msg = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
@@ -2637,6 +2644,8 @@ app.post('/api/upload-reference', requireAuth, upload.single('image'), async (re
 // Generate single slide
 app.post('/api/generate', requireAuth, generationLimiter, async (req, res) => {
   try {
+    const openai = getOpenAI(req);
+    const anthropic = getAnthropic(req);
     const data = req.body || {};
     const brandId = data.brand;
     if (!brandId) return res.status(400).json({ error: 'Missing brand' });
@@ -2653,10 +2662,10 @@ app.post('/api/generate', requireAuth, generationLimiter, async (req, res) => {
 
       // AI background: generate background image first, then composite mockup on top
       if (data.imageUsage === 'ai-background') {
-        if (!openai) return res.status(503).json({ error: 'Image generation not configured' });
+        if (!openai) return res.status(503).json({ error: 'Add your OpenAI API key in Settings to generate images.' });
 
         bgPrompt = buildMockupBackgroundPrompt(data, brand);
-        refinedBgPrompt = await refinePromptWithClaude(bgPrompt, 'photo', data, brand);
+        refinedBgPrompt = await refinePromptWithClaude(bgPrompt, 'photo', data, brand, req);
         const prompt = refinedBgPrompt || bgPrompt;
 
         console.log(`[Generate] ${brand.name} | AI background for mockup | ${refinedBgPrompt ? 'refined' : 'raw'}`);
@@ -2704,7 +2713,8 @@ app.post('/api/generate', requireAuth, generationLimiter, async (req, res) => {
 
     // Meme generation
     if (data.slideType === 'meme') {
-      if (!anthropic) return res.status(503).json({ error: 'Claude API not configured' });
+      if (!anthropic) return res.status(503).json({ error: 'Add your Anthropic API key in Settings to generate memes.' });
+      if (!openai) return res.status(503).json({ error: 'Add your OpenAI API key in Settings to generate images.' });
 
       // Auto-generate meme concept from brand website if no description provided
       if (!data.description || !data.description.trim()) {
@@ -2779,7 +2789,7 @@ Pick a DIFFERENT format each time. Do NOT default to two-panel approval.`,
       const openaiSize = sizeMap[data.aspectRatio] || '1024x1024';
 
       const rawPrompt = buildMemePrompt(data, brand);
-      const refinedPrompt = await refinePromptWithClaude(rawPrompt, 'meme', data, brand);
+      const refinedPrompt = await refinePromptWithClaude(rawPrompt, 'meme', data, brand, req);
       const prompt = refinedPrompt || rawPrompt;
 
       console.log(`[Meme] ${brand.name} | ${refinedPrompt ? 'refined' : 'raw'} | ${data.aspectRatio || '1:1'}`);
@@ -2836,6 +2846,8 @@ Pick a DIFFERENT format each time. Do NOT default to two-panel approval.`,
       });
     }
 
+    if (!openai) return res.status(503).json({ error: 'Add your OpenAI API key in Settings to generate images.' });
+
     const rawPrompt =
       data.slideType === 'photo'
         ? buildPhotoPrompt(data, brand)
@@ -2851,7 +2863,8 @@ Pick a DIFFERENT format each time. Do NOT default to two-panel approval.`,
       rawPrompt + referenceInstruction,
       data.slideType,
       data,
-      brand
+      brand,
+      req
     );
     const prompt = refinedPrompt || (rawPrompt + referenceInstruction);
 
@@ -2931,9 +2944,10 @@ Pick a DIFFERENT format each time. Do NOT default to two-panel approval.`,
 // --- Edit existing slide image ---
 app.post('/api/edit-slide', requireAuth, async (req, res) => {
   try {
+    const openai = getOpenAI(req);
     const { imageUrl, instructions, quality, imageModel, brand: brandId } = req.body;
     if (!imageUrl || !instructions) return res.status(400).json({ error: 'Missing imageUrl or instructions' });
-    if (!apiEnabled) return res.status(503).json({ error: 'OpenAI API not configured' });
+    if (!openai) return res.status(503).json({ error: 'Add your OpenAI API key in Settings to generate images.' });
 
     const brand = await getBrandAsync(brandId, req.user?.uid);
 
@@ -2976,6 +2990,7 @@ app.post('/api/edit-slide', requireAuth, async (req, res) => {
 const carouselJobs = new Map();
 
 app.post('/api/generate-carousel', requireAuth, generationLimiter, async (req, res) => {
+  const openai = getOpenAI(req);
   const { slides, includeOwl, owlPosition, quality, brand: brandId, imageModel, referenceImage, referenceUsage, referenceInstructions } = req.body || {};
   if (!slides || !Array.isArray(slides) || slides.length === 0) {
     return res.status(400).json({ error: 'Missing slides array' });
@@ -2985,6 +3000,7 @@ app.post('/api/generate-carousel', requireAuth, generationLimiter, async (req, r
   }
 
   if (!brandId) return res.status(400).json({ error: 'Missing brand' });
+  if (!openai) return res.status(400).json({ error: 'Add your OpenAI API key in Settings to generate images.' });
   const brand = await getBrandAsync(brandId, req.user?.uid);
 
   const jobId = crypto.randomUUID().slice(0, 12);
@@ -3013,7 +3029,7 @@ app.post('/api/generate-carousel', requireAuth, generationLimiter, async (req, r
           if (slideData.imageUsage === 'ai-background') {
             console.log(`[Carousel ${jobId}] ${brand.name} | Slide ${i + 1}/${slides.length} (mockup + AI bg)`);
             const bgPrompt = buildMockupBackgroundPrompt(slideData, brand);
-            const refined = await refinePromptWithClaude(bgPrompt, 'photo', slideData, brand);
+            const refined = await refinePromptWithClaude(bgPrompt, 'photo', slideData, brand, req);
             const response = await openai.images.generate({
               model: resolveImageModel(slideData.imageModel),
               prompt: refined || bgPrompt,
@@ -3067,7 +3083,7 @@ app.post('/api/generate-carousel', requireAuth, generationLimiter, async (req, r
           carouselRefInstruction = `\n\nReference image provided: Use it as ${slideRefUsage || 'background inspiration'}. ${slideRefInstructions || ''}`;
         }
 
-        const refinedPrompt = await refinePromptWithClaude(rawPrompt + carouselRefInstruction, slideData.slideType, slideData, brand);
+        const refinedPrompt = await refinePromptWithClaude(rawPrompt + carouselRefInstruction, slideData.slideType, slideData, brand, req);
         const prompt = refinedPrompt || (rawPrompt + carouselRefInstruction);
 
         console.log(`[Carousel ${jobId}] ${brand.name} | Slide ${i + 1}/${slides.length}${slideRefImage ? ' (ref image)' : ''}`);
@@ -3166,6 +3182,7 @@ app.get('/api/carousel-status/:jobId', requireAuth, (req, res) => {
 // --- Freeform AI Content Generation ---
 app.post('/api/generate-freeform', requireAuth, generationLimiter, async (req, res) => {
   try {
+    const anthropic = getAnthropic(req);
     const { prompt: userPrompt, brand: brandId, slideCount } = req.body || {};
     if (!userPrompt) {
       return res.status(400).json({ error: 'Missing prompt' });
@@ -3174,7 +3191,7 @@ app.post('/api/generate-freeform', requireAuth, generationLimiter, async (req, r
       return res.status(400).json({ error: 'Missing brand' });
     }
     if (!anthropic) {
-      return res.status(500).json({ error: 'Claude API not configured' });
+      return res.status(500).json({ error: 'Add your Anthropic API key in Settings.' });
     }
 
     const brand = await getBrandAsync(brandId, req.user?.uid);
@@ -3255,9 +3272,10 @@ Rules:
 // --- Auto-Generate Content Ideas from Website ---
 app.post('/api/generate-content-ideas', requireAuth, async (req, res) => {
   try {
+    const anthropic = getAnthropic(req);
     const { brand: brandId } = req.body || {};
     if (!brandId) return res.status(400).json({ error: 'Missing brand' });
-    if (!anthropic) return res.status(500).json({ error: 'Claude API not configured' });
+    if (!anthropic) return res.status(500).json({ error: 'Add your Anthropic API key in Settings.' });
 
     const brand = await getBrandAsync(brandId, req.user?.uid);
     if (!brand.website) {
@@ -3411,6 +3429,7 @@ const personalizeScenarioCache = new Map();
 
 app.post('/api/personalize-scenarios', requireAuth, async (req, res) => {
   try {
+    const anthropic = getAnthropic(req);
     const brandId = req.body?.brand;
     if (!brandId) return res.status(400).json({ error: 'Missing brand' });
 
@@ -3423,7 +3442,7 @@ app.post('/api/personalize-scenarios', requireAuth, async (req, res) => {
     }
 
     if (!anthropic) {
-      return res.status(500).json({ error: 'Claude API not configured' });
+      return res.status(500).json({ error: 'Add your Anthropic API key in Settings.' });
     }
 
     const brandContext = [
@@ -3471,6 +3490,7 @@ app.post('/api/personalize-scenarios', requireAuth, async (req, res) => {
 
 app.post('/api/generate-personalized', requireAuth, upload.array('faceImages', 5), async (req, res) => {
   try {
+    const openai = getOpenAI(req);
     const data = req.body || {};
     const brandId = data.brand;
     if (!brandId) return res.status(400).json({ error: 'Missing brand' });
@@ -3481,12 +3501,12 @@ app.post('/api/generate-personalized', requireAuth, upload.array('faceImages', 5
     const model = data.model || 'flux';
 
     const scenarioPrompt = data.prompt || buildPersonalizedPrompt(data, brand);
-    const refined = await refinePromptWithClaude(scenarioPrompt, 'photo', data, brand);
+    const refined = await refinePromptWithClaude(scenarioPrompt, 'photo', data, brand, req);
     const finalPrompt = refined || scenarioPrompt;
 
     let buffer;
-    if (model === 'flux' && isFalEnabled()) {
-      buffer = await generateWithFlux(faceImagePaths, finalPrompt);
+    if (model === 'flux' && isFalEnabled(req)) {
+      buffer = await generateWithFlux(faceImagePaths, finalPrompt, { falKey: req.headers['x-fal-key'] });
     } else {
       // GPT fallback — use first image only (doesn't support multi-ref)
       const refBuffer = await fs.readFile(faceImagePaths[0]);
@@ -3518,7 +3538,7 @@ app.post('/api/generate-personalized', requireAuth, upload.array('faceImages', 5
     const url = await uploadToStorage(buffer, filename);
     saveImageRecord({ userId: req.user?.uid, brandId, filename, type: 'personalized' });
 
-    res.json({ ok: true, url, filename, model: model === 'flux' && isFalEnabled() ? 'flux' : 'gpt' });
+    res.json({ ok: true, url, filename, model: model === 'flux' && isFalEnabled(req) ? 'flux' : 'gpt' });
   } catch (error) {
     console.error('[Personalized]', error);
     res.status(500).json({ error: safeErrorMessage(error, 'Personalized generation failed') });
@@ -3526,6 +3546,7 @@ app.post('/api/generate-personalized', requireAuth, upload.array('faceImages', 5
 });
 
 app.post('/api/generate-personalized-carousel', requireAuth, upload.array('faceImages', 5), async (req, res) => {
+  const openai = getOpenAI(req);
   let { slides, includeOwl, owlPosition, quality, brand: brandId, model } = req.body || {};
   if (typeof slides === 'string') {
     try { slides = JSON.parse(slides); } catch { return res.status(400).json({ error: 'Invalid slides JSON' }); }
@@ -3538,7 +3559,7 @@ app.post('/api/generate-personalized-carousel', requireAuth, upload.array('faceI
 
   const brand = await getBrandAsync(brandId, req.user?.uid);
   const faceImagePaths = req.files.map(f => f.path);
-  const useFlux = (model || 'flux') === 'flux' && isFalEnabled();
+  const useFlux = (model || 'flux') === 'flux' && isFalEnabled(req);
 
   const jobId = crypto.randomUUID().slice(0, 12);
   const job = { id: jobId, brandId: brand.id, total: slides.length, completed: 0, current: 0, slides: [], status: 'running', error: null };
@@ -3551,12 +3572,12 @@ app.post('/api/generate-personalized-carousel', requireAuth, upload.array('faceI
       const slideData = slides[i];
       try {
         const scenarioPrompt = slideData.prompt || buildPersonalizedPrompt(slideData, brand);
-        const refined = await refinePromptWithClaude(scenarioPrompt, 'photo', slideData, brand);
+        const refined = await refinePromptWithClaude(scenarioPrompt, 'photo', slideData, brand, req);
         const finalPrompt = refined || scenarioPrompt;
 
         let buffer;
         if (useFlux) {
-          buffer = await generateWithFlux(faceImagePaths, finalPrompt);
+          buffer = await generateWithFlux(faceImagePaths, finalPrompt, { falKey: req.headers['x-fal-key'] });
         } else {
           const refBuffer = await fs.readFile(faceImagePaths[0]);
           const response = await openai.images.generate({
@@ -3638,45 +3659,8 @@ app.post('/api/upload-icon', requireAuth, upload.single('icon'), async (req, res
   }
 });
 
-// --- API Key Settings ---
-app.post('/api/settings', requireAuth, async (req, res) => {
-  try {
-    const { openaiKey, anthropicKey, falKey } = req.body || {};
-    const envPath = path.join(__dirname, '.env');
-
-    let envContent = '';
-    try {
-      envContent = await fs.readFile(envPath, 'utf-8');
-    } catch {
-      envContent = '';
-    }
-
-    const lines = envContent.split('\n').filter((l) => l.trim());
-    const envMap = {};
-    for (const line of lines) {
-      const [key, ...valParts] = line.split('=');
-      if (key) envMap[key.trim()] = valParts.join('=').trim();
-    }
-
-    if (openaiKey) envMap['OPENAI_API_KEY'] = openaiKey;
-    if (anthropicKey) envMap['ANTHROPIC_API_KEY'] = anthropicKey;
-    if (falKey) envMap['FAL_API_KEY'] = falKey;
-
-    const newContent = Object.entries(envMap)
-      .map(([k, v]) => `${k}=${v}`)
-      .join('\n') + '\n';
-
-    await fs.writeFile(envPath, newContent);
-
-    // Reload dotenv
-    dotenv.config({ path: envPath, override: true });
-
-    res.json({ ok: true });
-  } catch (error) {
-    console.error('[Settings]', error);
-    res.status(500).json({ error: safeErrorMessage(error) });
-  }
-});
+// API keys are now BYOK — stored in browser localStorage, sent via headers per request.
+// No server-side key storage needed.
 
 // Return 204 for missing brand icons (avoids noisy 404 in console)
 app.get('/brands/:brandId/assets/app-icon.png', async (req, res, next) => {
@@ -3699,8 +3683,8 @@ app.get('/api/images', requireAuth, async (req, res) => {
   try {
     const userId = req.user.uid;
 
-    // Local dev fallback — list files from outputDir
-    if (!db) {
+    // Local dev fallback — list files from outputDir (no Firestore or no Storage bucket)
+    if (!db || !bucket) {
       const files = await fs.readdir(outputDir).catch(() => []);
       const pngs = files.filter(f => f.endsWith('.png')).sort().reverse();
       const images = pngs.slice(0, 50).map(f => ({
@@ -3960,9 +3944,10 @@ app.post('/api/download-selected', requireAuth, async (req, res) => {
 const backgroundJobs = new Map();
 
 app.post('/api/backgrounds/generate-topics', requireAuth, async (req, res) => {
+  const anthropic = getAnthropic(req);
   const { brandId } = req.body || {};
   if (!brandId) return res.status(400).json({ error: 'Missing brandId' });
-  if (!anthropic) return res.status(500).json({ error: 'Claude not configured' });
+  if (!anthropic) return res.status(500).json({ error: 'Add your Anthropic API key in Settings.' });
 
   const brand = await getBrandAsync(brandId, req.user?.uid);
 
