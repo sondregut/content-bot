@@ -551,31 +551,51 @@ body {
   align-items: flex-start;
 }
 
-.editor-left-col {
+.unified-preview-section {
+  flex: 0 0 auto;
+  width: 420px;
+  position: sticky;
+  top: 24px;
+  align-self: flex-start;
+}
+
+.editor-form-area {
   flex: 1;
   min-width: 0;
   max-width: 560px;
 }
 
-.editor-right-col {
-  flex: 1;
-  min-width: 0;
-  max-width: 500px;
-  position: sticky;
-  top: 24px;
-  align-self: flex-start;
+/* Unified Preview Container */
+.preview-container {
+  position: relative;
+  margin-bottom: 12px;
+}
+
+.live-preview-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--ink);
+  border-radius: var(--radius);
+  padding: 16px;
+  min-height: 200px;
+  overflow: hidden;
+}
+
+.generated-preview-wrapper {
+  /* shown when AI slide is generated */
 }
 
 @media (max-width: 900px) {
   .editor-columns {
     flex-direction: column;
   }
-  .editor-left-col,
-  .editor-right-col {
-    max-width: 100%;
-  }
-  .editor-right-col {
+  .unified-preview-section {
+    width: 100%;
     position: static;
+  }
+  .editor-form-area {
+    max-width: 100%;
   }
 }
 
@@ -665,10 +685,6 @@ body {
 
 /* Slide Preview Mockup */
 
-.slide-preview-panel {
-  margin-bottom: 20px;
-}
-
 .preview-mockup {
   width: 216px;
   height: 384px;
@@ -684,6 +700,8 @@ body {
   box-shadow: var(--shadow);
   font-family: 'Space Grotesk', sans-serif;
   transition: height 0.2s ease;
+  transform-origin: top left;
+  flex-shrink: 0;
 }
 
 .preview-mockup.aspect-4-5 { height: 270px; }
@@ -1500,8 +1518,6 @@ input:focus, select:focus, textarea:focus {
 }
 
 /* Preview */
-
-.preview-section { margin-bottom: 0; }
 
 .preview-frame {
   background: var(--ink);

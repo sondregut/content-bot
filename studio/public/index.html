@@ -321,11 +321,11 @@
 
             <div class="slide-tabs" id="slide-tabs"></div>
 
-            <!-- Slide Preview (HTML mockup) -->
             <div class="editor-columns">
-            <div class="editor-left-col">
-
-            <div class="slide-preview-panel" id="slide-preview-panel">
+            <div class="unified-preview-section">
+              <div class="status" id="status">Ready.</div>
+              <div class="preview-container" id="preview-container">
+                <div class="live-preview-wrapper" id="live-preview-wrapper">
               <div class="preview-mockup" id="preview-mockup">
                 <div class="mockup-text-group" id="mockup-text-group">
                   <div class="mockup-micro" id="mockup-micro">BRAND</div>
@@ -361,7 +361,61 @@
                   <span class="mockup-icon-text" id="mockup-icon-text"></span>
                 </div>
               </div>
+                </div>
+                <div class="generated-preview-wrapper" id="generated-preview-wrapper" style="display:none">
+                  <div class="preview-frame" id="preview-frame">
+                    <button class="preview-expand-btn" id="preview-expand-btn" title="Expand preview" aria-label="Expand preview">&#x26F6;</button>
+                    <div class="loading-spinner" id="loading-spinner">
+                      <div class="spinner-ring"></div>
+                      <div class="spinner-text" id="spinner-text">Generating image...</div>
+                    </div>
+                    <img id="preview-image" alt="Generated slide" />
+                    <video id="preview-video" style="display:none;width:100%;max-height:100%;object-fit:contain" controls playsinline></video>
+                    <div class="preview-drag-overlay" id="preview-drag-overlay" style="display:none">
+                      <div class="preview-edit-group" id="preview-edit-group">
+                        <div class="preview-edit-micro" id="preview-edit-micro"></div>
+                        <div class="preview-edit-headline" id="preview-edit-headline"></div>
+                        <div class="preview-edit-body" id="preview-edit-body"></div>
+                      </div>
+                      <div class="preview-drag-hint" id="preview-drag-hint">Drag to move text &middot; Double-click to edit</div>
+                    </div>
+                  </div>
+                  <div class="edit-section" id="edit-section" style="display:none">
+                    <div class="edit-bar">
+                      <input type="text" id="edit-instructions" placeholder="e.g. make background darker, change text color to gold..." />
+                      <button type="button" class="btn primary small" id="apply-edit-btn">Apply Edit</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="download-buttons" id="download-buttons" style="display:none">
+                <button type="button" class="btn small primary" id="download-single-btn">Download This Slide</button>
+              </div>
+              <div class="caption-editor" id="caption-editor" style="display:none">
+                <textarea id="caption-textarea" rows="2" placeholder="Write a caption..."></textarea>
+              </div>
+              <div class="gallery-section" id="gallery-section" style="display:none">
+                <div class="gallery-header">
+                  <h3>Generated Slides</h3>
+                  <div class="gallery-actions">
+                    <button type="button" class="btn small accent" id="download-all-btn">Download All as ZIP</button>
+                    <button class="btn small tiktok-post-btn" id="tiktok-post-btn" style="display:none">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19.59 6.69a4.83 4.83 0 01-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 01-2.88 2.5 2.89 2.89 0 01-2.89-2.89 2.89 2.89 0 012.89-2.89c.28 0 .54.04.79.1v-3.5a6.37 6.37 0 00-.79-.05A6.34 6.34 0 003.15 15.2a6.34 6.34 0 006.34 6.34 6.34 6.34 0 006.34-6.34V8.73a8.19 8.19 0 004.76 1.52v-3.4a4.85 4.85 0 01-1-.16z"/></svg>
+                      Post to TikTok
+                    </button>
+                  </div>
+                </div>
+                <div class="gallery-strip" id="gallery-strip"></div>
+              </div>
+              <div class="progress-section" id="progress-section" style="display:none">
+                <div class="progress-label" id="progress-label">Generating...</div>
+                <div class="progress-bar">
+                  <div class="progress-fill" id="progress-fill"></div>
+                </div>
+              </div>
             </div>
+
+            <div class="editor-form-area">
 
             <form id="slide-form" class="slide-form">
               <div class="form-row">
@@ -803,68 +857,7 @@
               </div>
             </form>
 
-            </div><!-- /.editor-left-col -->
-
-            <div class="editor-right-col">
-
-            <div class="edit-section" id="edit-section" style="display:none">
-              <div class="edit-bar">
-                <input type="text" id="edit-instructions" placeholder="e.g. make background darker, change text color to gold..." />
-                <button type="button" class="btn primary small" id="apply-edit-btn">Apply Edit</button>
-              </div>
-            </div>
-
-            <div class="preview-section">
-              <div class="status" id="status">Ready.</div>
-              <div class="preview-frame" id="preview-frame">
-                <button class="preview-expand-btn" id="preview-expand-btn" title="Expand preview" aria-label="Expand preview">&#x26F6;</button>
-                <div class="loading-spinner" id="loading-spinner">
-                  <div class="spinner-ring"></div>
-                  <div class="spinner-text" id="spinner-text">Generating image...</div>
-                </div>
-                <img id="preview-image" alt="Generated slide" />
-                <video id="preview-video" style="display:none;width:100%;max-height:100%;object-fit:contain" controls playsinline></video>
-                <div class="preview-drag-overlay" id="preview-drag-overlay" style="display:none">
-                  <div class="preview-edit-group" id="preview-edit-group">
-                    <div class="preview-edit-micro" id="preview-edit-micro"></div>
-                    <div class="preview-edit-headline" id="preview-edit-headline"></div>
-                    <div class="preview-edit-body" id="preview-edit-body"></div>
-                  </div>
-                  <div class="preview-drag-hint" id="preview-drag-hint">Drag to move text &middot; Double-click to edit</div>
-                </div>
-              </div>
-              <div class="download-buttons" id="download-buttons" style="display:none">
-                <button type="button" class="btn small primary" id="download-single-btn">Download This Slide</button>
-              </div>
-            </div>
-
-            <!-- Post Caption (Instagram-style, below preview) -->
-            <div class="caption-editor" id="caption-editor" style="display:none">
-              <textarea id="caption-textarea" rows="2" placeholder="Write a caption..."></textarea>
-            </div>
-
-            <div class="gallery-section" id="gallery-section" style="display:none">
-              <div class="gallery-header">
-                <h3>Generated Slides</h3>
-                <div class="gallery-actions">
-                  <button type="button" class="btn small accent" id="download-all-btn">Download All as ZIP</button>
-                  <button class="btn small tiktok-post-btn" id="tiktok-post-btn" style="display:none">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19.59 6.69a4.83 4.83 0 01-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 01-2.88 2.5 2.89 2.89 0 01-2.89-2.89 2.89 2.89 0 012.89-2.89c.28 0 .54.04.79.1v-3.5a6.37 6.37 0 00-.79-.05A6.34 6.34 0 003.15 15.2a6.34 6.34 0 006.34 6.34 6.34 6.34 0 006.34-6.34V8.73a8.19 8.19 0 004.76 1.52v-3.4a4.85 4.85 0 01-1-.16z"/></svg>
-                    Post to TikTok
-                  </button>
-                </div>
-              </div>
-              <div class="gallery-strip" id="gallery-strip"></div>
-            </div>
-
-            <div class="progress-section" id="progress-section" style="display:none">
-              <div class="progress-label" id="progress-label">Generating...</div>
-              <div class="progress-bar">
-                <div class="progress-fill" id="progress-fill"></div>
-              </div>
-            </div>
-
-            </div><!-- /.editor-right-col -->
+            </div><!-- /.editor-form-area -->
             </div><!-- /.editor-columns -->
           </div>
         </main>

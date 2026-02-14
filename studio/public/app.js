@@ -14,6 +14,13 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
+// --- Slide AI detection ---
+function slideNeedsAI(slideType, imageUsage) {
+  if (slideType === 'photo' || slideType === 'video') return true;
+  if (slideType === 'mockup' && imageUsage === 'ai-background') return true;
+  return false;
+}
+
 // --- Focus trapping for modals ---
 function trapFocus(modal) {
   const focusable = modal.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
@@ -476,6 +483,51 @@ const previewOverlayLibrary = document.getElementById('preview-overlay-library')
 const previewOverlayRemove = document.getElementById('preview-overlay-remove');
 const previewImageBadge = document.getElementById('preview-image-badge');
 const previewBadgeImg = document.getElementById('preview-badge-img');
+
+// Unified preview refs
+const previewContainer = document.getElementById('preview-container');
+const livePreviewWrapper = document.getElementById('live-preview-wrapper');
+const generatedPreviewWrapper = document.getElementById('generated-preview-wrapper');
+
+// --- Preview mode switching ---
+let currentPreviewMode = 'live'; // 'live' or 'generated'
+
+function setPreviewMode(mode) {
+  currentPreviewMode = mode;
+  livePreviewWrapper.style.display = mode === 'live' ? 'flex' : 'none';
+  generatedPreviewWrapper.style.display = mode === 'generated' ? 'block' : 'none';
+  if (mode === 'live') scaleLivePreview();
+  // Update button text based on mode
+  const submitBtn = form.querySelector('button[type="submit"]');
+  if (submitBtn) {
+    const slide = slideEdits[currentSlideIndex];
+    const type = slideTypeSelect.value || slide?.type || 'text';
+    const usage = imageUsageSelect.value || slide?.imageUsage || 'phone';
+    submitBtn.textContent = slideNeedsAI(type, usage) ? 'Generate This Slide' : 'Render Preview';
+  }
+}
+
+function scaleLivePreview() {
+  if (!livePreviewWrapper || livePreviewWrapper.style.display === 'none') return;
+  const wrapperRect = livePreviewWrapper.getBoundingClientRect();
+  if (wrapperRect.width === 0) return;
+  const mockupW = 216;
+  const mockupH = previewMockup.offsetHeight || 384;
+  const availW = wrapperRect.width - 32; // account for padding
+  const availH = wrapperRect.height > 100 ? wrapperRect.height - 32 : 600;
+  const scale = Math.min(availW / mockupW, availH / mockupH, 3);
+  previewMockup.style.transform = `scale(${scale})`;
+  // Set wrapper height to fit scaled mockup
+  livePreviewWrapper.style.height = (mockupH * scale + 32) + 'px';
+}
+
+// ResizeObserver for live preview scaling
+if (typeof ResizeObserver !== 'undefined') {
+  const previewResizeObserver = new ResizeObserver(() => {
+    if (currentPreviewMode === 'live') scaleLivePreview();
+  });
+  if (livePreviewWrapper) previewResizeObserver.observe(livePreviewWrapper);
+}
 
 // --- Per-element Text Offsets (drag to move) ---
 let elementOffsets = {
@@ -2240,6 +2292,8 @@ function loadSlideIntoForm(index) {
 
   toggleTypeFields();
 
+  // Determine preview mode based on slide type and whether it has been generated
+  const needsAI = slideNeedsAI(slide.type, slide.imageUsage);
   if (generatedImages[index]) {
     const gen = generatedImages[index];
     if (gen.isVideo) {
@@ -2253,11 +2307,19 @@ function loadSlideIntoForm(index) {
     }
     downloadButtons.style.display = 'flex';
     statusEl.textContent = `Slide ${index + 1} generated.`;
-  } else {
+    setPreviewMode('generated');
+  } else if (needsAI) {
     previewImg.style.display = 'none';
     previewVideo.style.display = 'none';
     downloadButtons.style.display = 'none';
-    statusEl.textContent = 'Ready.';
+    statusEl.textContent = 'Ready — click Generate to create this slide.';
+    setPreviewMode('live');
+  } else {
+    previewImg.style.display = 'none';
+    previewVideo.style.display = 'none';
+    downloadButtons.style.display = 'flex';
+    statusEl.textContent = 'Live preview — updates instantly.';
+    setPreviewMode('live');
   }
   updateEditSection();
   updatePreviewDragOverlay();
@@ -2353,6 +2415,15 @@ function toggleTypeFields() {
   };
   document.getElementById('slideTypeHint').textContent = hints[type] || '';
   updatePreviewImageOverlay();
+
+  // Switch preview mode based on whether this type needs AI
+  const usage = imageUsageSelect.value;
+  const hasGenerated = !!generatedImages[currentSlideIndex];
+  if (hasGenerated) {
+    setPreviewMode('generated');
+  } else {
+    setPreviewMode('live');
+  }
 }
 
 function toggleMockupPhoneOptions() {
@@ -2401,6 +2472,15 @@ mockupThemeSelect.addEventListener('change', updatePreviewMockup);
 imageUsageSelect.addEventListener('change', () => {
   toggleMockupPhoneOptions();
   updatePreviewMockup();
+  // Update preview mode — ai-background needs AI, others don't
+  const type = slideTypeSelect.value;
+  const usage = imageUsageSelect.value;
+  const hasGenerated = !!generatedImages[currentSlideIndex];
+  if (hasGenerated) {
+    setPreviewMode('generated');
+  } else {
+    setPreviewMode('live');
+  }
 });
 
 document.getElementById('bgOverlayOpacity').addEventListener('change', updatePreviewMockup);
@@ -2709,6 +2789,9 @@ function updatePreviewMockup() {
 
   // Update image overlay state
   updatePreviewImageOverlay();
+
+  // Re-scale live preview if visible
+  if (currentPreviewMode === 'live') scaleLivePreview();
 }
 
 // --- Preview Image Overlay ---
@@ -2846,10 +2929,16 @@ mockupTextReset.addEventListener('click', resetTextOffset);
 
 // Drag handlers (mouse + touch) — per-element on the small preview
 {
-  const scale = 5;
+  function getMockupDragScale() {
+    // Base ratio: canvas(1080) / mockup(216) = 5
+    // Account for CSS transform scale on the mockup
+    const cssScale = previewMockup.getBoundingClientRect().width / 216;
+    return 5 / (cssScale || 1);
+  }
   let dragging = false;
   let startX, startY, startOffsetX, startOffsetY;
   let dragTarget = null; // 'micro' | 'headline' | 'body'
+  let dragScale = 5;
 
   function isEditing() {
     return mockupTextGroup.querySelector('[contenteditable="true"]') !== null;
@@ -2869,6 +2958,7 @@ mockupTextReset.addEventListener('click', resetTextOffset);
     dragTarget = getElementKey(el);
     selectedElement = dragTarget;
     dragging = true;
+    dragScale = getMockupDragScale();
     startX = clientX;
     startY = clientY;
     startOffsetX = elementOffsets[dragTarget].x;
@@ -2878,8 +2968,8 @@ mockupTextReset.addEventListener('click', resetTextOffset);
 
   function moveDrag(clientX, clientY) {
     if (!dragging || !dragTarget) return;
-    const dx = (clientX - startX) * scale;
-    const dy = (clientY - startY) * scale;
+    const dx = (clientX - startX) * dragScale;
+    const dy = (clientY - startY) * dragScale;
     elementOffsets[dragTarget].x = Math.max(-500, Math.min(500, startOffsetX + dx));
     elementOffsets[dragTarget].y = Math.max(-800, Math.min(800, startOffsetY + dy));
     applyTextOffset();
@@ -3050,6 +3140,14 @@ async function regenerateMockup() {
   if (!slide || slide.type !== 'mockup') return;
 
   saveCurrentSlideEdits();
+
+  // For non-AI mockups, just update the live preview — no server call
+  if (!slideNeedsAI(slide.type, slide.imageUsage)) {
+    updatePreviewMockup();
+    saveSession();
+    return;
+  }
+
   const payload = buildSlidePayload(slide, currentSlideIndex);
 
   statusEl.textContent = 'Repositioning...';
@@ -3065,6 +3163,7 @@ async function regenerateMockup() {
     previewImg.src = data.url;
     previewImg.style.display = 'block';
     statusEl.textContent = `Slide ${currentSlideIndex + 1} done.`;
+    setPreviewMode('generated');
     updateGallery();
     saveSession();
     updatePreviewDragOverlay();
@@ -3490,6 +3589,8 @@ form.addEventListener('submit', async (e) => {
   statusEl.textContent = isVideo
     ? `Generating video ${slideIndex + 1} (this may take 1-7 min)...`
     : `Generating slide ${slideIndex + 1}...`;
+  // Switch to generated view for the spinner
+  setPreviewMode('generated');
   previewImg.style.display = 'none';
   previewVideo.style.display = 'none';
   downloadButtons.style.display = 'none';
@@ -3525,6 +3626,7 @@ form.addEventListener('submit', async (e) => {
       statusEl.textContent = data.usedRefined
         ? `Slide ${slideIndex + 1} done (Claude-refined).`
         : `Slide ${slideIndex + 1} done.`;
+      setPreviewMode('generated');
       updatePreviewDragOverlay();
     }
 
@@ -3612,15 +3714,51 @@ applyEditBtn.addEventListener('click', async () => {
 });
 
 // --- Download Single ---
-downloadSingleBtn.addEventListener('click', () => {
+downloadSingleBtn.addEventListener('click', async () => {
   const gen = generatedImages[currentSlideIndex];
-  if (!gen) return;
-  const a = document.createElement('a');
-  a.href = `/api/download/${gen.filename}`;
-  a.download = gen.filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+  if (gen) {
+    const a = document.createElement('a');
+    a.href = `/api/download/${gen.filename}`;
+    a.download = gen.filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    return;
+  }
+
+  // Lazy render for non-AI slides: generate server PNG on demand
+  const slide = slideEdits[currentSlideIndex];
+  const type = slide?.type || 'text';
+  const usage = slide?.imageUsage || 'phone';
+  if (slideNeedsAI(type, usage)) return; // AI slides must be generated first
+
+  const slideIndex = currentSlideIndex;
+  statusEl.textContent = 'Rendering for download...';
+  downloadSingleBtn.disabled = true;
+  try {
+    const payload = buildSlidePayload(slide, slideIndex);
+    const res = await authFetch('/api/generate', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Render failed');
+
+    generatedImages[slideIndex] = { url: data.url, filename: data.filename, isVideo: false };
+    renderSlideTabs();
+
+    const a = document.createElement('a');
+    a.href = `/api/download/${data.filename}`;
+    a.download = data.filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    statusEl.textContent = `Slide ${slideIndex + 1} downloaded.`;
+  } catch (err) {
+    statusEl.textContent = `Download failed: ${err.message}`;
+  } finally {
+    downloadSingleBtn.disabled = false;
+  }
 });
 
 // --- Download All as ZIP ---
