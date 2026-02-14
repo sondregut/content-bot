@@ -40,9 +40,7 @@ async function authFetch(url, opts = {}) {
     overlay.classList.remove('visible');
     appShell.style.display = 'flex';
     // Reset state from any previous user session
-    brands = [];
-    currentBrand = null;
-    clearSession();
+    resetAppState();
     // Init app
     loadApiKeysFromStorage();
     try {
@@ -74,6 +72,7 @@ async function authFetch(url, opts = {}) {
     checkTikTokStatus();
     updateVaultCount();
   } else {
+    resetAppState();
     overlay.classList.add('visible');
     appShell.style.display = 'none';
   }
@@ -132,17 +131,9 @@ document.getElementById('google-login-btn').addEventListener('click', async () =
 });
 
 document.getElementById('sign-out-btn').addEventListener('click', async () => {
-  clearSession();
-  // Clear any active polling timers
-  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  resetAppState();
   // Close settings modal
   document.getElementById('settings-modal').style.display = 'none';
-  // Reset app state
-  brands = [];
-  currentBrand = null;
-  selectedIdea = null;
-  slideEdits = [];
-  generatedImages = {};
   if (firebase.apps.length) {
     await firebase.auth().signOut();
   } else {
@@ -189,6 +180,63 @@ let referenceImageFilename = null;
 let screenshotImageFilename = null;
 let slideReferenceImages = {}; // { slideIndex: { filename, displayName } }
 let generateAbort = null; // AbortController for in-flight single-slide generation
+
+function resetAppState() {
+  // Core brand/content state
+  brands = [];
+  currentBrand = null;
+  contentData = null;
+  selectedIdea = null;
+  pendingContentPillars = null;
+  pendingIconUrl = null;
+  currentSlideIndex = 0;
+  slideEdits = [];
+  generatedImages = {};
+
+  // Generation state
+  batchJobId = null;
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  if (generateAbort) { generateAbort.abort(); generateAbort = null; }
+
+  // Reference images
+  referenceImageFilename = null;
+  screenshotImageFilename = null;
+  slideReferenceImages = {};
+
+  // Brand creation/editing
+  editingBrandId = null;
+  if (brandCreationEventSource) { brandCreationEventSource.close(); brandCreationEventSource = null; }
+  if (brandCreationAbort) { brandCreationAbort.abort(); brandCreationAbort = null; }
+
+  // Website analysis
+  if (analysisDebounce) { clearTimeout(analysisDebounce); analysisDebounce = null; }
+  if (analysisAbort) { analysisAbort.abort(); analysisAbort = null; }
+  analysisStepsCollapsed = false;
+  analysisCompleteCount = 0;
+
+  // Canvas/element state
+  elementOffsets = { headline: {x:0,y:0}, body: {x:0,y:0}, micro: {x:0,y:0}, highlight: {x:0,y:0}, cta: {x:0,y:0} };
+  selectedElement = 'headline';
+
+  // Meme generator
+  personalizedScenarios = [];
+  faceImageFiles = [];
+  selectedScenario = null;
+  personalizeResults = [];
+  memeFilename = null;
+
+  // TikTok
+  tiktokConnected = false;
+  tiktokUsername = '';
+  if (tiktokPostPollTimer) { clearInterval(tiktokPostPollTimer); tiktokPostPollTimer = null; }
+
+  // Background generator
+  bgTopics = [];
+  if (bgPollTimer) { clearInterval(bgPollTimer); bgPollTimer = null; }
+
+  // Session storage
+  clearSession();
+}
 
 // --- DOM refs ---
 const brandSelector = document.getElementById('brand-selector');
