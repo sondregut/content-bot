@@ -80,6 +80,7 @@
               <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
             </optgroup>
           </select>
+          <button class="header-btn" id="header-media-btn" title="Media Library" aria-label="Media Library">&#128194;</button>
           <button class="header-btn" id="settings-btn" title="Settings" aria-label="Settings">&#9881;</button>
         </div>
       </header>
@@ -98,6 +99,7 @@
             <div class="sidebar-footer">
               <button type="button" class="sidebar-face-btn" id="sidebar-face-btn">&#128247; Face Studio</button>
               <button type="button" class="sidebar-face-btn" id="sidebar-meme-btn">&#127912; Meme Studio</button>
+              <button type="button" class="sidebar-face-btn" id="sidebar-media-btn">&#128194; Media Library</button>
             </div>
           </div>
 
@@ -867,32 +869,93 @@
             </div><!-- /.editor-form-area -->
             </div><!-- /.editor-columns -->
           </div>
+
+          <!-- Media Library (full-page view) -->
+          <div class="media-library-view" id="media-library-view" style="display:none">
+            <div class="media-library-layout">
+              <aside class="media-library-sidebar">
+                <div class="media-sidebar-header">
+                  <button class="media-back-btn" id="media-back-btn" title="Back">&larr;</button>
+                  <h2>Media Library</h2>
+                </div>
+                <div class="media-sidebar-search">
+                  <input type="text" id="media-search-input" placeholder="Search by prompt, brand..." autocomplete="off" />
+                </div>
+                <nav class="media-filter-nav">
+                  <button class="media-filter-btn active" data-filter="all">All <span class="media-filter-count" id="ml-count-all">0</span></button>
+                  <button class="media-filter-btn" data-filter="liked">Liked <span class="media-filter-count" id="ml-count-liked">0</span></button>
+                  <button class="media-filter-btn" data-filter="image">Images <span class="media-filter-count" id="ml-count-images">0</span></button>
+                  <button class="media-filter-btn" data-filter="video">Videos <span class="media-filter-count" id="ml-count-videos">0</span></button>
+                </nav>
+                <div class="media-sidebar-brand">
+                  <label class="label" for="media-brand-filter">Brand</label>
+                  <select id="media-brand-filter"><option value="">All brands</option></select>
+                </div>
+              </aside>
+              <div class="media-library-content">
+                <div class="media-toolbar">
+                  <span class="media-result-count" id="media-result-count">0 items</span>
+                  <div class="media-size-slider">
+                    <span class="media-size-label">Size</span>
+                    <input type="range" id="media-thumb-slider" min="120" max="300" value="180" />
+                  </div>
+                </div>
+                <div class="media-grid-wrapper" id="media-grid-wrapper">
+                  <div class="media-grid-empty" id="media-grid-empty" style="display:none">No assets yet. Generate slides to fill your library.</div>
+                  <div id="media-grid-content"></div>
+                  <div class="media-load-more" id="media-load-more" style="display:none">
+                    <button class="btn secondary" id="media-load-more-btn">Load more</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
         </main>
       </div>
     </div>
 
-    <!-- Photo Vault -->
-    <button class="vault-toggle-btn" id="vault-toggle-btn">
-      <span>Vault</span>
-      <span class="vault-count" id="vault-count">0</span>
-    </button>
-    <div class="vault-backdrop" id="vault-backdrop"></div>
-    <div class="vault-panel" id="vault-panel">
-      <div class="vault-header">
-        <h3>Photo Vault</h3>
-        <button class="vault-close-btn" id="vault-close-btn" aria-label="Close vault">&times;</button>
-      </div>
-      <div class="vault-grid" id="vault-grid"></div>
-    </div>
-
-    <!-- Vault Lightbox -->
-    <div class="vault-lightbox" id="vault-lightbox" role="dialog" aria-modal="true" aria-label="Image viewer">
-      <button class="vault-lightbox-close" id="vault-lightbox-close" aria-label="Close">&times;</button>
-      <button class="vault-lightbox-nav vault-lightbox-prev" id="vault-lightbox-prev" aria-label="Previous">&#8249;</button>
-      <button class="vault-lightbox-nav vault-lightbox-next" id="vault-lightbox-next" aria-label="Next">&#8250;</button>
-      <img class="vault-lightbox-img" id="vault-lightbox-img" alt="Vault image" />
-      <div class="vault-lightbox-footer" id="vault-lightbox-footer">
-        <button class="vault-lightbox-dl" id="vault-lightbox-dl">Download</button>
+    <!-- Media Detail Overlay -->
+    <div class="media-detail-overlay" id="media-detail-overlay" style="display:none" role="dialog" aria-modal="true" aria-label="Asset detail">
+      <div class="media-detail-panel">
+        <button class="media-detail-close" id="media-detail-close" aria-label="Close">&times;</button>
+        <button class="media-detail-nav media-detail-prev" id="media-detail-prev" aria-label="Previous">&#8249;</button>
+        <button class="media-detail-nav media-detail-next" id="media-detail-next" aria-label="Next">&#8250;</button>
+        <div class="media-detail-preview" id="media-detail-preview"></div>
+        <div class="media-detail-info">
+          <div class="media-detail-meta">
+            <div class="media-detail-row">
+              <span class="media-detail-label">Prompt</span>
+              <p class="media-detail-value media-detail-prompt" id="media-detail-prompt">—</p>
+              <button class="media-copy-btn" id="media-copy-prompt" title="Copy prompt">Copy</button>
+            </div>
+            <div class="media-detail-row">
+              <span class="media-detail-label">Model</span>
+              <span class="media-detail-value" id="media-detail-model">—</span>
+            </div>
+            <div class="media-detail-row">
+              <span class="media-detail-label">Dimensions</span>
+              <span class="media-detail-value" id="media-detail-dims">—</span>
+            </div>
+            <div class="media-detail-row">
+              <span class="media-detail-label">Brand</span>
+              <span class="media-detail-value" id="media-detail-brand">—</span>
+            </div>
+            <div class="media-detail-row">
+              <span class="media-detail-label">Created</span>
+              <span class="media-detail-value" id="media-detail-date">—</span>
+            </div>
+            <div class="media-detail-row">
+              <span class="media-detail-label">Type</span>
+              <span class="media-detail-value" id="media-detail-type">—</span>
+            </div>
+          </div>
+          <div class="media-detail-actions">
+            <button class="btn primary" id="media-detail-download">Download</button>
+            <button class="btn secondary" id="media-detail-like">Like</button>
+            <button class="btn danger" id="media-detail-delete">Delete</button>
+          </div>
+        </div>
       </div>
     </div>
 

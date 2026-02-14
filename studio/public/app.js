@@ -152,7 +152,7 @@ async function authFetch(url, opts = {}) {
     }
     updateIconPreview();
     checkTikTokStatus();
-    updateVaultCount();
+    fetchMLCounts();
     loadUserPersons();
   } else {
     resetAppState();
@@ -291,14 +291,12 @@ function resetAppState() {
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
   if (generateAbort) { generateAbort.abort(); generateAbort = null; }
 
-  // Vault state
-  vaultImages = [];
-  vaultHasMore = false;
-  vaultNextCursor = null;
-  vaultLoading = false;
-  vaultLastFetched = 0;
-  const vaultCountEl = document.getElementById('vault-count');
-  if (vaultCountEl) vaultCountEl.textContent = '0';
+  // Media library state
+  mlImages = [];
+  mlHasMore = false;
+  mlNextCursor = null;
+  mlLoading = false;
+  mlLastFetched = 0;
 
   // Persons
   userPersons = [];
@@ -1175,6 +1173,7 @@ brandSelector.addEventListener('change', async () => {
   editorArea.style.display = 'none';
   personalizeView.style.display = 'none';
   if (document.getElementById('meme-view')) document.getElementById('meme-view').style.display = 'none';
+  if (document.getElementById('media-library-view')) document.getElementById('media-library-view').style.display = 'none';
   emptyState.style.display = 'flex';
   renderBrandSelector(); // update edit button visibility
   await loadContentIdeas();
@@ -1368,6 +1367,7 @@ function openBrandCreationSidebar() {
   try { document.getElementById('content-plan-view').style.display = 'none'; } catch {}
   try { document.getElementById('personalize-view').style.display = 'none'; } catch {}
   try { document.getElementById('meme-view').style.display = 'none'; } catch {}
+  try { document.getElementById('media-library-view').style.display = 'none'; } catch {}
   // Reset form state
   document.getElementById('brand-creation-url').value = '';
   document.getElementById('brand-creation-url').focus();
@@ -2343,6 +2343,7 @@ function selectIdea(ideaId) {
   emptyState.style.display = 'none';
   personalizeView.style.display = 'none';
   if (document.getElementById('meme-view')) document.getElementById('meme-view').style.display = 'none';
+  if (document.getElementById('media-library-view')) document.getElementById('media-library-view').style.display = 'none';
   document.getElementById('content-plan-view').style.display = 'none';
   editorArea.style.display = 'block';
 
@@ -2396,6 +2397,7 @@ function loadFreeformContent(data) {
   emptyState.style.display = 'none';
   personalizeView.style.display = 'none';
   if (document.getElementById('meme-view')) document.getElementById('meme-view').style.display = 'none';
+  if (document.getElementById('media-library-view')) document.getElementById('media-library-view').style.display = 'none';
   editorArea.style.display = 'block';
 
   ideaBadge.textContent = 'AI';
@@ -3969,7 +3971,7 @@ form.addEventListener('submit', async (e) => {
     updateGallery();
     updateEditSection();
     saveSession();
-    addToVault(data.url, data.filename);
+    invalidateMediaLibrary();
   } catch (err) {
     if (err.name === 'AbortError') return;
     statusEl.textContent = `Error: ${err.message}`;
@@ -4037,7 +4039,7 @@ applyEditBtn.addEventListener('click', async () => {
     renderSlideTabs();
     updateGallery();
     saveSession();
-    addToVault(data.url, data.filename);
+    invalidateMediaLibrary();
   } catch (err) {
     if (err.name === 'AbortError') return;
     statusEl.textContent = `Edit error: ${err.message}`;
@@ -4189,7 +4191,7 @@ async function pollBatchStatus() {
     for (const slide of job.slides) {
       if (slide.ok && slide.url) {
         const idx = slide.slideNumber - 1;
-        if (!generatedImages[idx]) addToVault(slide.url, slide.filename);
+        if (!generatedImages[idx]) invalidateMediaLibrary();
         generatedImages[idx] = { url: slide.url, filename: slide.filename, isVideo: slide.isVideo || false };
       }
     }
@@ -4498,6 +4500,7 @@ autoGenerateBtn.addEventListener('click', async () => {
     editorArea.style.display = 'none';
     personalizeView.style.display = 'none';
     if (document.getElementById('meme-view')) document.getElementById('meme-view').style.display = 'none';
+  if (document.getElementById('media-library-view')) document.getElementById('media-library-view').style.display = 'none';
     const contentPlanView = document.getElementById('content-plan-view');
     contentPlanView.style.display = 'block';
     document.getElementById('content-plan-subtitle').textContent =
@@ -4524,6 +4527,7 @@ function openPersonalizeView() {
   emptyState.style.display = 'none';
   editorArea.style.display = 'none';
   if (document.getElementById('meme-view')) document.getElementById('meme-view').style.display = 'none';
+  if (document.getElementById('media-library-view')) document.getElementById('media-library-view').style.display = 'none';
   personalizeView.style.display = 'block';
   renderFaceStudioPersons();
   renderFaceStudioPersonDetail();
@@ -4558,6 +4562,7 @@ function openMemeView() {
   editorArea.style.display = 'none';
   personalizeView.style.display = 'none';
   document.getElementById('content-plan-view').style.display = 'none';
+  if (document.getElementById('media-library-view')) document.getElementById('media-library-view').style.display = 'none';
   memeView.style.display = 'block';
 }
 
@@ -4611,7 +4616,7 @@ document.getElementById('generate-meme-btn').addEventListener('click', async () 
     memeFilename = data.filename;
     downloadMemeBtn.style.display = 'inline-block';
     memeStatus.textContent = '';
-    addToVault(data.url, data.filename);
+    invalidateMediaLibrary();
   } catch (err) {
     memeStatus.textContent = err.message || 'Generation failed';
   } finally {
@@ -4978,6 +4983,7 @@ function restoreSession(rawSession) {
         emptyState.style.display = 'none';
         personalizeView.style.display = 'none';
         if (document.getElementById('meme-view')) document.getElementById('meme-view').style.display = 'none';
+  if (document.getElementById('media-library-view')) document.getElementById('media-library-view').style.display = 'none';
         editorArea.style.display = 'block';
         ideaBadge.textContent = session.selectedIdeaId;
         ideaTitle.textContent = session.selectedIdeaTitle || 'Restored Session';
@@ -5000,113 +5006,166 @@ function clearSession() {
   localStorage.removeItem(SESSION_KEY);
 }
 
-// --- Photo Vault (Firestore-backed) ---
+// --- Media Library ---
 // =============================================
 
-let vaultImages = [];
-let vaultHasMore = false;
-let vaultNextCursor = null;
-let vaultLoading = false;
-let vaultLastFetched = 0; // timestamp of last successful fetch
-const VAULT_CACHE_TTL = 60 * 60 * 1000; // 1 hour (signed URLs last 2h)
+let mlImages = [];
+let mlHasMore = false;
+let mlNextCursor = null;
+let mlLoading = false;
+let mlLastFetched = 0;
+let mlFilter = 'all'; // 'all' | 'liked' | 'image' | 'video'
+let mlBrandFilter = '';
+let mlSearchQuery = '';
+let mlThumbSize = 180;
+let mlDetailIndex = -1;
+const ML_CACHE_TTL = 60 * 60 * 1000;
 
-async function fetchVaultImages(reset = false) {
-  if (vaultLoading) return;
-  vaultLoading = true;
+const mediaLibraryView = document.getElementById('media-library-view');
+const mediaGridContent = document.getElementById('media-grid-content');
+const mediaGridEmpty = document.getElementById('media-grid-empty');
+const mediaLoadMore = document.getElementById('media-load-more');
+const mediaDetailOverlay = document.getElementById('media-detail-overlay');
+
+function invalidateMediaLibrary() {
+  mlLastFetched = 0;
+  fetchMLCounts();
+}
+
+async function fetchMLCounts() {
   try {
-    if (reset) {
-      vaultImages = [];
-      vaultHasMore = false;
-      vaultNextCursor = null;
-    }
+    const res = await authFetch('/api/images/counts');
+    if (!res.ok) return;
+    const d = await res.json();
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+    set('ml-count-all', d.all || 0);
+    set('ml-count-liked', d.liked || 0);
+    set('ml-count-images', d.images || 0);
+    set('ml-count-videos', d.videos || 0);
+  } catch (err) { console.warn('[ML] Counts fetch failed:', err.message); }
+}
+
+async function fetchMLImages(reset = false) {
+  if (mlLoading) return;
+  mlLoading = true;
+  try {
+    if (reset) { mlImages = []; mlHasMore = false; mlNextCursor = null; }
     let url = '/api/images?limit=50';
-    if (vaultNextCursor && !reset) url += `&startAfter=${vaultNextCursor}`;
+    if (mlFilter === 'liked') url += '&liked=true';
+    else if (mlFilter === 'image') url += '&type=image';
+    else if (mlFilter === 'video') url += '&type=video';
+    if (mlBrandFilter) url += `&brand=${encodeURIComponent(mlBrandFilter)}`;
+    if (mlSearchQuery) url += `&search=${encodeURIComponent(mlSearchQuery)}`;
+    if (mlNextCursor && !reset) url += `&startAfter=${mlNextCursor}`;
     const res = await authFetch(url);
     if (!res.ok) throw new Error('Failed to load images');
     const data = await res.json();
-    if (reset) {
-      vaultImages = data.images;
-    } else {
-      vaultImages = vaultImages.concat(data.images);
-    }
-    vaultHasMore = data.hasMore;
-    vaultNextCursor = data.nextCursor;
-    vaultLastFetched = Date.now();
+    if (reset) mlImages = data.images;
+    else mlImages = mlImages.concat(data.images);
+    mlHasMore = data.hasMore;
+    mlNextCursor = data.nextCursor;
+    mlLastFetched = Date.now();
   } catch (err) {
-    console.error('Failed to fetch vault images:', err);
+    console.error('[ML] Fetch failed:', err);
   } finally {
-    vaultLoading = false;
+    mlLoading = false;
   }
 }
 
-async function fetchVaultCount() {
-  try {
-    const res = await authFetch('/api/images/count');
-    if (!res.ok) return;
-    const data = await res.json();
-    const el = document.getElementById('vault-count');
-    if (el) el.textContent = data.count || 0;
-  } catch (err) { console.warn('[Vault] Count fetch failed:', err.message); }
+function groupByDate(images) {
+  const groups = {};
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
+  for (const img of images) {
+    let label = 'Older';
+    if (img.createdAt) {
+      const d = new Date(img.createdAt); d.setHours(0, 0, 0, 0);
+      if (d.getTime() === today.getTime()) label = 'Today';
+      else if (d.getTime() === yesterday.getTime()) label = 'Yesterday';
+      else label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    }
+    if (!groups[label]) groups[label] = [];
+    groups[label].push(img);
+  }
+  return groups;
 }
 
-// Images are auto-saved server-side now; just refresh the count
-function addToVault(_url, _filename) {
-  vaultLastFetched = 0; // invalidate cache so next open fetches fresh
-  fetchVaultCount();
+function isVideoAsset(img) {
+  return img.type === 'video' || img.type === 'carousel-video' || (img.filename && img.filename.endsWith('.mp4'));
 }
 
-function updateVaultCount() {
-  fetchVaultCount();
-}
-
-function renderVault() {
-  const grid = document.getElementById('vault-grid');
-  if (!grid) return;
-  if (vaultLoading && vaultImages.length === 0) {
-    grid.innerHTML = '<div style="padding:24px;text-align:center;color:#9ca3af;font-size:0.9rem;">Loading...</div>';
+function renderMLGrid() {
+  if (!mediaGridContent) return;
+  if (mlLoading && mlImages.length === 0) {
+    mediaGridContent.innerHTML = '<div style="padding:40px;text-align:center;color:#9ca3af;font-size:0.9rem;">Loading...</div>';
+    mediaGridEmpty.style.display = 'none';
+    mediaLoadMore.style.display = 'none';
     return;
   }
-  if (vaultImages.length === 0) {
-    grid.innerHTML = '<div style="padding:24px;text-align:center;color:#9ca3af;font-size:0.9rem;">No images yet. Generate slides to fill your vault.</div>';
+  if (mlImages.length === 0) {
+    mediaGridContent.innerHTML = '';
+    mediaGridEmpty.style.display = 'block';
+    mediaLoadMore.style.display = 'none';
     return;
   }
-  let html = vaultImages.map(v =>
-    `<div class="vault-item">
-      <img src="${v.url}" alt="${v.filename || 'image'}" loading="lazy" />
-      <div class="vault-item-actions">
-        <button class="vault-dl-btn" data-url="${v.url}" data-filename="${v.filename || 'image.png'}" title="Download">&#8681;</button>
-        <button class="vault-rm-btn" data-id="${v.id}" title="Remove">&times;</button>
-      </div>
-    </div>`
-  ).join('');
-
-  if (vaultHasMore) {
-    html += `<div style="grid-column: 1/-1; text-align:center; padding:12px;">
-      <button id="vault-load-more" style="padding:8px 24px;border:1px solid #374151;background:#1f2937;color:#d1d5db;border-radius:6px;cursor:pointer;">Load more</button>
-    </div>`;
+  mediaGridEmpty.style.display = 'none';
+  const groups = groupByDate(mlImages);
+  let html = '';
+  let globalIdx = 0;
+  const indexMap = {};
+  for (const [label, imgs] of Object.entries(groups)) {
+    html += `<div class="media-date-group"><div class="media-date-label">${label}</div><div class="media-date-grid">`;
+    for (const img of imgs) {
+      indexMap[globalIdx] = img;
+      const isVid = isVideoAsset(img);
+      const typeLabel = isVid ? 'Video' : (img.type || 'Image');
+      const likedClass = img.liked ? ' liked' : '';
+      const heartIcon = img.liked ? '&#9829;' : '&#9825;';
+      html += `<div class="media-thumb" data-idx="${globalIdx}">`;
+      if (isVid) {
+        html += `<video src="${img.url}" muted preload="metadata"></video>`;
+      } else {
+        html += `<img src="${img.url}" alt="${img.filename || 'image'}" loading="lazy" />`;
+      }
+      html += `<span class="media-thumb-type">${typeLabel}</span>`;
+      html += `<div class="media-thumb-overlay">`;
+      html += `<button class="media-thumb-action${likedClass}" data-action="like" data-id="${img.id}" title="Like">${heartIcon}</button>`;
+      html += `<button class="media-thumb-action" data-action="download" data-url="${img.url}" data-filename="${img.filename || 'image.png'}" title="Download">&#8681;</button>`;
+      html += `</div></div>`;
+      globalIdx++;
+    }
+    html += `</div></div>`;
   }
-  grid.innerHTML = html;
+  mediaGridContent.innerHTML = html;
+  mediaLoadMore.style.display = mlHasMore ? 'block' : 'none';
 
-  grid.querySelectorAll('.vault-rm-btn').forEach(btn => {
+  const countEl = document.getElementById('media-result-count');
+  if (countEl) countEl.textContent = `${mlImages.length} item${mlImages.length !== 1 ? 's' : ''}`;
+
+  // Event listeners
+  mediaGridContent.querySelectorAll('.media-thumb').forEach(el => {
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('.media-thumb-action')) return;
+      openMediaDetail(parseInt(el.dataset.idx));
+    });
+  });
+  mediaGridContent.querySelectorAll('[data-action="like"]').forEach(btn => {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
       const id = btn.dataset.id;
-      btn.disabled = true;
-      btn.textContent = '...';
       try {
-        const res = await authFetch(`/api/images/${id}`, { method: 'DELETE' });
+        const res = await authFetch(`/api/images/${id}/like`, { method: 'PATCH' });
         if (res.ok) {
-          vaultImages = vaultImages.filter(v => v.id !== id);
-          fetchVaultCount();
-          renderVault();
+          const data = await res.json();
+          const img = mlImages.find(i => i.id === id);
+          if (img) img.liked = data.liked;
+          renderMLGrid();
+          fetchMLCounts();
         }
-      } catch (err) {
-        console.error('Delete failed:', err);
-      }
+      } catch (err) { console.error('[ML] Like failed:', err); }
     });
   });
-
-  grid.querySelectorAll('.vault-dl-btn').forEach(btn => {
+  mediaGridContent.querySelectorAll('[data-action="download"]').forEach(btn => {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
       try {
@@ -5120,125 +5179,211 @@ function renderVault() {
       } catch { window.open(btn.dataset.url, '_blank'); }
     });
   });
-
-  grid.querySelectorAll('.vault-item img').forEach((img, idx) => {
-    img.addEventListener('click', () => openVaultLightbox(idx));
-  });
-
-  document.getElementById('vault-load-more')?.addEventListener('click', async () => {
-    await fetchVaultImages(false);
-    renderVault();
-  });
 }
 
-// --- Vault Lightbox ---
-let lightboxIndex = 0;
-const lightboxEl = document.getElementById('vault-lightbox');
-const lightboxImg = document.getElementById('vault-lightbox-img');
-
-function openVaultLightbox(idx) {
-  lightboxIndex = idx;
-  updateLightboxImage();
-  lightboxEl.classList.add('active');
+// --- Media Detail Panel ---
+function openMediaDetail(idx) {
+  mlDetailIndex = idx;
+  updateMediaDetail();
+  mediaDetailOverlay.style.display = 'flex';
   document.body.style.overflow = 'hidden';
 }
 
-function closeLightbox() {
-  lightboxEl.classList.remove('active');
+function closeMediaDetail() {
+  mediaDetailOverlay.style.display = 'none';
   document.body.style.overflow = '';
 }
 
-function updateLightboxImage() {
-  if (!vaultImages[lightboxIndex]) return;
-  lightboxImg.src = vaultImages[lightboxIndex].url;
+function updateMediaDetail() {
+  const img = mlImages[mlDetailIndex];
+  if (!img) return;
+  const preview = document.getElementById('media-detail-preview');
+  const isVid = isVideoAsset(img);
+  if (isVid) {
+    preview.innerHTML = `<video src="${img.url}" controls autoplay muted style="max-width:100%;max-height:100%;object-fit:contain;"></video>`;
+  } else {
+    preview.innerHTML = `<img src="${img.url}" alt="${img.filename || 'image'}" />`;
+  }
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  set('media-detail-prompt', img.refinedPrompt || img.prompt || '—');
+  set('media-detail-model', img.model || '—');
+  set('media-detail-dims', (img.width && img.height) ? `${img.width} x ${img.height}` : '—');
+  set('media-detail-brand', img.brandName || '—');
+  set('media-detail-type', img.type || '—');
+  set('media-detail-date', img.createdAt ? new Date(img.createdAt).toLocaleString() : '—');
+
+  const likeBtn = document.getElementById('media-detail-like');
+  if (likeBtn) likeBtn.textContent = img.liked ? 'Unlike' : 'Like';
 }
 
-document.getElementById('vault-lightbox-close').addEventListener('click', closeLightbox);
-lightboxEl.addEventListener('click', (e) => { if (e.target === lightboxEl) closeLightbox(); });
-document.getElementById('vault-lightbox-prev').addEventListener('click', (e) => {
+document.getElementById('media-detail-close')?.addEventListener('click', closeMediaDetail);
+mediaDetailOverlay?.addEventListener('click', (e) => { if (e.target === mediaDetailOverlay) closeMediaDetail(); });
+
+document.getElementById('media-detail-prev')?.addEventListener('click', (e) => {
   e.stopPropagation();
-  if (lightboxIndex > 0) { lightboxIndex--; updateLightboxImage(); }
+  if (mlDetailIndex > 0) { mlDetailIndex--; updateMediaDetail(); }
 });
-document.getElementById('vault-lightbox-next').addEventListener('click', (e) => {
+document.getElementById('media-detail-next')?.addEventListener('click', (e) => {
   e.stopPropagation();
-  if (lightboxIndex < vaultImages.length - 1) { lightboxIndex++; updateLightboxImage(); }
+  if (mlDetailIndex < mlImages.length - 1) { mlDetailIndex++; updateMediaDetail(); }
 });
-document.getElementById('vault-lightbox-dl').addEventListener('click', async (e) => {
-  e.stopPropagation();
-  const v = vaultImages[lightboxIndex];
-  if (!v) return;
+
+document.getElementById('media-detail-download')?.addEventListener('click', async () => {
+  const img = mlImages[mlDetailIndex];
+  if (!img) return;
   try {
-    const res = await fetch(v.url);
+    const res = await fetch(img.url);
     const blob = await res.blob();
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = v.filename || 'image.png';
+    a.download = img.filename || 'image.png';
     a.click();
     URL.revokeObjectURL(a.href);
-  } catch { window.open(v.url, '_blank'); }
-});
-document.addEventListener('keydown', (e) => {
-  if (!lightboxEl.classList.contains('active')) return;
-  if (e.key === 'Escape') closeLightbox();
-  else if (e.key === 'ArrowLeft' && lightboxIndex > 0) { lightboxIndex--; updateLightboxImage(); }
-  else if (e.key === 'ArrowRight' && lightboxIndex < vaultImages.length - 1) { lightboxIndex++; updateLightboxImage(); }
+  } catch { window.open(img.url, '_blank'); }
 });
 
-async function migrateLocalVault() {
-  const uid = firebase.auth?.()?.currentUser?.uid;
-  if (!uid) return;
-  const migrationKey = `vault-migrated-${uid}`;
-  if (localStorage.getItem(migrationKey)) return;
-
-  // Read old localStorage vault
-  const oldKey = `carousel-studio-vault-${uid}`;
-  let oldVault = [];
-  try { oldVault = JSON.parse(localStorage.getItem(oldKey) || '[]'); } catch { /* ignore */ }
-
-  if (oldVault.length > 0) {
-    const filenames = oldVault.map(v => v.filename).filter(Boolean);
-    if (filenames.length > 0) {
-      try {
-        await authFetch('/api/images/migrate', {
-          method: 'POST',
-          body: JSON.stringify({ filenames }),
-        });
-      } catch { /* migration is best-effort */ }
+document.getElementById('media-detail-like')?.addEventListener('click', async () => {
+  const img = mlImages[mlDetailIndex];
+  if (!img) return;
+  try {
+    const res = await authFetch(`/api/images/${img.id}/like`, { method: 'PATCH' });
+    if (res.ok) {
+      const data = await res.json();
+      img.liked = data.liked;
+      updateMediaDetail();
+      fetchMLCounts();
     }
-  }
+  } catch (err) { console.error('[ML] Like failed:', err); }
+});
 
-  localStorage.setItem(migrationKey, '1');
-  // Clean up old key
-  try { localStorage.removeItem(oldKey); } catch { /* ignore */ }
-}
+document.getElementById('media-detail-delete')?.addEventListener('click', async () => {
+  const img = mlImages[mlDetailIndex];
+  if (!img || !confirm('Delete this asset?')) return;
+  try {
+    const res = await authFetch(`/api/images/${img.id}`, { method: 'DELETE' });
+    if (res.ok) {
+      mlImages.splice(mlDetailIndex, 1);
+      if (mlImages.length === 0) { closeMediaDetail(); renderMLGrid(); fetchMLCounts(); return; }
+      if (mlDetailIndex >= mlImages.length) mlDetailIndex = mlImages.length - 1;
+      updateMediaDetail();
+      renderMLGrid();
+      fetchMLCounts();
+    }
+  } catch (err) { console.error('[ML] Delete failed:', err); }
+});
 
-async function openVault() {
-  document.getElementById('vault-panel').classList.add('open');
-  document.getElementById('vault-backdrop').classList.add('open');
-  // Run one-time migration
-  await migrateLocalVault();
-  // Use cached images if fetched recently (signed URLs valid for 2h, cache for 1h)
-  const cacheValid = vaultImages.length > 0 && (Date.now() - vaultLastFetched) < VAULT_CACHE_TTL;
+document.getElementById('media-copy-prompt')?.addEventListener('click', () => {
+  const img = mlImages[mlDetailIndex];
+  if (!img) return;
+  const text = img.refinedPrompt || img.prompt || '';
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.getElementById('media-copy-prompt');
+    if (btn) { btn.textContent = 'Copied!'; setTimeout(() => btn.textContent = 'Copy', 1500); }
+  });
+});
+
+document.addEventListener('keydown', (e) => {
+  if (mediaDetailOverlay?.style.display !== 'flex') return;
+  if (e.key === 'Escape') closeMediaDetail();
+  else if (e.key === 'ArrowLeft' && mlDetailIndex > 0) { mlDetailIndex--; updateMediaDetail(); }
+  else if (e.key === 'ArrowRight' && mlDetailIndex < mlImages.length - 1) { mlDetailIndex++; updateMediaDetail(); }
+});
+
+// --- Media Library Navigation ---
+async function openMediaLibrary() {
+  // Hide all other views
+  emptyState.style.display = 'none';
+  editorArea.style.display = 'none';
+  personalizeView.style.display = 'none';
+  if (document.getElementById('meme-view')) document.getElementById('meme-view').style.display = 'none';
+  document.getElementById('content-plan-view').style.display = 'none';
+  mediaLibraryView.style.display = 'block';
+
+  // Populate brand dropdown
+  populateMLBrandDropdown();
+
+  // Fetch data if cache expired
+  const cacheValid = mlImages.length > 0 && (Date.now() - mlLastFetched) < ML_CACHE_TTL;
+  fetchMLCounts();
   if (cacheValid) {
-    renderVault();
+    renderMLGrid();
     return;
   }
-  renderVault(); // show loading state
-  await fetchVaultImages(true);
-  renderVault();
+  renderMLGrid(); // show loading state
+  await fetchMLImages(true);
+  renderMLGrid();
 }
 
-function closeVault() {
-  document.getElementById('vault-panel').classList.remove('open');
-  document.getElementById('vault-backdrop').classList.remove('open');
+function closeMediaLibrary() {
+  mediaLibraryView.style.display = 'none';
+  if (selectedIdea) {
+    editorArea.style.display = 'block';
+  } else {
+    emptyState.style.display = 'flex';
+  }
 }
 
-// Vault event listeners
-document.getElementById('vault-toggle-btn')?.addEventListener('click', openVault);
-document.getElementById('vault-close-btn')?.addEventListener('click', closeVault);
-document.getElementById('vault-backdrop')?.addEventListener('click', closeVault);
+function populateMLBrandDropdown() {
+  const select = document.getElementById('media-brand-filter');
+  if (!select) return;
+  const brands = document.querySelectorAll('#brand-select option');
+  let html = '<option value="">All brands</option>';
+  brands.forEach(opt => {
+    if (opt.value && opt.value !== 'new') {
+      html += `<option value="${opt.value}">${opt.textContent}</option>`;
+    }
+  });
+  select.innerHTML = html;
+  select.value = mlBrandFilter;
+}
 
-// Vault count loaded on auth state change (not here — avoids stale count from previous user)
+// Filter buttons
+document.querySelectorAll('.media-filter-btn').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    mlFilter = btn.dataset.filter;
+    document.querySelectorAll('.media-filter-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    renderMLGrid(); // show loading
+    await fetchMLImages(true);
+    renderMLGrid();
+  });
+});
+
+// Brand dropdown
+document.getElementById('media-brand-filter')?.addEventListener('change', async (e) => {
+  mlBrandFilter = e.target.value;
+  await fetchMLImages(true);
+  renderMLGrid();
+});
+
+// Search (debounced)
+let mlSearchTimer = null;
+document.getElementById('media-search-input')?.addEventListener('input', (e) => {
+  clearTimeout(mlSearchTimer);
+  mlSearchTimer = setTimeout(async () => {
+    mlSearchQuery = e.target.value.trim();
+    await fetchMLImages(true);
+    renderMLGrid();
+  }, 400);
+});
+
+// Size slider
+document.getElementById('media-thumb-slider')?.addEventListener('input', (e) => {
+  mlThumbSize = parseInt(e.target.value);
+  const wrapper = document.getElementById('media-grid-wrapper');
+  if (wrapper) wrapper.style.setProperty('--media-thumb-size', mlThumbSize + 'px');
+});
+
+// Load more
+document.getElementById('media-load-more-btn')?.addEventListener('click', async () => {
+  await fetchMLImages(false);
+  renderMLGrid();
+});
+
+// Navigation buttons
+document.getElementById('media-back-btn')?.addEventListener('click', closeMediaLibrary);
+document.getElementById('sidebar-media-btn')?.addEventListener('click', openMediaLibrary);
+document.getElementById('header-media-btn')?.addEventListener('click', openMediaLibrary);
 
 // --- Background Library ---
 

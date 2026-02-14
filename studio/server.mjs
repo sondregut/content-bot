@@ -5192,53 +5192,51 @@ app.get('/brands/:brandId/assets/app-icon.png', async (req, res, next) => {
 // Serve brand assets
 app.use('/brands', express.static(path.join(rootDir, 'brands')));
 
-// --- Image Vault API ---
+// --- Media Library API ---
 
-// List user's images with fresh signed URLs
+// List user's images with fresh signed URLs + filtering
 app.get('/api/images', requireAuth, async (req, res) => {
   try {
     const userId = req.user.uid;
 
-    // Local dev fallback — list files from outputDir (no Firestore or no Storage bucket)
+    // Local dev fallback
     if (!db || !bucket) {
       const files = await fs.readdir(outputDir).catch(() => []);
-      const pngs = files.filter(f => f.endsWith('.png')).sort().reverse();
-      const images = pngs.slice(0, 50).map(f => ({
-        id: f,
-        filename: f,
-        url: `/output/${f}`,
-        type: f.startsWith('meme_') ? 'meme' : f.startsWith('edit_') ? 'edit' : f.startsWith('personalized_') ? 'personalized' : f.startsWith('carousel_') ? 'carousel' : 'slide',
-        createdAt: null,
+      let filtered = files.filter(f => f.endsWith('.png') || f.endsWith('.mp4')).sort().reverse();
+      if (req.query.type === 'video') filtered = filtered.filter(f => f.endsWith('.mp4'));
+      else if (req.query.type === 'image') filtered = filtered.filter(f => !f.endsWith('.mp4'));
+      if (req.query.search) {
+        const q = req.query.search.toLowerCase();
+        filtered = filtered.filter(f => f.toLowerCase().includes(q));
+      }
+      const images = filtered.slice(0, 50).map(f => ({
+        id: f, filename: f, url: `/output/${f}`,
+        type: f.endsWith('.mp4') ? 'video' : f.startsWith('meme_') ? 'meme' : f.startsWith('edit_') ? 'edit' : f.startsWith('personalized_') ? 'personalized' : f.startsWith('carousel_') ? 'carousel' : 'slide',
+        createdAt: null, liked: false,
       }));
       return res.json({ images, hasMore: false, nextCursor: null });
     }
 
     const limit = Math.min(parseInt(req.query.limit) || 50, 100);
-    let query = db.collection('generated_images')
-      .where('userId', '==', userId)
-      .orderBy('createdAt', 'desc')
-      .limit(limit + 1);
+    const col = db.collection('generated_images');
+    let query = col.where('userId', '==', userId);
 
-    if (req.query.brand) {
-      query = db.collection('generated_images')
-        .where('userId', '==', userId)
-        .where('brandId', '==', req.query.brand)
-        .orderBy('createdAt', 'desc')
-        .limit(limit + 1);
-    }
+    if (req.query.brand) query = query.where('brandId', '==', req.query.brand);
+    if (req.query.type === 'video') query = query.where('type', 'in', ['video', 'carousel-video']);
+    else if (req.query.type === 'image') query = query.where('type', 'in', ['slide', 'meme', 'carousel', 'edit', 'personalized']);
+    if (req.query.liked === 'true') query = query.where('liked', '==', true);
+
+    query = query.orderBy('createdAt', 'desc').limit(limit + 1);
 
     if (req.query.startAfter) {
-      const cursorDoc = await db.collection('generated_images').doc(req.query.startAfter).get();
-      if (cursorDoc.exists) {
-        query = query.startAfter(cursorDoc);
-      }
+      const cursorDoc = await col.doc(req.query.startAfter).get();
+      if (cursorDoc.exists) query = query.startAfter(cursorDoc);
     }
 
     const snapshot = await query.get();
     const docs = snapshot.docs.slice(0, limit);
     const hasMore = snapshot.docs.length > limit;
 
-    // Generate fresh signed URLs in parallel
     const images = await Promise.all(docs.map(async (doc) => {
       const data = doc.data();
       try {
@@ -5247,22 +5245,32 @@ app.get('/api/images', requireAuth, async (req, res) => {
         if (!exists) return null;
         const [url] = await file.getSignedUrl({ action: 'read', expires: Date.now() + 2 * 60 * 60 * 1000 });
         return {
-          id: doc.id,
-          filename: data.filename,
-          url,
-          brandId: data.brandId,
-          type: data.type,
+          id: doc.id, filename: data.filename, url,
+          brandId: data.brandId, type: data.type,
           createdAt: data.createdAt?.toDate?.()?.toISOString() || null,
+          liked: data.liked || false,
+          prompt: data.prompt || null,
+          refinedPrompt: data.refinedPrompt || null,
+          model: data.model || null,
+          brandName: data.brandName || null,
+          width: data.width || null,
+          height: data.height || null,
         };
-      } catch {
-        return null;
-      }
+      } catch { return null; }
     }));
 
-    const filtered = images.filter(Boolean);
+    let result = images.filter(Boolean);
+    if (req.query.search) {
+      const q = req.query.search.toLowerCase();
+      result = result.filter(img =>
+        (img.prompt && img.prompt.toLowerCase().includes(q)) ||
+        (img.filename && img.filename.toLowerCase().includes(q)) ||
+        (img.brandName && img.brandName.toLowerCase().includes(q))
+      );
+    }
+
     res.json({
-      images: filtered,
-      hasMore,
+      images: result, hasMore,
       nextCursor: hasMore && docs.length > 0 ? docs[docs.length - 1].id : null,
     });
   } catch (err) {
@@ -5271,20 +5279,39 @@ app.get('/api/images', requireAuth, async (req, res) => {
   }
 });
 
-// Count user's images (single Firestore read)
+// Count user's images by category (media library sidebar badges)
+app.get('/api/images/counts', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user.uid;
+    if (!db) {
+      const files = await fs.readdir(outputDir).catch(() => []);
+      const all = files.filter(f => f.endsWith('.png') || f.endsWith('.mp4'));
+      return res.json({ all: all.length, liked: 0, images: all.filter(f => !f.endsWith('.mp4')).length, videos: all.filter(f => f.endsWith('.mp4')).length });
+    }
+    const col = db.collection('generated_images');
+    const base = col.where('userId', '==', userId);
+    const [allSnap, likedSnap, imageSnap, videoSnap] = await Promise.all([
+      base.count().get(),
+      base.where('liked', '==', true).count().get(),
+      base.where('type', 'in', ['slide', 'meme', 'carousel', 'edit', 'personalized']).count().get(),
+      base.where('type', 'in', ['video', 'carousel-video']).count().get(),
+    ]);
+    res.json({ all: allSnap.data().count, liked: likedSnap.data().count, images: imageSnap.data().count, videos: videoSnap.data().count });
+  } catch (err) {
+    console.error('[Images Counts]', err);
+    res.status(500).json({ error: safeErrorMessage(err) });
+  }
+});
+
+// Legacy count endpoint
 app.get('/api/images/count', requireAuth, async (req, res) => {
   try {
     const userId = req.user.uid;
-
     if (!db) {
       const files = await fs.readdir(outputDir).catch(() => []);
       return res.json({ count: files.filter(f => f.endsWith('.png')).length });
     }
-
-    const snapshot = await db.collection('generated_images')
-      .where('userId', '==', userId)
-      .count()
-      .get();
+    const snapshot = await db.collection('generated_images').where('userId', '==', userId).count().get();
     res.json({ count: snapshot.data().count });
   } catch (err) {
     console.error('[Images Count]', err);
@@ -5292,7 +5319,26 @@ app.get('/api/images/count', requireAuth, async (req, res) => {
   }
 });
 
-// Delete an image from vault
+// Toggle liked status
+app.patch('/api/images/:id/like', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user.uid;
+    const docId = req.params.id;
+    if (!db) return res.json({ ok: true, liked: false });
+    const docRef = db.collection('generated_images').doc(docId);
+    const doc = await docRef.get();
+    if (!doc.exists) return res.status(404).json({ error: 'Image not found' });
+    if (doc.data().userId !== userId) return res.status(403).json({ error: 'Not authorized' });
+    const newLiked = !doc.data().liked;
+    await docRef.update({ liked: newLiked });
+    res.json({ ok: true, liked: newLiked });
+  } catch (err) {
+    console.error('[Images Like]', err);
+    res.status(500).json({ error: safeErrorMessage(err) });
+  }
+});
+
+// Delete an image
 app.delete('/api/images/:id', requireAuth, async (req, res) => {
   try {
     const userId = req.user.uid;
