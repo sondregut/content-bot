@@ -524,7 +524,8 @@ function setPreviewMode(mode) {
     const slide = slideEdits[currentSlideIndex];
     const type = slideTypeSelect.value || slide?.type || 'text';
     const usage = imageUsageSelect.value || slide?.imageUsage || 'phone';
-    submitBtn.textContent = slideNeedsAI(type, usage) ? 'Generate This Slide' : 'Render Preview';
+    const isVideoMode = slideEdits.length === 1 && slideEdits[0].type === 'video';
+    submitBtn.textContent = isVideoMode ? 'Generate Video' : (slideNeedsAI(type, usage) ? 'Generate This Slide' : 'Render Preview');
   }
 }
 
@@ -2352,6 +2353,10 @@ function selectIdea(ideaId) {
   updatePreviewMockup();
   updateGallery();
   progressSection.style.display = 'none';
+
+  // Video mode: hide carousel-only UI when idea is a single video
+  applyVideoMode();
+
   saveSession();
 }
 
@@ -2395,11 +2400,20 @@ function loadFreeformContent(data) {
   updatePreviewMockup();
   updateGallery();
   progressSection.style.display = 'none';
+
+  applyVideoMode();
+
   saveSession();
 }
 
 // --- Slide Tabs ---
 function renderSlideTabs() {
+  // Video mode: no tabs needed for single video idea
+  if (slideEdits.length === 1 && slideEdits[0].type === 'video') {
+    slideTabs.innerHTML = '';
+    return;
+  }
+
   let html = '';
   for (let i = 0; i < slideEdits.length; i++) {
     const s = slideEdits[i];
@@ -2631,6 +2645,45 @@ function saveCurrentSlideEdits() {
     slide.duration = parseInt(form.elements.videoDuration?.value) || 5;
     slide.audio = form.elements.videoAudio?.checked || false;
     slide.videoTextOverlay = form.elements.videoTextOverlay?.checked ?? true;
+  }
+}
+
+function applyVideoMode() {
+  const isVideo = slideEdits.length === 1 && slideEdits[0].type === 'video';
+  editorArea.classList.toggle('video-mode', isVideo);
+
+  // Slide tabs
+  slideTabs.style.display = isVideo ? 'none' : '';
+
+  // Slide Type + Label row (first .form-row in the form)
+  const firstFormRow = form.querySelector('.form-row');
+  if (firstFormRow) firstFormRow.style.display = isVideo ? 'none' : '';
+
+  // Background + Text shortcut button
+  const bgShortcut = document.getElementById('bg-text-shortcut-btn');
+  if (bgShortcut) bgShortcut.style.display = isVideo ? 'none' : '';
+
+  // Icon watermark section
+  const iconSection = form.querySelector('.icon-section');
+  if (iconSection) iconSection.style.display = isVideo ? 'none' : '';
+
+  // Quality/controls row
+  const controlsRow = form.querySelector('.controls-row');
+  if (controlsRow) controlsRow.style.display = isVideo ? 'none' : '';
+
+  // Generate All Slides button
+  generateAllBtn.style.display = isVideo ? 'none' : '';
+
+  // Submit button text
+  const submitBtn = form.querySelector('button[type="submit"]');
+  if (submitBtn) {
+    submitBtn.textContent = isVideo ? 'Generate Video' : 'Generate This Slide';
+  }
+
+  // Force video type fields visible when in video mode
+  if (isVideo) {
+    slideTypeSelect.value = 'video';
+    toggleTypeFields();
   }
 }
 
