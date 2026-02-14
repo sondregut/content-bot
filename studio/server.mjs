@@ -300,6 +300,7 @@ async function generateVideoSlide(prompt, options = {}) {
         numberOfVideos: 1,
         durationSeconds: Math.min(options.duration || 5, 8),
         personGeneration: 'allow_all',
+        ...(videoModel !== 'veo-2' && { includeAudio: options.audio !== false }),
       },
     });
     // Poll Veo operation
