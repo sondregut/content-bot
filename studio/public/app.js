@@ -1177,7 +1177,6 @@ document.getElementById('bodyFontSize').addEventListener('input', () => {
 
 // Expand preview toggle
 const previewExpandBtn = document.getElementById('preview-expand-btn');
-const previewFrame = document.getElementById('preview-frame');
 previewExpandBtn.addEventListener('click', () => {
   previewFrame.classList.toggle('expanded');
 });
