@@ -455,8 +455,8 @@
                   <select name="slideType" id="slideType">
                     <option value="photo">AI Photo</option>
                     <option value="text">Text Only</option>
-                    <option value="mockup">App Mockup</option>
-                    <option value="video">Video Clip</option>
+                    <option value="mockup">Mockup</option>
+                    <option value="video">Video</option>
                   </select>
                   <p class="slide-type-hint" id="slideTypeHint"></p>
                 </div>
@@ -466,67 +466,61 @@
                 </div>
               </div>
 
-              <button type="button" class="bg-text-shortcut-btn" id="bg-text-shortcut-btn">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="15" x2="21" y2="15"/><polyline points="8 9 12 5 16 9"/></svg>
-                Background + Text (no AI)
-              </button>
-
               <div class="form-section" id="photo-fields" style="display:none">
                 <div class="form-row">
-                  <div class="form-group full">
-                    <label class="label" for="person-select">Person (face reference)</label>
-                    <select id="person-select" name="personId">
-                      <option value="">None (AI generates everything)</option>
-                    </select>
-                    <span class="field-hint">Select a person for hybrid rendering: AI photo + Sharp text overlay</span>
-                  </div>
-                </div>
-                <div class="form-row">
-                  <div class="form-group">
-                    <label class="label" for="field-sport">Sport</label>
-                    <input name="sport" id="field-sport" type="text" placeholder="topic or activity..." />
-                  </div>
                   <div class="form-group">
                     <label class="label" for="field-setting">Setting</label>
                     <input name="setting" id="field-setting" type="text" placeholder="office, outdoors..." />
-                  </div>
-                </div>
-                <div class="form-row">
-                  <div class="form-group">
-                    <label class="label" for="field-action">Action / Moment</label>
-                    <input name="action" id="field-action" type="text" placeholder="speaking, working..." />
                   </div>
                   <div class="form-group">
                     <label class="label" for="field-mood">Mood</label>
                     <input name="mood" id="field-mood" type="text" placeholder="calm intensity..." />
                   </div>
                 </div>
-                <div class="form-row">
-                  <div class="form-group">
-                    <label class="label">Overlay Style</label>
-                    <select name="overlayStyle">
-                      <option value="dark gradient">Dark gradient</option>
-                      <option value="frosted glass card">Frosted glass</option>
-                      <option value="solid dark bar">Solid dark bar</option>
-                    </select>
+                <button type="button" class="advanced-toggle">Advanced &#9656;</button>
+                <div class="advanced-fields" style="display:none">
+                  <div class="form-row">
+                    <div class="form-group full">
+                      <label class="label" for="person-select">Person (face reference)</label>
+                      <select id="person-select" name="personId">
+                        <option value="">None (AI generates everything)</option>
+                      </select>
+                      <span class="field-hint">Select a person for hybrid rendering: AI photo + Sharp text overlay</span>
+                    </div>
                   </div>
-                  <div class="form-group">
-                    <label class="label">Overlay Placement</label>
-                    <select name="overlayPlacement">
-                      <option value="bottom third">Bottom third</option>
-                      <option value="left side">Left side</option>
-                      <option value="lower-left">Lower-left</option>
-                    </select>
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label class="label" for="field-sport">Sport</label>
+                      <input name="sport" id="field-sport" type="text" placeholder="topic or activity..." />
+                    </div>
+                    <div class="form-group">
+                      <label class="label" for="field-action">Action / Moment</label>
+                      <input name="action" id="field-action" type="text" placeholder="speaking, working..." />
+                    </div>
+                  </div>
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label class="label">Overlay Style</label>
+                      <select name="overlayStyle">
+                        <option value="dark gradient">Dark gradient</option>
+                        <option value="frosted glass card">Frosted glass</option>
+                        <option value="solid dark bar">Solid dark bar</option>
+                      </select>
+                    </div>
+                    <div class="form-group">
+                      <label class="label">Overlay Placement</label>
+                      <select name="overlayPlacement">
+                        <option value="bottom third">Bottom third</option>
+                        <option value="left side">Left side</option>
+                        <option value="lower-left">Lower-left</option>
+                      </select>
+                    </div>
                   </div>
                 </div>
               </div>
 
               <div class="form-section" id="text-fields" style="display:none">
                 <div class="form-row">
-                  <div class="form-group">
-                    <label class="label">Background</label>
-                    <input name="backgroundStyle" type="text" value="dark premium background with subtle grain" />
-                  </div>
                   <div class="form-group">
                     <label class="label">Layout</label>
                     <select name="layoutTemplate">
@@ -535,6 +529,15 @@
                       <option value="Layout C - Center Weighted">Layout C</option>
                       <option value="Layout D - Bottom Emphasis">Layout D</option>
                     </select>
+                  </div>
+                </div>
+                <button type="button" class="advanced-toggle">Advanced &#9656;</button>
+                <div class="advanced-fields" style="display:none">
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label class="label">Background</label>
+                      <input name="backgroundStyle" type="text" value="dark premium background with subtle grain" />
+                    </div>
                   </div>
                 </div>
               </div>
@@ -558,42 +561,45 @@
                       <option value="inspiring and uplifting">Inspiring</option>
                     </select>
                   </div>
-                  <div class="form-group">
-                    <label class="label" for="video-camera">Camera Movement</label>
-                    <select name="videoCamera" id="video-camera">
-                      <option value="slow tracking shot">Tracking Shot</option>
-                      <option value="static wide angle">Static</option>
-                      <option value="smooth dolly-in">Dolly In</option>
-                      <option value="cinematic pan">Pan</option>
-                      <option value="handheld follow">Handheld</option>
-                      <option value="drone aerial pullback">Aerial</option>
-                    </select>
-                  </div>
                 </div>
-                <div class="form-row">
-                  <div class="form-group">
-                    <label class="label" for="video-duration">Duration</label>
-                    <select name="videoDuration" id="video-duration">
-                      <option value="5">5 seconds</option>
-                      <option value="10">10 seconds</option>
-                    </select>
-                    <span class="field-hint">5s: ~$0.84 &middot; 10s: ~$1.68</span>
+                <button type="button" class="advanced-toggle">Advanced &#9656;</button>
+                <div class="advanced-fields" style="display:none">
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label class="label" for="video-camera">Camera Movement</label>
+                      <select name="videoCamera" id="video-camera">
+                        <option value="slow tracking shot">Tracking Shot</option>
+                        <option value="static wide angle">Static</option>
+                        <option value="smooth dolly-in">Dolly In</option>
+                        <option value="cinematic pan">Pan</option>
+                        <option value="handheld follow">Handheld</option>
+                        <option value="drone aerial pullback">Aerial</option>
+                      </select>
+                    </div>
+                    <div class="form-group">
+                      <label class="label" for="video-duration">Duration</label>
+                      <select name="videoDuration" id="video-duration">
+                        <option value="5">5 seconds</option>
+                        <option value="10">10 seconds</option>
+                      </select>
+                      <span class="field-hint">5s: ~$0.84 &middot; 10s: ~$1.68</span>
+                    </div>
                   </div>
-                  <div class="form-group">
-                    <label class="label">Audio</label>
-                    <label class="checkbox" style="margin-top:8px">
-                      <input type="checkbox" name="videoAudio" id="video-audio" />
-                      Generate audio (+~33% cost)
-                    </label>
-                  </div>
-                </div>
-                <div class="form-row">
-                  <div class="form-group">
-                    <label class="checkbox" style="margin-top:4px">
-                      <input type="checkbox" name="videoTextOverlay" id="video-text-overlay" checked />
-                      Text overlay (headline/body burned onto video)
-                    </label>
-                    <span class="field-hint">Uses the headline &amp; body fields above. Uncheck for raw AI video.</span>
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label class="label">Audio</label>
+                      <label class="checkbox" style="margin-top:4px">
+                        <input type="checkbox" name="videoAudio" id="video-audio" />
+                        Generate audio (+~33% cost)
+                      </label>
+                    </div>
+                    <div class="form-group">
+                      <label class="checkbox" style="margin-top:4px">
+                        <input type="checkbox" name="videoTextOverlay" id="video-text-overlay" checked />
+                        Text overlay on video
+                      </label>
+                      <span class="field-hint">Burns headline &amp; body onto video. Uncheck for raw AI video.</span>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -617,66 +623,6 @@
                   </div>
                 </div>
                 <div class="form-row">
-                  <div class="form-group">
-                    <label class="label">Aspect Ratio</label>
-                    <select name="aspectRatio" id="aspectRatio">
-                      <option value="9:16">9:16 (TikTok)</option>
-                      <option value="4:5">4:5 (Instagram)</option>
-                      <option value="1:1">1:1 (Square)</option>
-                    </select>
-                  </div>
-                  <div class="form-group">
-                    <label class="label">Font</label>
-                    <select name="mockupFont" id="mockupFont">
-                      <option value="Helvetica">Helvetica</option>
-                      <option value="Arial">Arial</option>
-                      <option value="Georgia">Georgia</option>
-                      <option value="Times New Roman">Times New Roman</option>
-                      <option value="Courier">Courier</option>
-                      <option value="Impact">Impact</option>
-                    </select>
-                  </div>
-                </div>
-                <div class="form-row">
-                  <div class="form-group">
-                    <label class="label">Headline Size <span id="headlineFontSizeValue">82</span></label>
-                    <input type="range" name="headlineFontSize" id="headlineFontSize" min="40" max="120" value="82" />
-                  </div>
-                  <div class="form-group">
-                    <label class="label">Body Size <span id="bodyFontSizeValue">34</span></label>
-                    <input type="range" name="bodyFontSize" id="bodyFontSize" min="20" max="60" value="34" />
-                  </div>
-                </div>
-                <div class="form-row">
-                  <div class="form-group">
-                    <label class="label">Text Color</label>
-                    <div class="color-override-row">
-                      <input type="color" name="mockupTextColor" id="mockupTextColor" value="#FFFFFF" />
-                      <label class="checkbox"><input type="checkbox" id="mockupTextColorEnabled" /> Override</label>
-                    </div>
-                  </div>
-                  <div class="form-group">
-                    <label class="label">Accent Color</label>
-                    <div class="color-override-row">
-                      <input type="color" name="mockupAccentColor" id="mockupAccentColor" value="#E94560" />
-                      <label class="checkbox"><input type="checkbox" id="mockupAccentColorEnabled" /> Override</label>
-                    </div>
-                  </div>
-                </div>
-                <div class="form-row">
-                  <div class="form-group">
-                    <label class="label">Darken <span id="darkenValue">0%</span></label>
-                    <input type="range" name="overlayDarken" id="overlayDarken" min="0" max="100" value="0" />
-                  </div>
-                </div>
-                <div class="form-row">
-                  <div class="form-group">
-                    <label class="label">Highlight Style</label>
-                    <select name="highlightStyle" id="highlightStyle">
-                      <option value="subtle">Subtle</option>
-                      <option value="bold">Bold</option>
-                    </select>
-                  </div>
                   <div class="form-group">
                     <label class="label">Image Usage</label>
                     <select name="imageUsage" id="imageUsage">
@@ -776,18 +722,77 @@
                 <div id="mockup-bg-options" style="display:none">
                   <div class="form-row">
                     <div class="form-group">
-                      <label class="label">Overlay Darkness</label>
-                      <select name="bgOverlayOpacity" id="bgOverlayOpacity">
-                        <option value="0.35">Light (35%)</option>
-                        <option value="0.55" selected>Medium (55%)</option>
-                        <option value="0.7">Dark (70%)</option>
-                        <option value="0.85">Very Dark (85%)</option>
-                      </select>
+                      <label class="label">Overlay Darkness <span id="bgOverlayOpacityValue">55%</span></label>
+                      <input type="range" name="bgOverlayOpacity" id="bgOverlayOpacity" min="0" max="100" value="55" />
                     </div>
                   </div>
                 </div>
 
                 <div class="screenshot-warning" id="screenshot-warning" style="display:none; color:#b45309; font-size:0.78rem; margin-top:4px;">Upload an image above to use with this mode.</div>
+
+                <button type="button" class="advanced-toggle">Advanced &#9656;</button>
+                <div class="advanced-fields" style="display:none">
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label class="label">Aspect Ratio</label>
+                      <select name="aspectRatio" id="aspectRatio">
+                        <option value="9:16">9:16 (TikTok)</option>
+                        <option value="4:5">4:5 (Instagram)</option>
+                        <option value="1:1">1:1 (Square)</option>
+                      </select>
+                    </div>
+                    <div class="form-group">
+                      <label class="label">Font</label>
+                      <select name="mockupFont" id="mockupFont">
+                        <option value="Helvetica">Helvetica</option>
+                        <option value="Arial">Arial</option>
+                        <option value="Georgia">Georgia</option>
+                        <option value="Times New Roman">Times New Roman</option>
+                        <option value="Courier">Courier</option>
+                        <option value="Impact">Impact</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label class="label">Headline Size <span id="headlineFontSizeValue">82</span></label>
+                      <input type="range" name="headlineFontSize" id="headlineFontSize" min="40" max="120" value="82" />
+                    </div>
+                    <div class="form-group">
+                      <label class="label">Body Size <span id="bodyFontSizeValue">34</span></label>
+                      <input type="range" name="bodyFontSize" id="bodyFontSize" min="20" max="60" value="34" />
+                    </div>
+                  </div>
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label class="label">Text Color</label>
+                      <div class="color-override-row">
+                        <input type="color" name="mockupTextColor" id="mockupTextColor" value="#FFFFFF" />
+                        <label class="checkbox"><input type="checkbox" id="mockupTextColorEnabled" /> Override</label>
+                      </div>
+                    </div>
+                    <div class="form-group">
+                      <label class="label">Accent Color</label>
+                      <div class="color-override-row">
+                        <input type="color" name="mockupAccentColor" id="mockupAccentColor" value="#E94560" />
+                        <label class="checkbox"><input type="checkbox" id="mockupAccentColorEnabled" /> Override</label>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label class="label">Darken <span id="darkenValue">0%</span></label>
+                      <input type="range" name="overlayDarken" id="overlayDarken" min="0" max="100" value="0" />
+                    </div>
+                    <div class="form-group">
+                      <label class="label">Highlight Style</label>
+                      <select name="highlightStyle" id="highlightStyle">
+                        <option value="subtle">Subtle</option>
+                        <option value="bold">Bold</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
               </div>
 
               <div class="form-section">
@@ -811,82 +816,85 @@
                 </div>
               </div>
 
-              <!-- Per-Slide Reference Image -->
-              <div class="form-section slide-ref-section">
-                <label class="label">Slide Image (overrides global)</label>
-                <div class="ref-upload-row">
-                  <input type="file" id="slide-ref-input" accept="image/*" style="display:none" />
-                  <button type="button" class="btn small" id="slide-ref-btn">Upload</button>
-                  <span class="ref-filename" id="slide-ref-filename">No image</span>
-                  <button type="button" class="btn small danger" id="slide-ref-clear" style="display:none">Clear</button>
-                </div>
-                <img id="slide-ref-preview" class="ref-preview-img" style="display:none" />
-              </div>
-
-              <!-- Global Background Image Upload -->
-              <div class="form-section ref-section">
-                <label class="label">Global Background Image (optional)</label>
-                <div class="ref-upload-row">
-                  <input type="file" id="ref-image-input" accept="image/*" style="display:none" />
-                  <button type="button" class="btn small" id="ref-upload-btn">Upload Image</button>
-                  <span class="ref-filename" id="ref-filename">No image</span>
-                  <button type="button" class="btn small danger" id="ref-clear-btn" style="display:none">Clear</button>
-                </div>
-                <img id="ref-preview" class="ref-preview-img" style="display:none" />
-                <div id="ref-options" style="display:none">
-                  <div class="form-row" style="margin-top:8px">
-                    <div class="form-group">
-                      <label class="label">Usage</label>
-                      <select name="referenceUsage" id="referenceUsage">
-                        <option value="background image with dark overlay">Background + dark overlay</option>
-                        <option value="background inspiration">Background inspiration</option>
-                        <option value="style reference">Style reference</option>
-                        <option value="composite element">Composite element</option>
-                      </select>
-                    </div>
-                    <div class="form-group">
-                      <label class="label">Extra instructions</label>
-                      <input name="referenceInstructions" type="text" placeholder="e.g., darken and blur the background..." />
-                    </div>
+              <button type="button" class="advanced-toggle advanced-toggle-common" id="advanced-common-toggle">More Options &#9656;</button>
+              <div class="advanced-fields" id="advanced-common-fields" style="display:none">
+                <!-- Per-Slide Reference Image -->
+                <div class="form-section slide-ref-section">
+                  <label class="label">Slide Image (overrides global)</label>
+                  <div class="ref-upload-row">
+                    <input type="file" id="slide-ref-input" accept="image/*" style="display:none" />
+                    <button type="button" class="btn small" id="slide-ref-btn">Upload</button>
+                    <span class="ref-filename" id="slide-ref-filename">No image</span>
+                    <button type="button" class="btn small danger" id="slide-ref-clear" style="display:none">Clear</button>
                   </div>
+                  <img id="slide-ref-preview" class="ref-preview-img" style="display:none" />
                 </div>
-              </div>
 
-              <!-- Icon & Watermark Settings -->
-              <div class="form-section icon-section">
-                <label class="label">App Icon Watermark</label>
-                <div class="icon-settings-row">
-                  <div class="icon-preview-box" id="icon-preview-box">
-                    <img id="icon-preview-img" src="" alt="App Icon" />
-                    <button type="button" class="btn small" id="icon-upload-btn">Change Icon</button>
-                    <input type="file" id="icon-file-input" accept="image/*" style="display:none" />
+                <!-- Global Background Image Upload -->
+                <div class="form-section ref-section">
+                  <label class="label">Global Background Image (optional)</label>
+                  <div class="ref-upload-row">
+                    <input type="file" id="ref-image-input" accept="image/*" style="display:none" />
+                    <button type="button" class="btn small" id="ref-upload-btn">Upload Image</button>
+                    <span class="ref-filename" id="ref-filename">No image</span>
+                    <button type="button" class="btn small danger" id="ref-clear-btn" style="display:none">Clear</button>
                   </div>
-                  <div class="icon-controls">
-                    <label class="checkbox">
-                      <input type="checkbox" name="includeOwl" checked />
-                      Show watermark
-                    </label>
-                    <div class="corner-picker" id="corner-picker">
-                      <div class="corner-grid">
-                        <button type="button" class="corner-btn" data-pos="top-left" title="Top Left">TL</button>
-                        <button type="button" class="corner-btn" data-pos="top-right" title="Top Right">TR</button>
-                        <button type="button" class="corner-btn" data-pos="bottom-left" title="Bottom Left">BL</button>
-                        <button type="button" class="corner-btn active" data-pos="bottom-right" title="Bottom Right">BR</button>
+                  <img id="ref-preview" class="ref-preview-img" style="display:none" />
+                  <div id="ref-options" style="display:none">
+                    <div class="form-row" style="margin-top:8px">
+                      <div class="form-group">
+                        <label class="label">Usage</label>
+                        <select name="referenceUsage" id="referenceUsage">
+                          <option value="background image with dark overlay">Background + dark overlay</option>
+                          <option value="background inspiration">Background inspiration</option>
+                          <option value="style reference">Style reference</option>
+                          <option value="composite element">Composite element</option>
+                        </select>
+                      </div>
+                      <div class="form-group">
+                        <label class="label">Extra instructions</label>
+                        <input name="referenceInstructions" type="text" placeholder="e.g., darken and blur the background..." />
                       </div>
                     </div>
-                    <input type="hidden" name="owlPosition" id="owlPosition" value="bottom-right" />
                   </div>
                 </div>
-              </div>
 
-              <div class="form-section controls-row">
-                <div class="form-row">
-                  <div class="form-group">
-                    <label class="label">Quality</label>
-                    <select name="quality">
-                      <option value="high">High</option>
-                      <option value="medium">Medium</option>
-                    </select>
+                <!-- Icon & Watermark Settings -->
+                <div class="form-section icon-section">
+                  <label class="label">App Icon Watermark</label>
+                  <div class="icon-settings-row">
+                    <div class="icon-preview-box" id="icon-preview-box">
+                      <img id="icon-preview-img" src="" alt="App Icon" />
+                      <button type="button" class="btn small" id="icon-upload-btn">Change Icon</button>
+                      <input type="file" id="icon-file-input" accept="image/*" style="display:none" />
+                    </div>
+                    <div class="icon-controls">
+                      <label class="checkbox">
+                        <input type="checkbox" name="includeOwl" checked />
+                        Show watermark
+                      </label>
+                      <div class="corner-picker" id="corner-picker">
+                        <div class="corner-grid">
+                          <button type="button" class="corner-btn" data-pos="top-left" title="Top Left">TL</button>
+                          <button type="button" class="corner-btn" data-pos="top-right" title="Top Right">TR</button>
+                          <button type="button" class="corner-btn" data-pos="bottom-left" title="Bottom Left">BL</button>
+                          <button type="button" class="corner-btn active" data-pos="bottom-right" title="Bottom Right">BR</button>
+                        </div>
+                      </div>
+                      <input type="hidden" name="owlPosition" id="owlPosition" value="bottom-right" />
+                    </div>
+                  </div>
+                </div>
+
+                <div class="form-section controls-row">
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label class="label">Quality</label>
+                      <select name="quality">
+                        <option value="high">High</option>
+                        <option value="medium">Medium</option>
+                      </select>
+                    </div>
                   </div>
                 </div>
               </div>

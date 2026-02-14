@@ -2486,7 +2486,12 @@ function loadSlideIntoForm(index) {
   if (form.elements.figurePosition) form.elements.figurePosition.value = slide.figurePosition || 'center-right';
   if (form.elements.figureSize) form.elements.figureSize.value = slide.figureSize || 'medium';
   if (form.elements.figureBorderRadius) form.elements.figureBorderRadius.value = slide.figureBorderRadius || '24';
-  if (form.elements.bgOverlayOpacity) form.elements.bgOverlayOpacity.value = slide.bgOverlayOpacity || '0.55';
+  if (form.elements.bgOverlayOpacity) {
+    const opVal = parseFloat(slide.bgOverlayOpacity || 0.55);
+    form.elements.bgOverlayOpacity.value = Math.round(opVal * 100);
+    const opLabel = document.getElementById('bgOverlayOpacityValue');
+    if (opLabel) opLabel.textContent = Math.round(opVal * 100) + '%';
+  }
   if (form.elements.aiBgSetting) form.elements.aiBgSetting.value = slide.aiBgSetting || '';
   if (form.elements.aiBgMood) form.elements.aiBgMood.value = slide.aiBgMood || '';
 
@@ -2624,7 +2629,7 @@ function saveCurrentSlideEdits() {
     slide.figurePosition = form.elements.figurePosition?.value || 'center-right';
     slide.figureSize = form.elements.figureSize?.value || 'medium';
     slide.figureBorderRadius = form.elements.figureBorderRadius?.value || '24';
-    slide.bgOverlayOpacity = form.elements.bgOverlayOpacity?.value || '0.55';
+    slide.bgOverlayOpacity = (parseInt(form.elements.bgOverlayOpacity?.value) || 55) / 100;
     slide.screenshotImage = screenshotImageFilename || null;
     slide.aiBgSetting = form.elements.aiBgSetting?.value || '';
     slide.aiBgMood = form.elements.aiBgMood?.value || '';
@@ -2724,6 +2729,13 @@ function toggleTypeFields() {
     video: 'AI-generated 5\u201310s video clip',
   };
   document.getElementById('slideTypeHint').textContent = hints[type] || '';
+
+  // Hide common advanced toggle for video (not applicable)
+  const commonToggle = document.getElementById('advanced-common-toggle');
+  const commonFields = document.getElementById('advanced-common-fields');
+  if (commonToggle) commonToggle.style.display = type === 'video' ? 'none' : '';
+  if (commonFields && type === 'video') commonFields.style.display = 'none';
+
   updatePreviewImageOverlay();
 
   // Switch preview mode based on whether this type needs AI
@@ -2791,7 +2803,12 @@ imageUsageSelect.addEventListener('change', () => {
   }
 });
 
-document.getElementById('bgOverlayOpacity').addEventListener('change', updatePreviewMockup);
+document.getElementById('bgOverlayOpacity').addEventListener('input', () => {
+  const val = document.getElementById('bgOverlayOpacity').value;
+  const label = document.getElementById('bgOverlayOpacityValue');
+  if (label) label.textContent = val + '%';
+  updatePreviewMockup();
+});
 document.getElementById('phoneAngle').addEventListener('change', updatePreviewMockup);
 document.getElementById('phoneSize').addEventListener('change', updatePreviewMockup);
 document.getElementById('figurePosition').addEventListener('change', updatePreviewMockup);
@@ -2831,6 +2848,12 @@ document.getElementById('caption-textarea').addEventListener('input', (e) => {
     selectedIdea.caption = e.target.value;
     saveSession();
   }
+});
+
+// Text content fields trigger live preview update
+['microLabel', 'headline', 'body', 'highlightPhrase'].forEach(name => {
+  const el = form.elements[name];
+  if (el) el.addEventListener('input', updatePreviewMockup);
 });
 
 // Layout/highlight/overlay controls trigger preview update
@@ -2895,7 +2918,7 @@ function updatePreviewMockup() {
     const isBackground = usage === 'background';
     const isAiBg = usage === 'ai-background';
     if (isBackground && screenshotImageFilename) {
-      const o = parseFloat(form.elements.bgOverlayOpacity?.value) || 0.55;
+      const o = (parseInt(form.elements.bgOverlayOpacity?.value) || 55) / 100;
       previewMockup.style.background = `linear-gradient(to bottom, rgba(0,0,0,0) 0%, rgba(0,0,0,${o*0.3}) 40%, rgba(0,0,0,${o*0.7}) 70%, rgba(0,0,0,${o}) 100%), url('/uploads/${screenshotImageFilename}') center/cover no-repeat`;
       mockupPhotoPlaceholder.style.display = 'none';
     } else if (isAiBg) {
@@ -3324,8 +3347,6 @@ mockupTextReset.addEventListener('click', resetTextOffset);
 // --- Inline Text Editing (double-click) ---
 function setupInlineEdit(el, formFieldName) {
   el.addEventListener('dblclick', (e) => {
-    const isMockup = (slideTypeSelect.value || slideEdits[currentSlideIndex]?.type) === 'mockup';
-    if (!isMockup) return;
     e.stopPropagation();
     el.contentEditable = 'true';
     el.classList.add('inline-editing');
@@ -3832,7 +3853,7 @@ function buildSlidePayload(slide, slideIndex) {
     payload.figurePosition = slide.figurePosition || form.elements.figurePosition?.value || 'center-right';
     payload.figureSize = slide.figureSize || form.elements.figureSize?.value || 'medium';
     payload.figureBorderRadius = slide.figureBorderRadius || form.elements.figureBorderRadius?.value || '24';
-    payload.bgOverlayOpacity = slide.bgOverlayOpacity || form.elements.bgOverlayOpacity?.value || '0.55';
+    payload.bgOverlayOpacity = slide.bgOverlayOpacity || ((parseInt(form.elements.bgOverlayOpacity?.value) || 55) / 100);
     payload.screenshotImage = slide.screenshotImage || screenshotImageFilename || null;
     // AI background prompt fields
     if (payload.imageUsage === 'ai-background') {

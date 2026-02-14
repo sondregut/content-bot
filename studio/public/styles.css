@@ -1450,34 +1450,36 @@ input:focus, select:focus, textarea:focus {
   border-color: var(--navy);
 }
 
-/* Background + Text Shortcut Button */
+/* Advanced Fields Toggle */
 
-.bg-text-shortcut-btn {
+.advanced-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 5px 12px;
-  border-radius: 8px;
-  border: 1px dashed var(--cyan);
-  background: rgba(115, 166, 209, 0.08);
-  color: var(--navy);
+  gap: 4px;
+  padding: 4px 0;
+  border: none;
+  background: none;
+  color: var(--muted);
   font-family: inherit;
   font-size: 0.78rem;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.15s;
-  margin-bottom: 12px;
+  transition: color 0.15s;
+  margin: 4px 0 8px;
 }
 
-.bg-text-shortcut-btn:hover {
-  background: rgba(115, 166, 209, 0.18);
-  border-color: var(--navy);
-  border-style: solid;
+.advanced-toggle:hover {
+  color: var(--navy);
 }
 
-.bg-text-shortcut-btn svg {
-  flex-shrink: 0;
-  opacity: 0.7;
+.advanced-toggle-common {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.advanced-fields {
+  padding-top: 4px;
 }
 
 /* Mockup Fields */
