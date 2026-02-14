@@ -127,6 +127,8 @@ document.getElementById('google-login-btn').addEventListener('click', async () =
 
 document.getElementById('sign-out-btn').addEventListener('click', async () => {
   clearSession();
+  // Clear any active polling timers
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
   // Close settings modal
   document.getElementById('settings-modal').style.display = 'none';
   // Reset app state
@@ -972,6 +974,19 @@ brandDeleteBtn.addEventListener('click', async () => {
     const bData = await bRes.json();
     brands = bData.brands || [];
     currentBrand = brands[0]?.id || null;
+    // Reset editor state to avoid stale data from deleted brand
+    selectedIdea = null;
+    slideEdits = [];
+    generatedImages = {};
+    currentSlideIndex = 0;
+    contentData = null;
+    referenceImageFilename = null;
+    screenshotImageFilename = null;
+    slideReferenceImages = {};
+    editorArea.style.display = 'none';
+    document.getElementById('content-plan-view').style.display = 'none';
+    emptyState.style.display = 'flex';
+    closeBrandModal();
     if (!currentBrand) {
       renderBrandSelector();
       renderEmptySidebar();
@@ -980,7 +995,6 @@ brandDeleteBtn.addEventListener('click', async () => {
     renderBrandSelector();
     await loadContentIdeas();
     updateIconPreview();
-    closeBrandModal();
   } catch (err) {
     brandModalStatus.textContent = err.message;
     brandModalStatus.className = 'brand-modal-status error';
@@ -1943,16 +1957,29 @@ document.addEventListener('mousedown', (e) => {
 });
 
 // --- Icon Upload & Corner Picker ---
-function updateIconPreview() {
+async function updateIconPreview() {
+  if (!currentBrand) {
+    iconPreviewImg.style.display = 'none';
+    mockupIconImg.style.display = 'none';
+    return;
+  }
   const iconUrl = `/brands/${currentBrand}/assets/app-icon.png?t=${Date.now()}`;
+  try {
+    const res = await fetch(iconUrl, { method: 'HEAD' });
+    if (!res.ok) {
+      iconPreviewImg.style.display = 'none';
+      mockupIconImg.style.display = 'none';
+      return;
+    }
+  } catch {
+    iconPreviewImg.style.display = 'none';
+    mockupIconImg.style.display = 'none';
+    return;
+  }
   iconPreviewImg.src = iconUrl;
   mockupIconImg.src = iconUrl;
-
-  // Handle missing icon gracefully
-  iconPreviewImg.onerror = () => { iconPreviewImg.style.display = 'none'; };
-  iconPreviewImg.onload = () => { iconPreviewImg.style.display = 'block'; };
-  mockupIconImg.onerror = () => { mockupIconImg.style.display = 'none'; };
-  mockupIconImg.onload = () => { mockupIconImg.style.display = 'block'; };
+  iconPreviewImg.style.display = 'block';
+  mockupIconImg.style.display = 'block';
 }
 
 iconUploadBtn.addEventListener('click', () => iconFileInput.click());
@@ -1961,6 +1988,7 @@ iconFileInput.addEventListener('change', async () => {
   const file = iconFileInput.files[0];
   if (!file) return;
 
+  iconUploadBtn.disabled = true;
   const fd = new FormData();
   fd.append('icon', file);
   fd.append('brand', currentBrand);
@@ -1973,6 +2001,8 @@ iconFileInput.addEventListener('change', async () => {
     }
   } catch (err) {
     console.error('Icon upload failed:', err);
+  } finally {
+    iconUploadBtn.disabled = false;
   }
   iconFileInput.value = '';
 });
@@ -1994,6 +2024,7 @@ refImageInput.addEventListener('change', async () => {
   const file = refImageInput.files[0];
   if (!file) return;
 
+  refUploadBtn.disabled = true;
   refFilename.textContent = 'Uploading...';
   const fd = new FormData();
   fd.append('image', file);
@@ -2013,6 +2044,8 @@ refImageInput.addEventListener('change', async () => {
     }
   } catch {
     refFilename.textContent = 'Upload error';
+  } finally {
+    refUploadBtn.disabled = false;
   }
 });
 
@@ -2032,6 +2065,7 @@ slideRefInput.addEventListener('change', async () => {
   const file = slideRefInput.files[0];
   if (!file) return;
 
+  slideRefBtn.disabled = true;
   slideRefFilename.textContent = 'Uploading...';
   const fd = new FormData();
   fd.append('image', file);
@@ -2051,6 +2085,8 @@ slideRefInput.addEventListener('change', async () => {
     }
   } catch {
     slideRefFilename.textContent = 'Upload error';
+  } finally {
+    slideRefBtn.disabled = false;
   }
   slideRefInput.value = '';
 });
@@ -2426,6 +2462,7 @@ screenshotImageInput.addEventListener('change', async () => {
   const file = screenshotImageInput.files[0];
   if (!file) return;
 
+  screenshotUploadBtn.disabled = true;
   screenshotFilename.textContent = 'Uploading...';
   const fd = new FormData();
   fd.append('image', file);
@@ -2446,6 +2483,8 @@ screenshotImageInput.addEventListener('change', async () => {
     }
   } catch {
     screenshotFilename.textContent = 'Upload error';
+  } finally {
+    screenshotUploadBtn.disabled = false;
   }
 });
 
@@ -2508,25 +2547,56 @@ function renderContentPlanGrid(ideas, brandObj) {
   const primaryColor = brandObj?.colors?.primary || '#1a1a2e';
   const textColor = brandObj?.colors?.white || '#ffffff';
 
-  grid.innerHTML = ideas.map(idea => {
+  grid.innerHTML = '';
+  ideas.forEach(idea => {
     const hookSlide = idea.slides[0] || {};
     const caption = idea.caption || '';
     const truncCaption = caption.length > 120 ? caption.slice(0, 120) + '...' : caption;
 
-    return `
-      <div class="content-plan-card" data-idea-id="${idea.id}">
-        <div class="plan-card-header">
-          <img class="plan-card-icon" src="${iconUrl}" onerror="this.style.display='none'" />
-          <span class="plan-card-brand">${brandName}</span>
-        </div>
-        <div class="plan-card-visual" style="background:${primaryColor}; color:${textColor}">
-          <div class="plan-card-slide-count">${idea.slides.length} slides</div>
-          <div class="plan-card-headline">${hookSlide.headline || idea.title}</div>
-          ${hookSlide.body ? `<div class="plan-card-body">${hookSlide.body}</div>` : ''}
-        </div>
-        <div class="plan-card-caption">${truncCaption}</div>
-      </div>`;
-  }).join('');
+    const card = document.createElement('div');
+    card.className = 'content-plan-card';
+    card.dataset.ideaId = idea.id;
+
+    const header = document.createElement('div');
+    header.className = 'plan-card-header';
+    const icon = document.createElement('img');
+    icon.className = 'plan-card-icon';
+    icon.src = iconUrl;
+    icon.onerror = function() { this.style.display = 'none'; };
+    header.appendChild(icon);
+    const brand = document.createElement('span');
+    brand.className = 'plan-card-brand';
+    brand.textContent = brandName;
+    header.appendChild(brand);
+    card.appendChild(header);
+
+    const visual = document.createElement('div');
+    visual.className = 'plan-card-visual';
+    visual.style.background = primaryColor;
+    visual.style.color = textColor;
+    const slideCount = document.createElement('div');
+    slideCount.className = 'plan-card-slide-count';
+    slideCount.textContent = idea.slides.length + ' slides';
+    visual.appendChild(slideCount);
+    const headlineEl = document.createElement('div');
+    headlineEl.className = 'plan-card-headline';
+    headlineEl.textContent = hookSlide.headline || idea.title;
+    visual.appendChild(headlineEl);
+    if (hookSlide.body) {
+      const bodyEl = document.createElement('div');
+      bodyEl.className = 'plan-card-body';
+      bodyEl.textContent = hookSlide.body;
+      visual.appendChild(bodyEl);
+    }
+    card.appendChild(visual);
+
+    const captionEl = document.createElement('div');
+    captionEl.className = 'plan-card-caption';
+    captionEl.textContent = truncCaption;
+    card.appendChild(captionEl);
+
+    grid.appendChild(card);
+  });
 
   grid.querySelectorAll('.content-plan-card').forEach(el => {
     el.addEventListener('click', () => {

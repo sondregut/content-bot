@@ -1,6 +1,8 @@
 node_modules/
 .env
 studio/.env
+studio/.env.vercel
+studio/local-brands.json
 studio/output/
 studio/uploads/
 studio/backgrounds/

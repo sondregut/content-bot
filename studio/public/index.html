@@ -44,8 +44,8 @@
       <header class="app-header">
         <div class="header-left">
           <select id="brand-selector" class="app-dropdown"></select>
-          <button class="header-btn brand-add-btn" id="create-brand-btn" title="Create Brand">+</button>
-          <button class="header-btn brand-edit-btn" id="edit-brand-btn" title="Edit Brand" style="display:none">&#9998;</button>
+          <button class="header-btn brand-add-btn" id="create-brand-btn" title="Create Brand" aria-label="Create Brand">+</button>
+          <button class="header-btn brand-edit-btn" id="edit-brand-btn" title="Edit Brand" aria-label="Edit Brand" style="display:none">&#9998;</button>
           <h1>Carousel Studio</h1>
         </div>
         <div class="header-right">
@@ -58,7 +58,7 @@
             <option value="gpt-image-1">GPT Image 1</option>
             <option value="dall-e-3">DALL-E 3</option>
           </select>
-          <button class="header-btn" id="settings-btn" title="Settings">&#9881;</button>
+          <button class="header-btn" id="settings-btn" title="Settings" aria-label="Settings">&#9881;</button>
         </div>
       </header>
 
@@ -137,7 +137,7 @@
                 <p class="freeform-hint" style="margin:0 0 8px">Multiple angles give better face consistency.</p>
                 <div class="face-photos-grid" id="face-photos-grid">
                   <input type="file" id="face-image-input" accept="image/*" multiple style="display:none" />
-                  <button type="button" class="face-add-btn" id="face-add-btn" title="Add photo">+</button>
+                  <button type="button" class="face-add-btn" id="face-add-btn" title="Add photo" aria-label="Add photo">+</button>
                 </div>
 
                 <label class="label" style="margin-top:16px">Choose a Scenario</label>
@@ -589,7 +589,7 @@
             <div class="preview-section">
               <div class="status" id="status">Ready.</div>
               <div class="preview-frame" id="preview-frame">
-                <button class="preview-expand-btn" id="preview-expand-btn" title="Expand preview">&#x26F6;</button>
+                <button class="preview-expand-btn" id="preview-expand-btn" title="Expand preview" aria-label="Expand preview">&#x26F6;</button>
                 <div class="loading-spinner" id="loading-spinner">
                   <div class="spinner-ring"></div>
                   <div class="spinner-text" id="spinner-text">Generating image...</div>
@@ -646,7 +646,7 @@
     <div class="vault-panel" id="vault-panel">
       <div class="vault-header">
         <h3>Photo Vault</h3>
-        <button class="vault-close-btn" id="vault-close-btn">&times;</button>
+        <button class="vault-close-btn" id="vault-close-btn" aria-label="Close vault">&times;</button>
       </div>
       <div class="vault-grid" id="vault-grid"></div>
     </div>
@@ -657,7 +657,7 @@
       <div class="modal brand-modal-wide">
         <div class="modal-header">
           <h3 id="brand-modal-title">Create Brand</h3>
-          <button class="modal-close" id="brand-modal-close">&times;</button>
+          <button class="modal-close" id="brand-modal-close" aria-label="Close">&times;</button>
         </div>
         <div class="modal-body">
           <div class="form-group full">
@@ -798,7 +798,7 @@
       <div class="modal">
         <div class="modal-header">
           <h3>Settings</h3>
-          <button class="modal-close" id="settings-close">&times;</button>
+          <button class="modal-close" id="settings-close" aria-label="Close">&times;</button>
         </div>
         <div class="modal-body">
           <div class="settings-profile">
@@ -864,7 +864,7 @@
       <div class="tiktok-modal">
         <div class="tiktok-modal-header">
           <h2>Post to TikTok</h2>
-          <button class="tiktok-modal-close" id="tiktok-modal-close">&times;</button>
+          <button class="tiktok-modal-close" id="tiktok-modal-close" aria-label="Close">&times;</button>
         </div>
         <div class="tiktok-modal-body">
           <div class="tiktok-slides-preview" id="tiktok-slides-preview"></div>
@@ -930,7 +930,7 @@
       <div class="modal bg-library-modal-wide">
         <div class="modal-header">
           <h3>Background Library</h3>
-          <button class="modal-close" id="bg-library-close">&times;</button>
+          <button class="modal-close" id="bg-library-close" aria-label="Close">&times;</button>
         </div>
         <div class="modal-body">
           <!-- Empty state -->

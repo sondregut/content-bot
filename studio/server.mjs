@@ -11,6 +11,7 @@ import archiver from 'archiver';
 import multer from 'multer';
 import admin from 'firebase-admin';
 import { spawn, execSync } from 'child_process';
+import rateLimit from 'express-rate-limit';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -147,9 +148,52 @@ const upload = multer({
   },
 });
 
+// --- Safe error message helper ---
+const isProduction = process.env.NODE_ENV === 'production';
+function safeErrorMessage(err, fallback = 'An error occurred') {
+  if (isProduction) return fallback;
+  return (err instanceof Error ? err.message : String(err)) || fallback;
+}
+
+// --- SSRF validation helper ---
+function isUrlSafe(urlString) {
+  try {
+    const parsed = new URL(urlString);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+    const host = parsed.hostname.toLowerCase();
+    if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '0.0.0.0') return false;
+    // Block private IP ranges
+    const parts = host.split('.').map(Number);
+    if (parts.length === 4 && !parts.some(isNaN)) {
+      if (parts[0] === 10) return false;
+      if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return false;
+      if (parts[0] === 192 && parts[1] === 168) return false;
+      if (parts[0] === 169 && parts[1] === 254) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// --- MIME validation helper ---
+async function validateImageFile(file) {
+  try {
+    const input = file.path || file.buffer;
+    const meta = await sharp(input).metadata();
+    if (!meta.format) throw new Error('Unrecognized image format');
+    return meta;
+  } catch (err) {
+    throw new Error('Uploaded file is not a valid image');
+  }
+}
+
 // --- Firebase Auth middleware ---
 async function requireAuth(req, res, next) {
-  if (!admin.apps.length) { req.user = { email: 'dev@local', uid: 'local-dev' }; return next(); }
+  if (!admin.apps.length) {
+    if (process.env.NODE_ENV === 'production') return res.status(500).json({ error: 'Auth service unavailable' });
+    req.user = { email: 'dev@local', uid: 'local-dev' }; return next();
+  }
   const token = req.headers.authorization?.split('Bearer ')[1];
   if (!token) return res.status(401).json({ error: 'Not authenticated' });
   try {
@@ -170,11 +214,29 @@ async function uploadToStorage(buffer, filename) {
   }
   const file = bucket.file(`carousel-studio/${filename}`);
   await file.save(buffer, { metadata: { contentType: 'image/png' } });
-  const [url] = await file.getSignedUrl({ action: 'read', expires: Date.now() + 7 * 24 * 60 * 60 * 1000 });
+  const [url] = await file.getSignedUrl({ action: 'read', expires: Date.now() + 2 * 60 * 60 * 1000 });
   return url;
 }
 
 app.use(express.json({ limit: '10mb' }));
+
+// --- Rate limiting for expensive generation routes ---
+const generationLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 5,
+  keyGenerator: (req) => req.user?.uid || req.ip,
+  message: { error: 'Too many requests, please try again in a minute' },
+});
+
+// --- Security headers ---
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  next();
+});
+
+// --- Health check ---
+app.get('/health', (req, res) => res.json({ status: 'ok', firebase: !!admin.apps.length, timestamp: Date.now() }));
 
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/output', express.static(outputDir));
@@ -195,13 +257,40 @@ const GENERIC_BRAND = {
   imageStyle: 'Minimalist and clean. Candid photography with natural lighting, shot on iPhone. 35mm film grain aesthetic. Simple uncluttered backgrounds.',
 };
 
-async function getBrandAsync(brandId, userId) {
-  if (!db || !brandId) return GENERIC_BRAND;
+// --- Local brand store (JSON file fallback when Firestore is unavailable) ---
+const localBrandsPath = path.join(__dirname, 'local-brands.json');
+
+async function readLocalBrands() {
   try {
-    const doc = await db.collection('carousel_brands').doc(brandId).get();
-    if (doc.exists && doc.data().createdBy === userId) return { id: brandId, ...doc.data() };
-  } catch (e) {
-    console.error('[getBrandAsync]', e.message);
+    const data = await fs.readFile(localBrandsPath, 'utf8');
+    return JSON.parse(data);
+  } catch {
+    return {};
+  }
+}
+
+async function writeLocalBrands(data) {
+  await fs.writeFile(localBrandsPath, JSON.stringify(data, null, 2));
+}
+
+async function getBrandAsync(brandId, userId) {
+  if (!brandId) return GENERIC_BRAND;
+  if (db) {
+    try {
+      const doc = await db.collection('carousel_brands').doc(brandId).get();
+      if (doc.exists && doc.data().createdBy === userId) return { id: brandId, ...doc.data() };
+    } catch (e) {
+      console.error('[getBrandAsync]', e.message);
+    }
+  } else {
+    try {
+      const brands = await readLocalBrands();
+      if (brands[brandId] && brands[brandId].createdBy === userId) {
+        return { id: brandId, ...brands[brandId] };
+      }
+    } catch (e) {
+      console.error('[getBrandAsync local]', e.message);
+    }
   }
   return GENERIC_BRAND;
 }
@@ -369,7 +458,7 @@ async function createPhoneMockup({ screenshotPath, brandId, phoneWidth, phoneHei
 
   let screenBuffer;
   if (screenshotPath) {
-    const fullPath = path.join(uploadsDir, screenshotPath);
+    const fullPath = path.join(uploadsDir, path.basename(screenshotPath));
     try {
       await fs.access(fullPath);
       screenBuffer = await sharp(fullPath)
@@ -427,7 +516,7 @@ async function createPhoneMockup({ screenshotPath, brandId, phoneWidth, phoneHei
 // --- Image Usage Helpers (figure, background) ---
 
 async function createFigureElement({ imagePath, maxWidth, maxHeight, borderRadius }) {
-  const fullPath = path.join(uploadsDir, imagePath);
+  const fullPath = path.join(uploadsDir, path.basename(imagePath));
   try {
     await fs.access(fullPath);
   } catch {
@@ -450,7 +539,7 @@ async function createFigureElement({ imagePath, maxWidth, maxHeight, borderRadiu
 async function createBackgroundImage(imagePath, overlayOpacity, canvasWidth, canvasHeight) {
   const width = canvasWidth || MOCKUP_CANVAS.width;
   const height = canvasHeight || MOCKUP_CANVAS.height;
-  const fullPath = path.join(uploadsDir, imagePath);
+  const fullPath = path.join(uploadsDir, path.basename(imagePath));
   try {
     await fs.access(fullPath);
   } catch {
@@ -1300,6 +1389,12 @@ app.get('/api/brands', requireAuth, async (req, res) => {
       } catch (fsErr) {
         console.error('[Brands] Firestore query failed:', fsErr.message);
       }
+    } else if (!db && req.user?.uid) {
+      const all = await readLocalBrands();
+      brands = Object.entries(all)
+        .filter(([, b]) => b.createdBy === req.user.uid)
+        .map(([id, b]) => ({ id, ...b }));
+      brands.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
     }
     res.json({ brands });
   } catch (err) {
@@ -1313,6 +1408,12 @@ app.post('/api/brands', requireAuth, async (req, res) => {
   try {
     const { name, website, colors, systemPrompt, defaultMicroLabel, defaultBackground, iconOverlayText, contentPillars, contentIdeaPrompt } = req.body;
     if (!name || !colors) return res.status(400).json({ error: 'Name and colors are required' });
+    if (name.length > 100) return res.status(400).json({ error: 'Name too long (max 100 chars)' });
+    if (systemPrompt && systemPrompt.length > 5000) return res.status(400).json({ error: 'System prompt too long (max 5000 chars)' });
+    if (website && website.length > 200) return res.status(400).json({ error: 'Website too long (max 200 chars)' });
+    if (defaultMicroLabel && defaultMicroLabel.length > 500) return res.status(400).json({ error: 'Micro label too long (max 500 chars)' });
+    if (defaultBackground && defaultBackground.length > 500) return res.status(400).json({ error: 'Background description too long (max 500 chars)' });
+    if (iconOverlayText && iconOverlayText.length > 500) return res.status(400).json({ error: 'Icon overlay text too long (max 500 chars)' });
     const id = slugify(name) + '-' + crypto.randomUUID().slice(0, 6);
     const brand = {
       name,
@@ -1331,48 +1432,79 @@ app.post('/api/brands', requireAuth, async (req, res) => {
       contentPillars: contentPillars || [],
       contentIdeaPrompt: contentIdeaPrompt || '',
       createdBy: req.user.uid,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
     };
-    if (!db) return res.status(500).json({ error: 'Database not available' });
-    await db.collection('carousel_brands').doc(id).set(brand);
+    if (db) {
+      brand.createdAt = admin.firestore.FieldValue.serverTimestamp();
+      await db.collection('carousel_brands').doc(id).set(brand);
+    } else {
+      brand.createdAt = Date.now();
+      const brands = await readLocalBrands();
+      brands[id] = brand;
+      await writeLocalBrands(brands);
+    }
     res.json({ ok: true, brand: { id, ...brand } });
   } catch (err) {
     console.error('[Create Brand]', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErrorMessage(err) });
   }
 });
 
 // Update a brand
 app.put('/api/brands/:id', requireAuth, async (req, res) => {
   try {
-    if (!db) return res.status(500).json({ error: 'Database not available' });
-    const doc = await db.collection('carousel_brands').doc(req.params.id).get();
-    if (!doc.exists) return res.status(404).json({ error: 'Brand not found' });
-    if (doc.data().createdBy !== req.user.uid) return res.status(403).json({ error: 'Not your brand' });
-    const updates = {};
-    for (const key of ['name', 'website', 'colors', 'systemPrompt', 'defaultMicroLabel', 'defaultBackground', 'iconOverlayText', 'contentPillars', 'contentIdeaPrompt']) {
-      if (req.body[key] !== undefined) updates[key] = req.body[key];
+    if (req.body.name && req.body.name.length > 100) return res.status(400).json({ error: 'Name too long (max 100 chars)' });
+    if (req.body.systemPrompt && req.body.systemPrompt.length > 5000) return res.status(400).json({ error: 'System prompt too long (max 5000 chars)' });
+    if (req.body.website && req.body.website.length > 200) return res.status(400).json({ error: 'Website too long (max 200 chars)' });
+    if (req.body.defaultMicroLabel && req.body.defaultMicroLabel.length > 500) return res.status(400).json({ error: 'Micro label too long (max 500 chars)' });
+    if (req.body.defaultBackground && req.body.defaultBackground.length > 500) return res.status(400).json({ error: 'Background description too long (max 500 chars)' });
+    if (req.body.iconOverlayText && req.body.iconOverlayText.length > 500) return res.status(400).json({ error: 'Icon overlay text too long (max 500 chars)' });
+    const allowedKeys = ['name', 'website', 'colors', 'systemPrompt', 'defaultMicroLabel', 'defaultBackground', 'iconOverlayText', 'contentPillars', 'contentIdeaPrompt'];
+    if (db) {
+      const doc = await db.collection('carousel_brands').doc(req.params.id).get();
+      if (!doc.exists) return res.status(404).json({ error: 'Brand not found' });
+      if (doc.data().createdBy !== req.user.uid) return res.status(403).json({ error: 'Not your brand' });
+      const updates = {};
+      for (const key of allowedKeys) {
+        if (req.body[key] !== undefined) updates[key] = req.body[key];
+      }
+      await db.collection('carousel_brands').doc(req.params.id).update(updates);
+    } else {
+      const brands = await readLocalBrands();
+      const brand = brands[req.params.id];
+      if (!brand) return res.status(404).json({ error: 'Brand not found' });
+      if (brand.createdBy !== req.user.uid) return res.status(403).json({ error: 'Not your brand' });
+      for (const key of allowedKeys) {
+        if (req.body[key] !== undefined) brand[key] = req.body[key];
+      }
+      await writeLocalBrands(brands);
     }
-    await db.collection('carousel_brands').doc(req.params.id).update(updates);
     res.json({ ok: true });
   } catch (err) {
     console.error('[Update Brand]', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErrorMessage(err) });
   }
 });
 
 // Delete a brand
 app.delete('/api/brands/:id', requireAuth, async (req, res) => {
   try {
-    if (!db) return res.status(500).json({ error: 'Database not available' });
-    const doc = await db.collection('carousel_brands').doc(req.params.id).get();
-    if (!doc.exists) return res.status(404).json({ error: 'Brand not found' });
-    if (doc.data().createdBy !== req.user.uid) return res.status(403).json({ error: 'Not your brand' });
-    await db.collection('carousel_brands').doc(req.params.id).delete();
+    if (db) {
+      const doc = await db.collection('carousel_brands').doc(req.params.id).get();
+      if (!doc.exists) return res.status(404).json({ error: 'Brand not found' });
+      if (doc.data().createdBy !== req.user.uid) return res.status(403).json({ error: 'Not your brand' });
+      await db.collection('carousel_brands').doc(req.params.id).delete();
+    } else {
+      const brands = await readLocalBrands();
+      const brand = brands[req.params.id];
+      if (!brand) return res.status(404).json({ error: 'Brand not found' });
+      if (brand.createdBy !== req.user.uid) return res.status(403).json({ error: 'Not your brand' });
+      delete brands[req.params.id];
+      await writeLocalBrands(brands);
+    }
     res.json({ ok: true });
   } catch (err) {
     console.error('[Delete Brand]', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErrorMessage(err) });
   }
 });
 
@@ -1395,7 +1527,7 @@ app.delete('/api/account', requireAuth, async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     console.error('[Delete Account]', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErrorMessage(err) });
   }
 });
 
@@ -1409,7 +1541,10 @@ app.post('/api/brands/ai-setup', requireAuth, async (req, res) => {
     if (websiteUrl) {
       try {
         const url = websiteUrl.startsWith('http') ? websiteUrl : `https://${websiteUrl}`;
+        if (!isUrlSafe(url)) throw new Error('URL not allowed');
         const resp = await fetch(url, { signal: AbortSignal.timeout(5000) });
+        const contentLength = parseInt(resp.headers.get('content-length') || '0', 10);
+        if (contentLength > 1024 * 1024) throw new Error('Response too large');
         const html = await resp.text();
         // Basic HTML to text extraction
         websiteContent = html.replace(/<script[\s\S]*?<\/script>/gi, '')
@@ -1461,7 +1596,7 @@ Return ONLY valid JSON (no markdown, no code fences) with:
     res.json({ ok: true, suggestion: parsed });
   } catch (err) {
     console.error('[AI Setup]', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErrorMessage(err) });
   }
 });
 
@@ -1475,6 +1610,9 @@ app.post('/api/brands/analyze-website', requireAuth, async (req, res) => {
     url = url.trim();
     if (!/^https?:\/\//i.test(url)) url = `https://${url}`;
 
+    // Validate URL against SSRF
+    if (!isUrlSafe(url)) return res.status(400).json({ error: 'URL not allowed' });
+
     // Fetch HTML
     let html, finalUrl;
     try {
@@ -1484,6 +1622,8 @@ app.post('/api/brands/analyze-website', requireAuth, async (req, res) => {
         redirect: 'follow',
       });
       finalUrl = resp.url;
+      const contentLength = parseInt(resp.headers.get('content-length') || '0', 10);
+      if (contentLength > 1024 * 1024) return res.status(400).json({ error: 'Website response too large' });
       html = await resp.text();
     } catch (e) {
       return res.status(400).json({ error: `Could not reach website: ${e.message}` });
@@ -1771,7 +1911,7 @@ Return ONLY valid JSON (no markdown, no code fences) with:
     });
   } catch (err) {
     console.error('[Analyze Website]', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErrorMessage(err) });
   }
 });
 
@@ -1793,7 +1933,7 @@ app.get('/api/content-ideas', requireAuth, async (req, res) => {
     }
   } catch (error) {
     console.error('[Content Ideas]', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: safeErrorMessage(error) });
   }
 });
 
@@ -1803,6 +1943,7 @@ app.post('/api/upload-reference', requireAuth, upload.single('image'), async (re
     if (!req.file) {
       return res.status(400).json({ error: 'No image uploaded' });
     }
+    await validateImageFile(req.file);
 
     // Rename to keep extension
     const ext = path.extname(req.file.originalname) || '.png';
@@ -1817,12 +1958,12 @@ app.post('/api/upload-reference', requireAuth, upload.single('image'), async (re
     });
   } catch (error) {
     console.error('[Upload]', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: safeErrorMessage(error) });
   }
 });
 
 // Generate single slide
-app.post('/api/generate', requireAuth, async (req, res) => {
+app.post('/api/generate', requireAuth, generationLimiter, async (req, res) => {
   try {
     const data = req.body || {};
     const brandId = data.brand;
@@ -1875,7 +2016,7 @@ app.post('/api/generate', requireAuth, async (req, res) => {
     // If reference image provided, use images.edit() instead of images.generate()
     let response;
     if (data.referenceImage) {
-      const refPath = path.join(uploadsDir, data.referenceImage);
+      const refPath = path.join(uploadsDir, path.basename(data.referenceImage));
       try {
         await fs.access(refPath);
         const refBuffer = await fs.readFile(refPath);
@@ -1925,7 +2066,7 @@ app.post('/api/generate', requireAuth, async (req, res) => {
     });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ error: error.message || 'Generation failed' });
+    res.status(500).json({ error: safeErrorMessage(error, 'Generation failed') });
   }
 });
 
@@ -1968,17 +2109,20 @@ app.post('/api/edit-slide', requireAuth, async (req, res) => {
     res.json({ ok: true, filename, url });
   } catch (error) {
     console.error('[Edit Slide]', error);
-    res.status(500).json({ error: error.message || 'Edit failed' });
+    res.status(500).json({ error: safeErrorMessage(error, 'Edit failed') });
   }
 });
 
 // Batch carousel generation
 const carouselJobs = new Map();
 
-app.post('/api/generate-carousel', requireAuth, async (req, res) => {
+app.post('/api/generate-carousel', requireAuth, generationLimiter, async (req, res) => {
   const { slides, includeOwl, owlPosition, quality, brand: brandId, imageModel, referenceImage, referenceUsage, referenceInstructions } = req.body || {};
   if (!slides || !Array.isArray(slides) || slides.length === 0) {
     return res.status(400).json({ error: 'Missing slides array' });
+  }
+  if (slides.length > 20) {
+    return res.status(400).json({ error: 'Maximum 20 slides per batch' });
   }
 
   if (!brandId) return res.status(400).json({ error: 'Missing brand' });
@@ -2040,7 +2184,7 @@ app.post('/api/generate-carousel', requireAuth, async (req, res) => {
 
         let response;
         if (slideRefImage) {
-          const refPath = path.join(uploadsDir, slideRefImage);
+          const refPath = path.join(uploadsDir, path.basename(slideRefImage));
           try {
             await fs.access(refPath);
             const refBuffer = await fs.readFile(refPath);
@@ -2110,7 +2254,7 @@ app.post('/api/generate-carousel', requireAuth, async (req, res) => {
     console.log(`[Carousel ${jobId}] Complete — ${job.slides.filter((s) => s.ok).length}/${job.total} succeeded`);
 
     setTimeout(() => carouselJobs.delete(jobId), 30 * 60 * 1000);
-  })();
+  })().catch(err => { job.status = 'error'; job.error = err.message; });
 });
 
 app.get('/api/carousel-status/:jobId', requireAuth, (req, res) => {
@@ -2129,7 +2273,7 @@ app.get('/api/carousel-status/:jobId', requireAuth, (req, res) => {
 });
 
 // --- Freeform AI Content Generation ---
-app.post('/api/generate-freeform', requireAuth, async (req, res) => {
+app.post('/api/generate-freeform', requireAuth, generationLimiter, async (req, res) => {
   try {
     const { prompt: userPrompt, brand: brandId, slideCount } = req.body || {};
     if (!userPrompt) {
@@ -2213,7 +2357,7 @@ Rules:
     res.json({ ok: true, ...parsed });
   } catch (error) {
     console.error('[Freeform]', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: safeErrorMessage(error) });
   }
 });
 
@@ -2232,6 +2376,7 @@ app.post('/api/generate-content-ideas', requireAuth, async (req, res) => {
     // Fetch website HTML
     let websiteUrl = brand.website.trim();
     if (!/^https?:\/\//i.test(websiteUrl)) websiteUrl = `https://${websiteUrl}`;
+    if (!isUrlSafe(websiteUrl)) return res.status(400).json({ error: 'Website URL not allowed' });
 
     let html;
     try {
@@ -2240,6 +2385,8 @@ app.post('/api/generate-content-ideas', requireAuth, async (req, res) => {
         headers: { 'User-Agent': 'Mozilla/5.0 (compatible; CarouselStudio/1.0)' },
         redirect: 'follow',
       });
+      const contentLength = parseInt(resp.headers.get('content-length') || '0', 10);
+      if (contentLength > 1024 * 1024) throw new Error('Response too large');
       html = await resp.text();
     } catch (e) {
       return res.status(400).json({ error: `Could not reach website: ${e.message}` });
@@ -2350,7 +2497,7 @@ Rules:
     res.json({ ok: true, ideas: parsed.ideas || [] });
   } catch (error) {
     console.error('[Content Ideas]', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: safeErrorMessage(error) });
   }
 });
 
@@ -2412,7 +2559,7 @@ app.post('/api/personalize-scenarios', requireAuth, async (req, res) => {
     res.json({ scenarios });
   } catch (error) {
     console.error('[Scenarios]', error);
-    res.status(500).json({ error: error.message || 'Scenario generation failed' });
+    res.status(500).json({ error: safeErrorMessage(error, 'Scenario generation failed') });
   }
 });
 
@@ -2469,7 +2616,7 @@ app.post('/api/generate-personalized', requireAuth, upload.array('faceImages', 5
     res.json({ ok: true, url, filename, model: model === 'flux' && isFalEnabled() ? 'flux' : 'gpt' });
   } catch (error) {
     console.error('[Personalized]', error);
-    res.status(500).json({ error: error.message || 'Personalized generation failed' });
+    res.status(500).json({ error: safeErrorMessage(error, 'Personalized generation failed') });
   }
 });
 
@@ -2543,7 +2690,7 @@ app.post('/api/generate-personalized-carousel', requireAuth, upload.array('faceI
     job.status = 'done';
     console.log(`[Personalized Carousel ${jobId}] Complete — ${job.slides.filter((s) => s.ok).length}/${job.total} succeeded`);
     setTimeout(() => carouselJobs.delete(jobId), 30 * 60 * 1000);
-  })();
+  })().catch(err => { job.status = 'error'; job.error = err.message; });
 });
 
 // --- App Icon Upload ---
@@ -2552,6 +2699,7 @@ app.post('/api/upload-icon', requireAuth, upload.single('icon'), async (req, res
     if (!req.file) {
       return res.status(400).json({ error: 'No icon uploaded' });
     }
+    await validateImageFile(req.file);
 
     const brandId = req.body.brand;
     if (!brandId) return res.status(400).json({ error: 'Missing brand' });
@@ -2575,7 +2723,7 @@ app.post('/api/upload-icon', requireAuth, upload.single('icon'), async (req, res
     });
   } catch (error) {
     console.error('[Icon Upload]', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: safeErrorMessage(error) });
   }
 });
 
@@ -2615,7 +2763,7 @@ app.post('/api/settings', requireAuth, async (req, res) => {
     res.json({ ok: true });
   } catch (error) {
     console.error('[Settings]', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: safeErrorMessage(error) });
   }
 });
 
@@ -2625,7 +2773,7 @@ app.use('/brands', express.static(path.join(rootDir, 'brands')));
 // Download single image
 app.get('/api/download/:filename', requireAuth, async (req, res) => {
   try {
-    const filename = req.params.filename;
+    const filename = path.basename(req.params.filename);
     const filepath = path.join(outputDir, filename);
     await fs.access(filepath);
     res.download(filepath, filename);
@@ -2678,7 +2826,7 @@ app.post('/api/download-selected', requireAuth, async (req, res) => {
   archive.pipe(res);
 
   for (let i = 0; i < filenames.length; i++) {
-    const filepath = path.join(outputDir, filenames[i]);
+    const filepath = path.join(outputDir, path.basename(filenames[i]));
     try {
       await fs.access(filepath);
       archive.file(filepath, { name: `slide_${i + 1}.png` });
@@ -2707,11 +2855,14 @@ app.post('/api/backgrounds/generate-topics', requireAuth, async (req, res) => {
     try {
       let url = brand.website.trim();
       if (!/^https?:\/\//i.test(url)) url = `https://${url}`;
+      if (!isUrlSafe(url)) throw new Error('URL not allowed');
       const resp = await fetch(url, {
         signal: AbortSignal.timeout(8000),
         headers: { 'User-Agent': 'Mozilla/5.0 (compatible; CarouselStudio/1.0)' },
         redirect: 'follow',
       });
+      const contentLength = parseInt(resp.headers.get('content-length') || '0', 10);
+      if (contentLength > 1024 * 1024) throw new Error('Response too large');
       const html = await resp.text();
       const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
       const pageTitle = titleMatch ? titleMatch[1].replace(/\s+/g, ' ').trim() : '';
@@ -2758,7 +2909,7 @@ Return ONLY a JSON array of 12 strings, no other text.`
     res.json({ topics });
   } catch (err) {
     console.error('[Generate Topics]', err);
-    res.status(500).json({ error: err.message || 'Failed to generate topics' });
+    res.status(500).json({ error: safeErrorMessage(err, 'Failed to generate topics') });
   }
 });
 
@@ -2887,7 +3038,8 @@ app.post('/api/backgrounds/select', requireAuth, async (req, res) => {
 
   // Resolve the actual file on disk from the URL path
   const relativePath = backgroundPath.replace(/^\/backgrounds\//, '');
-  const sourcePath = path.join(backgroundsDir, relativePath);
+  const sourcePath = path.resolve(backgroundsDir, relativePath);
+  if (!sourcePath.startsWith(backgroundsDir)) return res.status(400).json({ error: 'Invalid path' });
 
   try {
     await fs.access(sourcePath);
@@ -3019,13 +3171,14 @@ app.get('/api/tiktok/auth', requireAuth, (req, res) => {
 // OAuth: Callback — exchange code for token
 app.get('/api/tiktok/callback', async (req, res) => {
   if (!tiktokEnabled) return res.status(500).send('TikTok not configured');
+  const postMessageOrigin = process.env.FRONTEND_URL || `${req.protocol}://${req.get('host')}`;
 
   const { code, error, error_description } = req.query;
   if (error) {
-    return res.send(`<script>window.opener?.postMessage({type:'tiktok-error',error:'${error_description || error}'},'*');window.close();</script>`);
+    return res.send(`<script>window.opener?.postMessage(${JSON.stringify({type:'tiktok-error',error: error_description || error})},${JSON.stringify(postMessageOrigin)});window.close();</script>`);
   }
   if (!code) {
-    return res.send('<script>window.opener?.postMessage({type:"tiktok-error",error:"No authorization code"},"*");window.close();</script>');
+    return res.send(`<script>window.opener?.postMessage(${JSON.stringify({type:'tiktok-error',error:'No authorization code'})},${JSON.stringify(postMessageOrigin)});window.close();</script>`);
   }
 
   try {
@@ -3058,20 +3211,18 @@ app.get('/api/tiktok/callback', async (req, res) => {
     } catch { /* ignore — username is optional */ }
 
     // Return HTML that posts message to opener with token data for storage
-    res.send(`<script>
-      window.opener?.postMessage({
-        type: 'tiktok-success',
-        access_token: '${tokenData.access_token}',
-        refresh_token: '${tokenData.refresh_token}',
-        open_id: '${tokenData.open_id}',
-        expires_in: ${tokenData.expires_in},
-        username: '${tiktokUsername.replace(/'/g, "\\'")}'
-      }, '*');
-      window.close();
-    </script>`);
+    const successPayload = {
+      type: 'tiktok-success',
+      access_token: tokenData.access_token,
+      refresh_token: tokenData.refresh_token,
+      open_id: tokenData.open_id,
+      expires_in: tokenData.expires_in,
+      username: tiktokUsername,
+    };
+    res.send(`<script>window.opener?.postMessage(${JSON.stringify(successPayload)},${JSON.stringify(postMessageOrigin)});window.close();</script>`);
   } catch (err) {
     console.error('[TikTok] Callback error:', err);
-    res.send(`<script>window.opener?.postMessage({type:'tiktok-error',error:'${err.message.replace(/'/g, "\\'")}'},'*');window.close();</script>`);
+    res.send(`<script>window.opener?.postMessage(${JSON.stringify({type:'tiktok-error',error:err.message})},${JSON.stringify(postMessageOrigin)});window.close();</script>`);
   }
 });
 
@@ -3095,7 +3246,7 @@ app.post('/api/tiktok/save-tokens', requireAuth, async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     console.error('[TikTok] Save tokens error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErrorMessage(err) });
   }
 });
 
@@ -3142,7 +3293,7 @@ app.post('/api/tiktok/disconnect', requireAuth, async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     console.error('[TikTok] Disconnect error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErrorMessage(err) });
   }
 });
 
@@ -3255,7 +3406,7 @@ app.post('/api/tiktok/post', requireAuth, async (req, res) => {
     res.json({ ok: true, publishId });
   } catch (err) {
     console.error('[TikTok] Post error:', err);
-    res.status(500).json({ error: err.message || 'Post failed' });
+    res.status(500).json({ error: safeErrorMessage(err, 'Post failed') });
   }
 });
 
@@ -3293,7 +3444,7 @@ app.get('/api/tiktok/post-status/:publishId', requireAuth, async (req, res) => {
     });
   } catch (err) {
     console.error('[TikTok] Status check error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErrorMessage(err) });
   }
 });
 // Start server (only when run directly, not on Vercel)
