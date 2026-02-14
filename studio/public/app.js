@@ -4,6 +4,7 @@ const DEFAULT_BACKGROUND = 'dark premium background with subtle grain';
 
 // --- Firebase Auth ---
 async function getIdToken() {
+  if (!firebase.apps.length) return null;
   const user = firebase.auth().currentUser;
   if (!user) return null;
   return user.getIdToken();
@@ -99,6 +100,7 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
   btn.disabled = true;
   errEl.textContent = '';
   try {
+    if (!firebase.apps.length) throw new Error('Firebase not configured');
     if (isSignUp) {
       await firebase.auth().createUserWithEmailAndPassword(email, password);
     } else {
@@ -115,6 +117,7 @@ document.getElementById('google-login-btn').addEventListener('click', async () =
   const errEl = document.getElementById('login-error');
   errEl.textContent = '';
   try {
+    if (!firebase.apps.length) throw new Error('Firebase not configured');
     const provider = new firebase.auth.GoogleAuthProvider();
     await firebase.auth().signInWithPopup(provider);
   } catch (err) {
@@ -124,7 +127,9 @@ document.getElementById('google-login-btn').addEventListener('click', async () =
 
 document.getElementById('sign-out-btn').addEventListener('click', async () => {
   clearSession();
-  await firebase.auth().signOut();
+  if (firebase.apps.length) await firebase.auth().signOut();
+  document.getElementById('login-overlay').classList.add('visible');
+  document.getElementById('app-shell').style.display = 'none';
 });
 
 // --- State ---
