@@ -1376,6 +1376,29 @@ app.delete('/api/brands/:id', requireAuth, async (req, res) => {
   }
 });
 
+// Delete user account and all associated data
+app.delete('/api/account', requireAuth, async (req, res) => {
+  try {
+    const uid = req.user.uid;
+    if (!admin.apps.length) return res.status(500).json({ error: 'Firebase not configured' });
+
+    // Delete all user's brands from Firestore
+    if (db) {
+      const brands = await db.collection('carousel_brands').where('createdBy', '==', uid).get();
+      const batch = db.batch();
+      brands.forEach(doc => batch.delete(doc.ref));
+      await batch.commit();
+    }
+
+    // Delete the Firebase Auth user
+    await admin.auth().deleteUser(uid);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[Delete Account]', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // AI brand setup — generate colors, system prompt, etc. from description
 app.post('/api/brands/ai-setup', requireAuth, async (req, res) => {
   try {

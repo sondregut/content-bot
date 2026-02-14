@@ -241,6 +241,10 @@ body {
 
 .sign-out-btn:hover { background: rgba(255,60,60,0.15); color: #d32f2f; border-color: rgba(255,60,60,0.3); }
 
+.delete-account-section { margin: 0; }
+.delete-account-toggle { cursor: pointer; font-size: 0.8rem; color: rgba(0,0,0,0.4); font-weight: 500; }
+.delete-account-toggle:hover { color: #d32f2f; }
+
 .app {
   display: flex;
   flex-direction: column;
