@@ -199,8 +199,8 @@
             <div class="meme-layout">
               <!-- Left column: Controls -->
               <div class="meme-controls">
-                <label class="label">Describe your meme</label>
-                <textarea class="freeform-input" id="meme-description" rows="4" placeholder="e.g. Drake meme — top: using boring stock photos for ads, bottom: using AI-generated memes"></textarea>
+                <label class="label">Describe your meme (optional)</label>
+                <textarea class="freeform-input" id="meme-description" rows="4" placeholder="Leave empty to auto-generate from your website, or describe: e.g. Drake meme — top: boring stock photos, bottom: AI-generated memes"></textarea>
 
                 <div class="form-row" style="margin-top:12px">
                   <div class="form-group">
@@ -257,6 +257,21 @@
                 <div class="mockup-text-reset" id="mockup-text-reset" style="display:none" title="Reset text position">Reset position</div>
                 <div class="mockup-photo-placeholder" id="mockup-photo-placeholder" style="display:none">
                   <span>Photo will be generated here</span>
+                </div>
+                <div class="preview-image-overlay" id="preview-image-overlay" style="display:none">
+                  <div class="preview-overlay-empty" id="preview-overlay-empty">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+                    <span class="preview-overlay-label" id="preview-overlay-label">Click to add image</span>
+                    <a class="preview-overlay-library-link" id="preview-overlay-library-link" style="display:none">Browse Library</a>
+                  </div>
+                  <div class="preview-overlay-actions" id="preview-overlay-actions" style="display:none">
+                    <button type="button" class="preview-overlay-btn" id="preview-overlay-replace">Replace</button>
+                    <button type="button" class="preview-overlay-btn" id="preview-overlay-library" style="display:none">Library</button>
+                    <button type="button" class="preview-overlay-btn preview-overlay-btn-danger" id="preview-overlay-remove">Remove</button>
+                  </div>
+                </div>
+                <div class="preview-image-badge" id="preview-image-badge" style="display:none">
+                  <img id="preview-badge-img" src="" alt="Image thumbnail" />
                 </div>
                 <div class="mockup-icon" id="mockup-icon">
                   <img id="mockup-icon-img" src="" alt="" />

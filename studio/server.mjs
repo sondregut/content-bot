@@ -1053,7 +1053,7 @@ function buildTextPrompt(data, brand) {
 
   const c = brand.colors;
   const safeMicro = microLabel || brand.defaultMicroLabel;
-  const safeHeadline = headline || 'Your mind leads your body';
+  const safeHeadline = headline || 'Your Headline Here';
   const safeBody = body || '';
   const safeBackground = backgroundStyle || brand.defaultBackground;
   const safeLayout = layoutTemplate || 'Layout A - Classic Left Lane';
@@ -1108,14 +1108,14 @@ function buildPhotoPrompt(data, brand) {
   } = data;
 
   const c = brand.colors;
-  const safeSport = sport || 'track';
-  const safeSetting = setting || 'empty stadium at dusk';
-  const safeAction = action || 'head down, slow breathing';
-  const safeMood = mood || 'calm intensity, disciplined';
+  const safeSport = sport || 'person';
+  const safeSetting = setting || 'professional setting';
+  const safeAction = action || 'looking confident and engaged';
+  const safeMood = mood || 'confident, professional';
   const safeOverlayStyle = overlayStyle || 'dark gradient';
   const safeOverlayPlacement = overlayPlacement || 'bottom third';
   const safeMicro = microLabel || brand.defaultMicroLabel;
-  const safeHeadline = headline || 'Calm is a competitive advantage';
+  const safeHeadline = headline || 'Your Headline Here';
   const safeBody = body || '';
 
   const trickyLine = buildTrickyWordsLine(trickyWords);
@@ -2645,6 +2645,67 @@ app.post('/api/generate', requireAuth, generationLimiter, async (req, res) => {
 
     // Meme generation
     if (data.slideType === 'meme') {
+      if (!anthropic) return res.status(503).json({ error: 'Claude API not configured' });
+
+      // Auto-generate meme concept from brand website if no description provided
+      if (!data.description || !data.description.trim()) {
+        if (!brand.website) {
+          return res.status(400).json({ error: 'No website set for this brand. Add a website URL in brand settings, or describe the meme manually.' });
+        }
+
+        let websiteUrl = brand.website.trim();
+        if (!/^https?:\/\//i.test(websiteUrl)) websiteUrl = `https://${websiteUrl}`;
+        if (!isUrlSafe(websiteUrl)) return res.status(400).json({ error: 'Website URL not allowed' });
+
+        let websiteText;
+        try {
+          const resp = await fetch(websiteUrl, {
+            signal: AbortSignal.timeout(8000),
+            headers: { 'User-Agent': 'Mozilla/5.0 (compatible; CarouselStudio/1.0)' },
+            redirect: 'follow',
+          });
+          const html = await resp.text();
+          websiteText = html
+            .replace(/<script[\s\S]*?<\/script>/gi, '')
+            .replace(/<style[\s\S]*?<\/style>/gi, '')
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .slice(0, 3000);
+        } catch (e) {
+          return res.status(400).json({ error: `Could not reach website: ${e.message}` });
+        }
+
+        const conceptResponse = await anthropic.messages.create({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 300,
+          messages: [{
+            role: 'user',
+            content: `You are a meme creator. Based on this brand's website content, generate ONE specific meme concept.
+
+Brand: ${brand.name}
+Website: ${websiteUrl}
+Website content: ${websiteText}
+
+Requirements:
+- Pick a specific meme format (Drake, expanding brain, distracted boyfriend, comparison, "nobody:", POV, etc.)
+- The joke should be about the brand's actual product, features, or industry — something their audience would relate to
+- Include exact text for each panel/section of the meme
+- Keep it funny, relatable, and shareable — not corporate or salesy
+- The meme should make sense even to people who don't know the brand
+
+Return ONLY the meme description (no explanation, no preamble). Example format:
+"Drake meme — top: manually tracking workouts in a notebook, bottom: letting [brand] auto-track everything"`,
+          }],
+        });
+
+        data.description = conceptResponse.content[0]?.text?.trim();
+        if (!data.description) {
+          return res.status(500).json({ error: 'Failed to generate meme concept from website' });
+        }
+        console.log(`[Meme] Auto-generated concept for ${brand.name}: ${data.description.slice(0, 100)}...`);
+      }
+
       const sizeMap = {
         '1:1': '1024x1024',
         '9:16': '1024x1536',

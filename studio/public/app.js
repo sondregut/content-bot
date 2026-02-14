@@ -322,6 +322,18 @@ const mockupIconImg = document.getElementById('mockup-icon-img');
 const mockupTextGroup = document.getElementById('mockup-text-group');
 const mockupTextReset = document.getElementById('mockup-text-reset');
 
+// Preview image overlay refs
+const previewImageOverlay = document.getElementById('preview-image-overlay');
+const previewOverlayEmpty = document.getElementById('preview-overlay-empty');
+const previewOverlayActions = document.getElementById('preview-overlay-actions');
+const previewOverlayLabel = document.getElementById('preview-overlay-label');
+const previewOverlayLibraryLink = document.getElementById('preview-overlay-library-link');
+const previewOverlayReplace = document.getElementById('preview-overlay-replace');
+const previewOverlayLibrary = document.getElementById('preview-overlay-library');
+const previewOverlayRemove = document.getElementById('preview-overlay-remove');
+const previewImageBadge = document.getElementById('preview-image-badge');
+const previewBadgeImg = document.getElementById('preview-badge-img');
+
 // --- Per-element Text Offsets (drag to move) ---
 let elementOffsets = {
   micro: { x: 0, y: 0 },
@@ -1644,25 +1656,35 @@ function toggleTypeFields() {
   textFields.style.display = type === 'text' ? 'block' : 'none';
   mockupFields.style.display = type === 'mockup' ? 'block' : 'none';
   if (type === 'mockup') toggleMockupPhoneOptions();
+
+  // Hide mockup image upload section from sidebar — moved to preview overlay
+  mockupImageUploadSection.style.display = 'none';
+  screenshotWarning.style.display = 'none';
+
+  // Hide reference sections for mockup (they are ignored server-side)
+  const slideRefSection = document.querySelector('.slide-ref-section');
+  const refSection = document.querySelector('.ref-section');
+  if (slideRefSection) slideRefSection.style.display = type === 'mockup' ? 'none' : '';
+  if (refSection) refSection.style.display = type === 'mockup' ? 'none' : '';
+
   const hints = {
     photo: 'AI-generated background image with text overlay',
     text: 'Text and colors only — no background image',
     mockup: 'App screenshot in a phone frame with text overlay',
   };
   document.getElementById('slideTypeHint').textContent = hints[type] || '';
+  updatePreviewImageOverlay();
 }
 
 function toggleMockupPhoneOptions() {
   const usage = imageUsageSelect.value;
-  const needsUpload = usage !== 'none' && usage !== 'ai-background';
 
   mockupPhoneOptions.style.display = usage === 'phone' ? 'block' : 'none';
   mockupFigureOptions.style.display = usage === 'figure' ? 'block' : 'none';
   mockupBgOptions.style.display = (usage === 'background' || usage === 'ai-background') ? 'block' : 'none';
-  mockupImageUploadSection.style.display = needsUpload ? 'block' : 'none';
-  screenshotWarning.style.display = needsUpload && !screenshotImageFilename ? 'block' : 'none';
   const aiBgOptions = document.getElementById('mockup-ai-bg-options');
   if (aiBgOptions) aiBgOptions.style.display = usage === 'ai-background' ? 'block' : 'none';
+  updatePreviewImageOverlay();
 }
 
 slideTypeSelect.addEventListener('change', () => {
@@ -1772,6 +1794,7 @@ function updatePreviewMockup() {
     previewMockup.classList.add('photo-type');
     previewMockup.style.background = '';
     mockupPhotoPlaceholder.style.display = 'flex';
+    mockupPhotoPlaceholder.querySelector('span').textContent = ''; // overlay handles prompt
   } else if (isMockup) {
     previewMockup.classList.remove('photo-type');
     const mockupTheme = mockupThemeSelect.value || 'dark';
@@ -1789,7 +1812,7 @@ function updatePreviewMockup() {
     } else if (isBackground && !screenshotImageFilename) {
       previewMockup.style.background = `linear-gradient(135deg, #1e293b 0%, #334155 100%)`;
       mockupPhotoPlaceholder.style.display = 'flex';
-      mockupPhotoPlaceholder.querySelector('span').textContent = 'Upload a background image';
+      mockupPhotoPlaceholder.querySelector('span').textContent = ''; // overlay handles prompt
     } else {
       previewMockup.style.background = mockupTheme === 'light' ? '#F5F3EF' : primaryColor;
       mockupPhotoPlaceholder.style.display = 'none';
@@ -1870,7 +1893,109 @@ function updatePreviewMockup() {
 
   // Re-apply text offset transform
   applyTextOffset();
+
+  // Update image overlay state
+  updatePreviewImageOverlay();
 }
+
+// --- Preview Image Overlay ---
+function updatePreviewImageOverlay() {
+  const type = slideTypeSelect.value;
+  const usage = imageUsageSelect.value;
+  const isMockup = type === 'mockup';
+  const hasScreenshot = !!screenshotImageFilename;
+  const hasSlideRef = !!slideReferenceImages[currentSlideIndex];
+
+  // Reset all states
+  previewImageOverlay.style.display = 'none';
+  previewImageBadge.style.display = 'none';
+  previewOverlayEmpty.style.display = 'none';
+  previewOverlayActions.style.display = 'none';
+  previewOverlayLibraryLink.style.display = 'none';
+  previewOverlayLibrary.style.display = 'none';
+
+  if (isMockup) {
+    if (usage === 'none' || usage === 'ai-background') return;
+
+    const isBackground = usage === 'background';
+    const isPhoneOrFigure = usage === 'phone' || usage === 'figure';
+
+    if (!hasScreenshot) {
+      // Empty state — show overlay with upload prompt
+      previewImageOverlay.style.display = 'flex';
+      previewOverlayEmpty.style.display = 'flex';
+      previewOverlayLabel.textContent = 'Click to add image';
+      previewOverlayLibraryLink.style.display = 'inline';
+    } else if (isBackground) {
+      // Background mode with image — show hover actions
+      previewImageOverlay.style.display = 'flex';
+      previewOverlayActions.style.display = 'flex';
+      previewOverlayLibrary.style.display = 'inline-block';
+    } else if (isPhoneOrFigure) {
+      // Phone/figure mode with image — show badge thumbnail
+      previewImageBadge.style.display = 'block';
+      previewBadgeImg.src = `/uploads/${screenshotImageFilename}`;
+    }
+  } else {
+    // Photo or text slide — reference image
+    const hasRef = hasSlideRef;
+    if (!hasRef) {
+      previewImageOverlay.style.display = 'flex';
+      previewOverlayEmpty.style.display = 'flex';
+      previewOverlayLabel.textContent = type === 'photo' ? 'Click to add reference' : 'Optional reference image';
+    } else {
+      previewImageOverlay.style.display = 'flex';
+      previewOverlayActions.style.display = 'flex';
+    }
+  }
+}
+
+// Overlay click — trigger file input based on slide type
+previewImageOverlay.addEventListener('click', (e) => {
+  // Don't trigger if clicking action buttons or library link
+  if (e.target.closest('.preview-overlay-btn') || e.target.closest('.preview-overlay-library-link')) return;
+  const type = slideTypeSelect.value;
+  if (type === 'mockup') {
+    screenshotImageInput.click();
+  } else {
+    slideRefInput.click();
+  }
+});
+
+previewOverlayLibraryLink.addEventListener('click', (e) => {
+  e.stopPropagation();
+  openBgLibrary();
+});
+
+previewOverlayReplace.addEventListener('click', (e) => {
+  e.stopPropagation();
+  const type = slideTypeSelect.value;
+  if (type === 'mockup') {
+    screenshotImageInput.click();
+  } else {
+    slideRefInput.click();
+  }
+});
+
+previewOverlayLibrary.addEventListener('click', (e) => {
+  e.stopPropagation();
+  openBgLibrary();
+});
+
+previewOverlayRemove.addEventListener('click', (e) => {
+  e.stopPropagation();
+  const type = slideTypeSelect.value;
+  if (type === 'mockup') {
+    screenshotClearBtn.click();
+  } else {
+    slideRefClear.click();
+  }
+});
+
+// Badge click — trigger replace
+previewImageBadge.addEventListener('click', () => {
+  screenshotImageInput.click();
+});
 
 // --- Drag to Move Text (per-element) ---
 function applyTextOffset() {
@@ -2424,6 +2549,7 @@ slideRefInput.addEventListener('change', async () => {
       slideRefPreview.style.display = 'block';
       slideRefClear.style.display = 'inline-block';
       renderSlideTabs();
+      updatePreviewImageOverlay();
     } else {
       slideRefFilename.textContent = 'Upload failed';
     }
@@ -2442,6 +2568,7 @@ slideRefClear.addEventListener('click', () => {
   slideRefClear.style.display = 'none';
   slideRefInput.value = '';
   renderSlideTabs();
+  updatePreviewImageOverlay();
 });
 
 // --- Build payload ---
@@ -2460,10 +2587,10 @@ function buildSlidePayload(slide, slideIndex) {
   };
 
   if (payload.slideType === 'photo') {
-    payload.sport = slide.sport || 'track';
-    payload.setting = slide.setting || 'empty stadium at dusk';
-    payload.action = slide.action || 'head down, slow breathing';
-    payload.mood = slide.mood || 'calm intensity, disciplined';
+    payload.sport = slide.sport || '';
+    payload.setting = slide.setting || '';
+    payload.action = slide.action || '';
+    payload.mood = slide.mood || '';
     payload.overlayStyle = form.elements.overlayStyle?.value || 'dark gradient';
     payload.overlayPlacement = form.elements.overlayPlacement?.value || 'bottom third';
     payload.headlineFontSize = slide.headlineFontSize || parseInt(form.elements.headlineFontSize?.value) || 82;
@@ -3146,10 +3273,6 @@ document.getElementById('meme-back-btn').addEventListener('click', closeMemeView
 
 document.getElementById('generate-meme-btn').addEventListener('click', async () => {
   const description = memeDescription.value.trim();
-  if (!description) {
-    memeStatus.textContent = 'Please describe your meme concept.';
-    return;
-  }
   if (!currentBrand) {
     memeStatus.textContent = 'Please select a brand first.';
     return;
@@ -3157,7 +3280,7 @@ document.getElementById('generate-meme-btn').addEventListener('click', async () 
 
   const generateBtn = document.getElementById('generate-meme-btn');
   generateBtn.disabled = true;
-  memeStatus.textContent = 'Generating meme...';
+  memeStatus.textContent = description ? 'Generating meme...' : 'Generating meme from your website...';
   downloadMemeBtn.style.display = 'none';
 
   try {
@@ -4118,7 +4241,6 @@ async function selectBackground(imgUrl) {
       screenshotPreview.style.display = 'block';
       screenshotClearBtn.style.display = 'inline-block';
       closeBgLibrary();
-      toggleMockupPhoneOptions();
       updatePreviewMockup();
     }
   } catch (err) {
