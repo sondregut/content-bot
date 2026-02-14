@@ -505,6 +505,7 @@ function openBrandModal(brand = null) {
   brandWebsiteInput.value = brand?.website || '';
   brandDescInput.value = '';
   document.getElementById('brand-system-prompt').value = brand?.systemPrompt || '';
+  document.getElementById('brand-image-style').value = brand?.imageStyle || '';
   document.getElementById('brand-micro-label').value = brand?.defaultMicroLabel || '';
   document.getElementById('brand-watermark').value = brand?.iconOverlayText || '';
   document.getElementById('brand-bg-desc').value = brand?.defaultBackground || '';
@@ -721,6 +722,7 @@ async function analyzeWebsite(url) {
 
     // Fill advanced fields
     if (brand.systemPrompt) document.getElementById('brand-system-prompt').value = brand.systemPrompt;
+    if (brand.imageStyle) document.getElementById('brand-image-style').value = brand.imageStyle;
     if (brand.defaultBackground) document.getElementById('brand-bg-desc').value = brand.defaultBackground;
     if (brand.microLabel) document.getElementById('brand-micro-label').value = brand.microLabel;
     if (brand.watermarkText) document.getElementById('brand-watermark').value = brand.watermarkText;
@@ -844,6 +846,7 @@ brandAiBtn.addEventListener('click', async () => {
       }
     }
     if (s.systemPrompt) document.getElementById('brand-system-prompt').value = s.systemPrompt;
+    if (s.imageStyle) document.getElementById('brand-image-style').value = s.imageStyle;
     if (s.defaultBackground) document.getElementById('brand-bg-desc').value = s.defaultBackground;
     if (!document.getElementById('brand-micro-label').value) {
       document.getElementById('brand-micro-label').value = name.toUpperCase();
@@ -868,6 +871,7 @@ brandSaveBtn.addEventListener('click', async () => {
     website: brandWebsiteInput.value.trim(),
     colors,
     systemPrompt: document.getElementById('brand-system-prompt').value.trim(),
+    imageStyle: document.getElementById('brand-image-style').value.trim(),
     defaultMicroLabel: document.getElementById('brand-micro-label').value.trim() || name.toUpperCase(),
     defaultBackground: document.getElementById('brand-bg-desc').value.trim() || DEFAULT_BACKGROUND,
     iconOverlayText: document.getElementById('brand-watermark').value.trim() || brandWebsiteInput.value.trim(),

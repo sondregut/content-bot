@@ -192,6 +192,7 @@ const GENERIC_BRAND = {
   defaultBackground: 'dark premium background with subtle grain',
   iconOverlayText: '',
   systemPrompt: 'You are an expert visual designer and prompt engineer for social media carousel content.',
+  imageStyle: 'Minimalist and clean. Candid photography with natural lighting, shot on iPhone. 35mm film grain aesthetic. Simple uncluttered backgrounds.',
 };
 
 async function getBrandAsync(brandId, userId) {
@@ -972,7 +973,8 @@ function buildTextPrompt(data, brand) {
   const trickyLine = buildTrickyWordsLine(trickyWords);
 
   return [
-    `Create a minimalist premium TikTok carousel slide (1080x1920, 9:16) for ${brand.name}.`,
+    `Create a TikTok carousel slide (1080x1920, 9:16) for ${brand.name}.`,
+    `Visual style: ${brand.imageStyle || 'Minimalist and clean with plenty of negative space.'}`,
     `Background: ${safeBackground} using brand palette primary ${c.primary}, accent ${c.accent}, white ${c.white}, secondary ${c.secondary}, CTA color ${c.cta} (CTA only).`,
     `Composition: ${safeLayout}. Large left-aligned text block within safe zones (top 180px, bottom 320px, sides 90px). Plenty of negative space.`,
     textBlocks.join('\n\n'),
@@ -1014,12 +1016,11 @@ function buildPhotoPrompt(data, brand) {
   const trickyLine = buildTrickyWordsLine(trickyWords);
 
   return [
-    'Create a candid, authentic-looking sports photo for a TikTok carousel slide (1080x1920, 9:16). Shot on iPhone 15 Pro, 50mm equivalent lens, medium close-up at eye level.',
-    `Scene: ${safeSport} athlete in ${safeSetting}, ${safeAction}. Honest and unposed moment — not staged or glamorized.`,
-    'Subject: one athlete, natural proportions, real skin texture with visible pores and natural imperfections, authentic worn gear (no brand logos). No airbrushed or plastic-looking skin.',
-    `Lighting: soft natural daylight, natural color balance, shallow depth of field. No dramatic studio lighting or heavy color grading. Subtle film grain, 35mm film photograph aesthetic.`,
+    `Create a photo for a TikTok carousel slide (1080x1920, 9:16) for ${brand.name}.`,
+    `Visual style: ${brand.imageStyle || 'Clean and professional photography with natural lighting.'}`,
+    `Scene: ${safeSport} in ${safeSetting}, ${safeAction}.`,
     `Mood: ${safeMood}.`,
-    `Composition: simple, clean background — not overly dramatic. Leave negative space for text overlay in the ${safeOverlayPlacement}.`,
+    `Composition: simple, clean background. Leave negative space for text overlay in the ${safeOverlayPlacement}. No brand logos on subject.`,
     `Add a subtle ${safeOverlayStyle} behind text for readability; image stays dominant and uncluttered.`,
     'Overlay text (EXACT, verbatim):',
     `Micro-label: "${safeMicro}"`,
@@ -1167,13 +1168,9 @@ const BASE_REFINEMENT_INSTRUCTIONS = `Your job: Take a raw image-generation prom
 - Preserve ALL exact text content from the original — never change the user's words
 - Keep the prompt concise and direct — no fluff, no markdown, no explanation
 
-CRITICAL for photo slides with people:
-- Push hard for REALISM over cinematic drama. The goal is photos that look like they were taken on an iPhone, not a Hollywood set
-- Include: "natural skin texture with pores", "35mm film grain", "soft natural daylight", "candid and unposed", "shallow depth of field"
+CRITICAL: Respect the brand's visual style direction. Do not override it with generic realism instructions. Adapt your refinements to match the brand's stated aesthetic.
 - AVOID these words that make images look AI-generated: "perfect", "flawless", "ultra-smooth", "ultra-detailed", "8K", "hyper-realistic", "masterpiece"
-- Specify a real camera/lens feel: "shot on iPhone", "50mm lens", "medium close-up at eye level"
-- Backgrounds should be simple and believable — a real gym, a regular field, a plain wall — not epic dramatic stadiums with god rays
-- Skin should have real texture, natural imperfections, visible pores — never airbrushed or plastic
+- Backgrounds should be simple and believable — not epic dramatic stadiums with god rays
 
 Return ONLY the refined prompt text. No preamble, no explanation, no markdown formatting.`;
 
@@ -1420,6 +1417,7 @@ Return ONLY valid JSON (no markdown, no code fences) with:
 - colors: { primary (dark bg), accent (highlight), white (text), secondary (alt bg), cta (button) } — all hex codes
 - systemPrompt: 150-200 word brand brief for AI content generation, describing tone, audience, content pillars
 - defaultBackground: one-line visual description for AI image backgrounds
+- imageStyle: 2-4 sentence visual/photography direction for AI image generation (describe lighting, composition style, mood, camera feel — NOT colors, those are separate)
 - contentPillars: array of 4-5 content themes as short strings
 - tone: short tone/voice description (2-3 words)`
       }],
@@ -1716,6 +1714,7 @@ Return ONLY valid JSON (no markdown, no code fences) with:
 - colors: { primary, accent, white, secondary, cta } — hex codes mapped from the actual CSS colors above
 - systemPrompt: 150-200 word brand brief for AI content generation describing tone, audience, content pillars, visual style
 - defaultBackground: one-line visual description for slide backgrounds matching the brand aesthetic
+- imageStyle: 2-4 sentence visual/photography direction for AI image generation (describe lighting, composition style, mood, camera feel — NOT colors, those are separate)
 - tone: 2-3 word tone description (e.g. "bold, energetic")
 - microLabel: short uppercase label for slides (e.g. "SPORTYLAB")
 - watermarkText: website domain for watermark (e.g. "sportylab.no")
