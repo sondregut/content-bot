@@ -1,3 +1,7 @@
+// --- Default brand values (must match GENERIC_BRAND in server.mjs) ---
+const DEFAULT_BRAND_COLORS = { primary: '#1A1A2E', accent: '#E94560', white: '#FFFFFF', secondary: '#16213E', cta: '#0F3460' };
+const DEFAULT_BACKGROUND = 'dark premium background with subtle grain';
+
 // --- Firebase Auth ---
 async function getIdToken() {
   const user = firebase.auth().currentUser;
@@ -380,7 +384,7 @@ function openBrandModal(brand = null) {
   const analysisEl = document.getElementById('brand-analysis-section');
   if (analysisEl) analysisEl.style.display = 'none';
 
-  const colors = brand?.colors || { primary: '#1A1A2E', accent: '#E94560', white: '#FFFFFF', secondary: '#16213E', cta: '#0F3460' };
+  const colors = brand?.colors || DEFAULT_BRAND_COLORS;
   for (const [key, input] of Object.entries(colorInputs)) {
     input.value = colors[key] || '#000000';
     document.getElementById(`brand-color-${key}-hex`).textContent = input.value.toUpperCase();
@@ -730,7 +734,7 @@ brandSaveBtn.addEventListener('click', async () => {
     colors,
     systemPrompt: document.getElementById('brand-system-prompt').value.trim(),
     defaultMicroLabel: document.getElementById('brand-micro-label').value.trim() || name.toUpperCase(),
-    defaultBackground: document.getElementById('brand-bg-desc').value.trim() || 'dark premium background with subtle grain',
+    defaultBackground: document.getElementById('brand-bg-desc').value.trim() || DEFAULT_BACKGROUND,
     iconOverlayText: document.getElementById('brand-watermark').value.trim() || brandWebsiteInput.value.trim(),
   };
   if (pendingContentPillars) payload.contentPillars = pendingContentPillars;

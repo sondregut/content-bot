@@ -1052,7 +1052,7 @@ function buildPersonalizedPrompt(data, brand) {
     `The person's face, features, and identity must be clearly preserved from the reference photo.`,
     `Shot on iPhone 15 Pro, 50mm equivalent. Natural skin texture, no brand logos.`,
     `Leave space in the bottom third for text overlay.`,
-    brand.name !== 'My Brand' ? `Brand: ${brand.name}.` : '',
+    brand.id !== 'generic' ? `Brand: ${brand.name}.` : '',
   ].filter(Boolean).join('\n');
 }
 
@@ -1306,15 +1306,15 @@ app.post('/api/brands', requireAuth, async (req, res) => {
       name,
       website: website || '',
       colors: {
-        primary: colors.primary || '#1A1A2E',
-        accent: colors.accent || '#E94560',
-        white: colors.white || '#FFFFFF',
-        secondary: colors.secondary || '#16213E',
-        cta: colors.cta || '#0F3460',
+        primary: colors.primary || GENERIC_BRAND.colors.primary,
+        accent: colors.accent || GENERIC_BRAND.colors.accent,
+        white: colors.white || GENERIC_BRAND.colors.white,
+        secondary: colors.secondary || GENERIC_BRAND.colors.secondary,
+        cta: colors.cta || GENERIC_BRAND.colors.cta,
       },
       systemPrompt: systemPrompt || '',
       defaultMicroLabel: defaultMicroLabel || name.toUpperCase(),
-      defaultBackground: defaultBackground || `dark premium background with subtle grain`,
+      defaultBackground: defaultBackground || GENERIC_BRAND.defaultBackground,
       iconOverlayText: iconOverlayText || website || '',
       contentPillars: contentPillars || [],
       createdBy: req.user.uid,
