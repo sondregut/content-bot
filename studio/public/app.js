@@ -204,6 +204,8 @@ function resetAppState() {
   vaultHasMore = false;
   vaultNextCursor = null;
   vaultLoading = false;
+  const vaultCountEl = document.getElementById('vault-count');
+  if (vaultCountEl) vaultCountEl.textContent = '0';
 
   // Reference images
   referenceImageFilename = null;
@@ -243,6 +245,10 @@ function resetAppState() {
 
   // Session storage
   clearSession();
+
+  // Clear DOM immediately to prevent stale UI flash on account switch
+  renderBrandSelector();
+  renderEmptySidebar();
 }
 
 // --- DOM refs ---
@@ -3422,7 +3428,6 @@ document.getElementById('generate-meme-btn').addEventListener('click', async () 
     downloadMemeBtn.style.display = 'inline-block';
     memeStatus.textContent = '';
     addToVault(data.url, data.filename);
-    updateVaultCount();
   } catch (err) {
     memeStatus.textContent = err.message || 'Generation failed';
   } finally {
@@ -4111,7 +4116,7 @@ function renderVault() {
     `<div class="vault-item">
       <img src="${v.url}" alt="${v.filename || 'image'}" loading="lazy" />
       <div class="vault-item-actions">
-        <a href="${v.url}" download="${v.filename || 'image.png'}" class="vault-dl-btn" title="Download">&#8681;</a>
+        <button class="vault-dl-btn" data-url="${v.url}" data-filename="${v.filename || 'image.png'}" title="Download">&#8681;</button>
         <button class="vault-rm-btn" data-id="${v.id}" title="Remove">&times;</button>
       </div>
     </div>`
@@ -4140,6 +4145,21 @@ function renderVault() {
       } catch (err) {
         console.error('Delete failed:', err);
       }
+    });
+  });
+
+  grid.querySelectorAll('.vault-dl-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      try {
+        const res = await fetch(btn.dataset.url);
+        const blob = await res.blob();
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = btn.dataset.filename || 'image.png';
+        a.click();
+        URL.revokeObjectURL(a.href);
+      } catch { window.open(btn.dataset.url, '_blank'); }
     });
   });
 
@@ -4202,8 +4222,7 @@ document.getElementById('vault-toggle-btn')?.addEventListener('click', openVault
 document.getElementById('vault-close-btn')?.addEventListener('click', closeVault);
 document.getElementById('vault-backdrop')?.addEventListener('click', closeVault);
 
-// Initial vault count
-updateVaultCount();
+// Vault count loaded on auth state change (not here — avoids stale count from previous user)
 
 // --- Background Library ---
 
