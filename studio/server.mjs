@@ -2035,8 +2035,9 @@ Return ONLY valid JSON (no markdown, no code fences) with:
 }
 
 // --- Shared content ideas prompt builder ---
-function buildContentIdeasPrompt({ brand, microLabel, websiteUrl, pageTitle, metaDesc, websiteText, numIdeas }) {
+function buildContentIdeasPrompt({ brand, microLabel, websiteUrl, pageTitle, metaDesc, websiteText, numIdeas, slidesPerIdea }) {
   const count = numIdeas || 5;
+  const slideCount = (slidesPerIdea >= 2 && slidesPerIdea <= 12) ? `exactly ${slidesPerIdea}` : '6-7';
   return `Based on this website content, generate ${count} carousel content ideas for ${brand.name}'s social media (TikTok/Instagram).
 
 Website: ${websiteUrl}
@@ -2044,7 +2045,7 @@ Page title: ${pageTitle}
 Description: ${metaDesc}
 Website text: ${websiteText}
 
-Generate exactly ${count} carousel concepts. Each should have 6-7 slides and be based on real content/features/value props from the website.
+Generate exactly ${count} carousel concepts. Each should have ${slideCount} slides and be based on real content/features/value props from the website.
 
 Return ONLY valid JSON (no markdown, no code fences) with this structure:
 {
@@ -3790,7 +3791,7 @@ Rules:
 app.post('/api/generate-content-ideas', requireAuth, async (req, res) => {
   try {
     const anthropic = getAnthropic(req);
-    const { brand: brandId, existingTitles, numIdeas, startIndex } = req.body || {};
+    const { brand: brandId, existingTitles, numIdeas, startIndex, userTopic, slidesPerIdea } = req.body || {};
     if (!brandId) return res.status(400).json({ error: 'Missing brand' });
     if (!anthropic) return res.status(500).json({ error: 'Add your Anthropic API key in Settings.' });
 
@@ -3856,12 +3857,17 @@ app.post('/api/generate-content-ideas', requireAuth, async (req, res) => {
         .replace(/\{\{website_text\}\}/g, websiteText)
         .replace(/\{\{micro_label\}\}/g, microLabel);
     } else {
-      userPrompt = buildContentIdeasPrompt({ brand, microLabel, websiteUrl, pageTitle, metaDesc, websiteText, numIdeas: count });
+      userPrompt = buildContentIdeasPrompt({ brand, microLabel, websiteUrl, pageTitle, metaDesc, websiteText, numIdeas: count, slidesPerIdea });
     }
 
     // When generating more, tell Claude to avoid repeating existing topics
     if (existingTitles?.length) {
       userPrompt += `\n\nIMPORTANT: The following carousel ideas already exist. Generate COMPLETELY DIFFERENT topics — do NOT repeat or rephrase any of these:\n${existingTitles.map(t => `- ${t}`).join('\n')}`;
+    }
+
+    // Freeform user topic to guide idea generation
+    if (userTopic?.trim()) {
+      userPrompt += `\n\nUSER REQUEST: The user specifically wants this idea to be about: "${userTopic.trim()}". Generate content that directly addresses this topic using the brand's real information.`;
     }
 
     const response = await anthropic.messages.create({

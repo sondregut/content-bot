@@ -1945,7 +1945,7 @@ function renderSidebar() {
   if (hasAiIdeas) {
     const moreDiv = document.createElement('div');
     moreDiv.className = 'sidebar-generate-more';
-    moreDiv.innerHTML = `<button class="btn secondary sidebar-more-btn" id="sidebar-generate-more-btn">+ Generate Idea</button><div class="sidebar-more-status" id="sidebar-more-status"></div>`;
+    moreDiv.innerHTML = `<input type="text" class="sidebar-prompt-input" id="sidebar-prompt-input" placeholder="e.g. explain app features..." /><div class="sidebar-prompt-row"><input type="number" class="sidebar-slides-input" id="sidebar-slides-input" min="2" max="12" placeholder="Slides" title="Number of slides (default 6-7)" /><button class="btn secondary sidebar-more-btn" id="sidebar-generate-more-btn">+ Generate Idea</button></div><div class="sidebar-more-status" id="sidebar-more-status"></div>`;
     sidebar.appendChild(moreDiv);
     document.getElementById('sidebar-generate-more-btn').addEventListener('click', generateMoreIdeas);
   }
@@ -1965,7 +1965,11 @@ async function generateMoreIdeas() {
     const startIndex = allIdeas.length;
     const res = await authFetch('/api/generate-content-ideas', {
       method: 'POST',
-      body: JSON.stringify({ brand: currentBrand, existingTitles, numIdeas: 1, startIndex }),
+      body: JSON.stringify({
+        brand: currentBrand, existingTitles, numIdeas: 1, startIndex,
+        userTopic: document.getElementById('sidebar-prompt-input')?.value?.trim() || '',
+        slidesPerIdea: parseInt(document.getElementById('sidebar-slides-input')?.value) || 0,
+      }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Generation failed');
@@ -1983,6 +1987,9 @@ async function generateMoreIdeas() {
       app.categories.push({ name: 'AI-Generated Ideas', ideas: newIdeas });
     }
     renderSidebar();
+    // Clear the prompt input (sidebar was re-rendered so the DOM element is fresh, but clear just in case)
+    const promptEl = document.getElementById('sidebar-prompt-input');
+    if (promptEl) promptEl.value = '';
     // Update content plan grid if visible
     const contentPlanView = document.getElementById('content-plan-view');
     if (contentPlanView && contentPlanView.style.display !== 'none') {

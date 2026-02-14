@@ -469,8 +469,39 @@ body {
   padding: 12px 16px;
   border-top: 1px solid var(--border);
 }
-.sidebar-more-btn {
+.sidebar-prompt-input {
   width: 100%;
+  padding: 6px 10px;
+  margin-bottom: 8px;
+  font-size: 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  color: var(--text);
+  box-sizing: border-box;
+}
+.sidebar-prompt-input::placeholder { color: var(--text-secondary); }
+.sidebar-prompt-row {
+  display: flex;
+  gap: 6px;
+}
+.sidebar-slides-input {
+  width: 64px;
+  flex-shrink: 0;
+  padding: 6px 8px;
+  font-size: 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  color: var(--text);
+  box-sizing: border-box;
+  -moz-appearance: textfield;
+}
+.sidebar-slides-input::-webkit-outer-spin-button,
+.sidebar-slides-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.sidebar-slides-input::placeholder { color: var(--text-secondary); }
+.sidebar-more-btn {
+  flex: 1;
   font-size: 0.8rem;
   padding: 8px 12px;
 }
