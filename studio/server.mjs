@@ -2070,12 +2070,22 @@ Return ONLY valid JSON (no markdown, no code fences) with this structure:
 }
 
 Rules:
-- Each idea MUST include a "caption" field: a ready-to-post Instagram/TikTok caption in the brand's voice. Caption rules:
-  * First line is the HOOK — most compelling line, front-loaded with keywords (only ~125 chars show before "...more" on Instagram)
-  * 2-3 engaging sentences total, using natural keywords relevant to the content (algorithms prioritize keywords over hashtags)
-  * End with a CTA — ask a question, prompt a save/share, or direct to link in bio
-  * Add 3-5 relevant hashtags at the very end (not 8+, quality over quantity)
-  * Keep total caption under 300 characters for TikTok readability
+- Each idea MUST include a "caption" field: a ready-to-post Instagram/TikTok caption in the brand's voice. Caption structure:
+  * LINE 1 — HOOK (under 125 chars, this is all that shows before "...more"). Use one of these proven formulas:
+    - Question: "Are you still doing X wrong?"
+    - Stat: "X% of people miss this about Y"
+    - Promise: "Save this: everything you need to know about X"
+    - Mistake: "Stop doing X if you want Y"
+    - Curiosity: "I didn't expect slide 5..."
+  * LINES 2-3 — VALUE: expand on the carousel's key takeaway using natural keywords (algorithms rank keywords over hashtags)
+  * LAST LINE — CTA: use a SPECIFIC call-to-action (specific CTAs get 3x more engagement than generic ones). Best formats:
+    - Save-driven: "Save this for when you need it"
+    - Comment-driven: "Comment which tip you're trying first" (prompts 5+ word replies, weighted heavier by algorithm)
+    - Share-driven: "Send this to someone who needs to hear it"
+    - Choice-driven: "A or B? Drop your pick below"
+    - AVOID generic CTAs like "thoughts?" or "let me know"
+  * End with 3-5 relevant hashtags (quality over quantity)
+  * Total length: 150-200 words ideal for Instagram, works on TikTok too
 - Each idea should cover a DISTINCTLY different angle — avoid repeating the same theme or structure across ideas.
 - Default to 7 slides per idea. Only go to 5-6 if the topic is simple, or 8-9 if it genuinely needs more depth. Always bias toward 7.
 - Strategically choose slide types based on content purpose:
@@ -3750,7 +3760,7 @@ Return ONLY valid JSON with this exact structure (no markdown, no explanation):
 }
 
 Rules:
-- Include a "caption" field: first line is the HOOK (front-load keywords, only ~125 chars show before truncation). 2-3 sentences using natural keywords. End with a CTA (question or prompt). Add 3-5 hashtags at the end. Keep under 300 chars for TikTok.
+- Include a "caption" field with this structure: (1) HOOK line under 125 chars using a proven formula — question, stat, promise, mistake, or curiosity pattern. (2) 1-2 VALUE sentences expanding on the carousel takeaway with natural keywords. (3) SPECIFIC CTA — "save this for later", "comment which tip you'll try", "send this to someone who needs it", or a choice question. Avoid generic CTAs like "thoughts?". (4) 3-5 hashtags at the end.
 - First slide should be a strong hook (usually photo type)
 - Last slide should be a CTA with "${brand.name} — link in bio"
 - Mix photo, text, and mockup types for visual variety
