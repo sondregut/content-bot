@@ -339,6 +339,7 @@ const slideTypeSelect = document.getElementById('slideType');
 const photoFields = document.getElementById('photo-fields');
 const textFields = document.getElementById('text-fields');
 const mockupFields = document.getElementById('mockup-fields');
+const videoFields = document.getElementById('video-fields');
 const mockupLayoutSelect = document.getElementById('mockupLayout');
 const mockupThemeSelect = document.getElementById('mockupTheme');
 const mockupPhoneOptions = document.getElementById('mockup-phone-options');
@@ -354,6 +355,7 @@ const screenshotPreview = document.getElementById('screenshot-preview');
 const screenshotWarning = document.getElementById('screenshot-warning');
 const statusEl = document.getElementById('status');
 const previewImg = document.getElementById('preview-image');
+const previewVideo = document.getElementById('preview-video');
 const generateAllBtn = document.getElementById('generate-all-btn');
 const gallerySection = document.getElementById('gallery-section');
 const galleryStrip = document.getElementById('gallery-strip');
@@ -1937,6 +1939,64 @@ function renderSidebar() {
   sidebar.querySelectorAll('.idea-item').forEach((el) => {
     el.addEventListener('click', () => selectIdea(el.dataset.ideaId));
   });
+
+  // Add "Generate More" button for AI-generated ideas
+  const hasAiIdeas = app.categories.some(c => c.ideas.some(i => i.id?.startsWith('AI-')));
+  if (hasAiIdeas) {
+    const moreDiv = document.createElement('div');
+    moreDiv.className = 'sidebar-generate-more';
+    moreDiv.innerHTML = `<button class="btn secondary sidebar-more-btn" id="sidebar-generate-more-btn">+ Generate 5 More</button><div class="sidebar-more-status" id="sidebar-more-status"></div>`;
+    sidebar.appendChild(moreDiv);
+    document.getElementById('sidebar-generate-more-btn').addEventListener('click', generateMoreIdeas);
+  }
+}
+
+async function generateMoreIdeas() {
+  const btn = document.getElementById('sidebar-generate-more-btn');
+  const status = document.getElementById('sidebar-more-status');
+  if (!btn || !currentBrand) return;
+  btn.disabled = true;
+  btn.textContent = 'Generating...';
+  if (status) status.textContent = '';
+  try {
+    const app = contentData?.apps?.[0];
+    const allIdeas = app?.categories?.flatMap(c => c.ideas) || [];
+    const existingTitles = allIdeas.map(i => i.title);
+    const startIndex = allIdeas.length;
+    const res = await authFetch('/api/generate-content-ideas', {
+      method: 'POST',
+      body: JSON.stringify({ brand: currentBrand, existingTitles, numIdeas: 5, startIndex }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Generation failed');
+    if (!data.ideas || data.ideas.length === 0) throw new Error('No new ideas generated.');
+    const newIdeas = data.ideas.map((idea, i) => ({
+      id: `AI-${startIndex + i + 1}`,
+      title: idea.title,
+      caption: idea.caption || '',
+      slides: (idea.slides || []).map((s, si) => ({ ...s, number: s.number || si + 1, type: s.type || 'text' })),
+    }));
+    let aiCat = app.categories.find(c => c.name === 'AI-Generated Ideas');
+    if (aiCat) {
+      aiCat.ideas.push(...newIdeas);
+    } else {
+      app.categories.push({ name: 'AI-Generated Ideas', ideas: newIdeas });
+    }
+    renderSidebar();
+    // Update content plan grid if visible
+    const contentPlanView = document.getElementById('content-plan-view');
+    if (contentPlanView && contentPlanView.style.display !== 'none') {
+      const brandObj = brands.find(b => b.id === currentBrand);
+      const allUpdatedIdeas = app.categories.flatMap(c => c.ideas);
+      document.getElementById('content-plan-subtitle').textContent = `${allUpdatedIdeas.length} carousel ideas for ${brandObj?.name || 'Brand'}`;
+      renderContentPlanGrid(allUpdatedIdeas, brandObj);
+    }
+  } catch (err) {
+    if (status) status.textContent = `Error: ${err.message}`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '+ Generate 5 More';
+  }
 }
 
 // --- Idea Selection ---
@@ -2113,6 +2173,13 @@ function loadSlideIntoForm(index) {
     document.getElementById('bodyFontSizeValue').textContent = slide.bodyFontSize || 34;
   }
 
+  // Video fields
+  if (form.elements.videoScene) form.elements.videoScene.value = slide.scene || '';
+  if (form.elements.videoMood) form.elements.videoMood.value = slide.videoMood || 'energetic and dynamic';
+  if (form.elements.videoCamera) form.elements.videoCamera.value = slide.cameraMove || 'slow tracking shot';
+  if (form.elements.videoDuration) form.elements.videoDuration.value = slide.duration || '5';
+  if (form.elements.videoAudio) form.elements.videoAudio.checked = slide.audio || false;
+
   // Color overrides
   const textColorEnabled = document.getElementById('mockupTextColorEnabled');
   const accentColorEnabled = document.getElementById('mockupAccentColorEnabled');
@@ -2160,12 +2227,21 @@ function loadSlideIntoForm(index) {
   toggleTypeFields();
 
   if (generatedImages[index]) {
-    previewImg.src = generatedImages[index].url;
-    previewImg.style.display = 'block';
+    const gen = generatedImages[index];
+    if (gen.isVideo) {
+      previewImg.style.display = 'none';
+      previewVideo.src = gen.url;
+      previewVideo.style.display = 'block';
+    } else {
+      previewVideo.style.display = 'none';
+      previewImg.src = gen.url;
+      previewImg.style.display = 'block';
+    }
     downloadButtons.style.display = 'flex';
     statusEl.textContent = `Slide ${index + 1} generated.`;
   } else {
     previewImg.style.display = 'none';
+    previewVideo.style.display = 'none';
     downloadButtons.style.display = 'none';
     statusEl.textContent = 'Ready.';
   }
@@ -2223,6 +2299,12 @@ function saveCurrentSlideEdits() {
     const accentColorEnabled = document.getElementById('mockupAccentColorEnabled');
     slide.textColor = textColorEnabled?.checked ? form.elements.mockupTextColor?.value : null;
     slide.microColor = accentColorEnabled?.checked ? form.elements.mockupAccentColor?.value : null;
+  } else if (slide.type === 'video') {
+    slide.scene = form.elements.videoScene?.value || '';
+    slide.videoMood = form.elements.videoMood?.value || 'energetic and dynamic';
+    slide.cameraMove = form.elements.videoCamera?.value || 'slow tracking shot';
+    slide.duration = parseInt(form.elements.videoDuration?.value) || 5;
+    slide.audio = form.elements.videoAudio?.checked || false;
   }
 }
 
@@ -2231,22 +2313,25 @@ function toggleTypeFields() {
   photoFields.style.display = type === 'photo' ? 'block' : 'none';
   textFields.style.display = type === 'text' ? 'block' : 'none';
   mockupFields.style.display = type === 'mockup' ? 'block' : 'none';
+  videoFields.style.display = type === 'video' ? 'block' : 'none';
   if (type === 'mockup') toggleMockupPhoneOptions();
 
   // Hide mockup image upload section from sidebar — moved to preview overlay
   mockupImageUploadSection.style.display = 'none';
   screenshotWarning.style.display = 'none';
 
-  // Hide reference sections for mockup (they are ignored server-side)
+  // Hide reference sections for mockup/video (they are ignored server-side)
   const slideRefSection = document.querySelector('.slide-ref-section');
   const refSection = document.querySelector('.ref-section');
-  if (slideRefSection) slideRefSection.style.display = type === 'mockup' ? 'none' : '';
-  if (refSection) refSection.style.display = type === 'mockup' ? 'none' : '';
+  const hideRef = type === 'mockup' || type === 'video';
+  if (slideRefSection) slideRefSection.style.display = hideRef ? 'none' : '';
+  if (refSection) refSection.style.display = hideRef ? 'none' : '';
 
   const hints = {
     photo: 'AI-generated background image with text overlay',
     text: 'Text and colors only — no background image',
     mockup: 'App screenshot in a phone frame with text overlay',
+    video: 'AI-generated video clip (Kling 3.0) — 5-10 seconds',
   };
   document.getElementById('slideTypeHint').textContent = hints[type] || '';
   updatePreviewImageOverlay();
@@ -3345,6 +3430,12 @@ function buildSlidePayload(slide, slideIndex) {
     payload.bodyFontSize = slide.bodyFontSize || parseInt(form.elements.bodyFontSize?.value) || 34;
     if (slide.textColor) payload.textColor = slide.textColor;
     if (slide.microColor) payload.microColor = slide.microColor;
+  } else if (payload.slideType === 'video') {
+    payload.scene = slide.scene || form.elements.videoScene?.value || '';
+    payload.mood = slide.videoMood || form.elements.videoMood?.value || 'energetic and dynamic';
+    payload.cameraMove = slide.cameraMove || form.elements.videoCamera?.value || 'slow tracking shot';
+    payload.duration = slide.duration || parseInt(form.elements.videoDuration?.value) || 5;
+    payload.audio = slide.audio || form.elements.videoAudio?.checked || false;
   } else {
     payload.backgroundStyle = form.elements.backgroundStyle?.value || 'dark premium navy/near-black with very subtle grain';
     payload.layoutTemplate = form.elements.layoutTemplate?.value || 'Layout A - Classic Left Lane';
@@ -3591,7 +3682,7 @@ async function pollBatchStatus() {
       if (slide.ok && slide.url) {
         const idx = slide.slideNumber - 1;
         if (!generatedImages[idx]) addToVault(slide.url, slide.filename);
-        generatedImages[idx] = { url: slide.url, filename: slide.filename };
+        generatedImages[idx] = { url: slide.url, filename: slide.filename, isVideo: slide.isVideo || false };
       }
     }
     renderSlideTabs();
@@ -3599,8 +3690,16 @@ async function pollBatchStatus() {
     saveSession();
 
     if (generatedImages[currentSlideIndex]) {
-      previewImg.src = generatedImages[currentSlideIndex].url;
-      previewImg.style.display = 'block';
+      const gen = generatedImages[currentSlideIndex];
+      if (gen.isVideo) {
+        previewImg.style.display = 'none';
+        previewVideo.src = gen.url;
+        previewVideo.style.display = 'block';
+      } else {
+        previewVideo.style.display = 'none';
+        previewImg.src = gen.url;
+        previewImg.style.display = 'block';
+      }
       downloadButtons.style.display = 'flex';
     }
 

@@ -12,6 +12,7 @@ import multer from 'multer';
 import admin from 'firebase-admin';
 import { spawn, execSync } from 'child_process';
 import rateLimit from 'express-rate-limit';
+import jwt from 'jsonwebtoken';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -83,6 +84,90 @@ async function generateWithFlux(faceImagePaths, prompt, { aspectRatio = '9:16', 
 
   const imgRes = await fetch(imgUrl);
   return Buffer.from(await imgRes.arrayBuffer());
+}
+
+// --- Kling 3.0 Video Generation ---
+const KLING_BASE = 'https://api.klingai.com/v1';
+let _klingToken = null, _klingTokenExp = 0;
+
+function getKlingToken() {
+  const ak = process.env.KLING_ACCESS_KEY;
+  const sk = process.env.KLING_SECRET_KEY;
+  if (!ak || !sk) return null;
+  const now = Math.floor(Date.now() / 1000);
+  if (_klingToken && _klingTokenExp > now + 300) return _klingToken;
+  _klingToken = jwt.sign(
+    { iss: ak, exp: now + 1800, nbf: now - 5 },
+    sk, { algorithm: 'HS256', header: { alg: 'HS256', typ: 'JWT' } }
+  );
+  _klingTokenExp = now + 1800;
+  return _klingToken;
+}
+
+function buildVideoPrompt(data, brand) {
+  const c = brand.colors || {};
+  const scene = data.scene || data.headline || 'dynamic product showcase';
+  const mood = data.mood || 'energetic and professional';
+  const cameraMove = data.cameraMove || 'slow tracking shot';
+
+  return [
+    brand.imageStyle ? `Visual style: ${brand.imageStyle}.` : null,
+    `Scene: ${scene}. The color palette features ${c.primary || 'dark'} as the dominant background tone with ${c.accent || 'bright'} accent highlights.`,
+    `Mood: ${mood}. ${brand.defaultBackground || ''}`.trim(),
+    `Camera: ${cameraMove}, cinematic lighting, shallow depth of field.`,
+    `Technical: Vertical 9:16 format, social media style, ${data.duration || 5} seconds.`,
+    'No text, watermarks, or logos in the generated video.',
+  ].filter(Boolean).join('\n\n');
+}
+
+async function generateVideoSlide(prompt, options = {}) {
+  const token = getKlingToken();
+  if (!token) throw new Error('Kling API not configured. Set KLING_ACCESS_KEY and KLING_SECRET_KEY in .env');
+
+  const createRes = await fetch(`${KLING_BASE}/videos/text2video`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model_name: 'kling-v3',
+      prompt,
+      aspect_ratio: options.aspectRatio || '9:16',
+      duration: String(options.duration || 5),
+      generate_audio: options.audio || false,
+    }),
+  });
+
+  if (!createRes.ok) {
+    const errText = await createRes.text();
+    throw new Error(`Kling API error (${createRes.status}): ${errText}`);
+  }
+
+  const createData = await createRes.json();
+  const taskId = createData.data?.task_id;
+  if (!taskId) throw new Error('Kling API did not return a task ID');
+
+  // Poll for completion (timeout after 10 min)
+  const deadline = Date.now() + 600_000;
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 5000));
+    const statusRes = await fetch(`${KLING_BASE}/videos/text2video/${taskId}`, {
+      headers: { 'Authorization': `Bearer ${getKlingToken()}` },
+    });
+    if (!statusRes.ok) continue;
+    const status = await statusRes.json();
+    const taskStatus = status.data?.task_status;
+    if (taskStatus === 'succeed') {
+      const videoUrl = status.data?.task_result?.videos?.[0]?.url;
+      if (!videoUrl) throw new Error('Kling returned success but no video URL');
+      return videoUrl;
+    }
+    if (taskStatus === 'failed') {
+      throw new Error(`Kling generation failed: ${status.data?.task_status_msg || 'unknown error'}`);
+    }
+  }
+  throw new Error('Kling generation timed out after 10 minutes');
 }
 
 // --- Firebase Admin ---
@@ -222,6 +307,23 @@ async function uploadToStorage(buffer, filename) {
     return `https://storage.googleapis.com/${bucket.name}/carousel-studio/${filename}`;
   } catch (err) {
     console.error('[Storage Upload] Failed, falling back to local disk:', err.message);
+    await fs.writeFile(path.join(outputDir, filename), buffer);
+    return `/output/${filename}`;
+  }
+}
+
+async function uploadVideoToStorage(buffer, filename) {
+  if (!bucket) {
+    await fs.writeFile(path.join(outputDir, filename), buffer);
+    return `/output/${filename}`;
+  }
+  try {
+    const file = bucket.file(`carousel-studio/${filename}`);
+    await file.save(buffer, { metadata: { contentType: 'video/mp4' } });
+    await file.makePublic();
+    return `https://storage.googleapis.com/${bucket.name}/carousel-studio/${filename}`;
+  } catch (err) {
+    console.error('[Video Upload] Failed, falling back to local disk:', err.message);
     await fs.writeFile(path.join(outputDir, filename), buffer);
     return `/output/${filename}`;
   }
@@ -1578,6 +1680,8 @@ async function refinePromptWithClaude(rawPrompt, slideType, formData, brand, req
     let context;
     if (slideType === 'meme') {
       context = `This is a MEME for ${brand.name}. It must look like a genuine internet meme — informal, humorous, culturally aware. Do NOT apply carousel rules (no safe zones, no TikTok composition, no professional typography). Preserve the meme format and humor. Only refine for text legibility and spelling accuracy. Keep the raw, authentic meme aesthetic. CRITICAL: If the user prompt mentions real people by name (Drake, celebrities, public figures), replace them with generic characters — OpenAI will reject prompts depicting real people.`;
+    } else if (slideType === 'video') {
+      context = `This is a VIDEO prompt for ${brand.name} using Kling 3.0 AI video generation. Use cinematic language: describe camera movements (tracking shot, dolly-in, crane, handheld, pan), motion over time ("starts with... transitions to... ends with..."), and maintain brand visual identity. Do NOT request any text, watermarks, or logos in the video — text will be overlaid separately. Keep the prompt under 500 words. Focus on visual storytelling, mood, and motion.`;
     } else if (slideType === 'photo') {
       context = `This is a photo-led slide for ${brand.name} featuring a ${formData.sport || 'person in action'} scene with text overlay.`;
     } else {
@@ -1596,7 +1700,7 @@ async function refinePromptWithClaude(rawPrompt, slideType, formData, brand, req
       messages: [
         {
           role: 'user',
-          content: `${context}\n\nRefine this image-generation prompt:\n\n${rawPrompt}`,
+          content: `${context}\n\nRefine this ${slideType === 'video' ? 'video' : 'image'}-generation prompt:\n\n${rawPrompt}`,
         },
       ],
     });
@@ -3362,6 +3466,34 @@ app.post('/api/generate-carousel', requireAuth, generationLimiter, async (req, r
           continue;
         }
 
+        // Video slides: Kling 3.0 text-to-video
+        if (slideData.slideType === 'video') {
+          console.log(`[Carousel ${jobId}] ${brand.name} | Slide ${i + 1}/${slides.length} (video)`);
+          const rawPrompt = buildVideoPrompt(slideData, brand);
+          const refined = await refinePromptWithClaude(rawPrompt, 'video', slideData, brand, req);
+          const prompt = refined || rawPrompt;
+
+          const videoUrl = await generateVideoSlide(prompt, {
+            duration: slideData.duration || 5,
+            aspectRatio: '9:16',
+            audio: slideData.audio || false,
+          });
+
+          // Download video to local storage
+          const videoRes = await fetch(videoUrl);
+          if (!videoRes.ok) throw new Error('Failed to download video from Kling');
+          const videoBuffer = Buffer.from(await videoRes.arrayBuffer());
+
+          const slug = crypto.randomUUID().slice(0, 8);
+          const filename = `carousel_${brand.id}_${jobId}_s${i + 1}_${slug}.mp4`;
+          const slideUrl = await uploadVideoToStorage(videoBuffer, filename);
+          saveImageRecord({ userId: req.user?.uid, brandId: brand.id, filename, type: 'carousel-video' });
+
+          job.slides.push({ slideNumber: i + 1, url: slideUrl, filename, ok: true, isVideo: true });
+          job.completed = i + 1;
+          continue;
+        }
+
         // Hybrid photo generation: AI image with person + Sharp text overlay
         if (slideData.slideType === 'photo' && slideData.personId) {
           let personTempFiles = [];
@@ -3628,7 +3760,7 @@ Rules:
 app.post('/api/generate-content-ideas', requireAuth, async (req, res) => {
   try {
     const anthropic = getAnthropic(req);
-    const { brand: brandId } = req.body || {};
+    const { brand: brandId, existingTitles, numIdeas, startIndex } = req.body || {};
     if (!brandId) return res.status(400).json({ error: 'Missing brand' });
     if (!anthropic) return res.status(500).json({ error: 'Add your Anthropic API key in Settings.' });
 
@@ -3683,6 +3815,7 @@ app.post('/api/generate-content-ideas', requireAuth, async (req, res) => {
     ].filter(Boolean).join('\n');
 
     const microLabel = brand.defaultMicroLabel || brand.name.toUpperCase();
+    const count = numIdeas || 5;
     let userPrompt;
     if (brand.contentIdeaPrompt) {
       userPrompt = brand.contentIdeaPrompt
@@ -3693,7 +3826,12 @@ app.post('/api/generate-content-ideas', requireAuth, async (req, res) => {
         .replace(/\{\{website_text\}\}/g, websiteText)
         .replace(/\{\{micro_label\}\}/g, microLabel);
     } else {
-      userPrompt = buildContentIdeasPrompt({ brand, microLabel, websiteUrl, pageTitle, metaDesc, websiteText });
+      userPrompt = buildContentIdeasPrompt({ brand, microLabel, websiteUrl, pageTitle, metaDesc, websiteText, numIdeas: count });
+    }
+
+    // When generating more, tell Claude to avoid repeating existing topics
+    if (existingTitles?.length) {
+      userPrompt += `\n\nIMPORTANT: The following carousel ideas already exist. Generate COMPLETELY DIFFERENT topics — do NOT repeat or rephrase any of these:\n${existingTitles.map(t => `- ${t}`).join('\n')}`;
     }
 
     const response = await anthropic.messages.create({
@@ -3720,15 +3858,23 @@ app.post('/api/generate-content-ideas', requireAuth, async (req, res) => {
     const ideas = parsed.ideas || [];
     console.log(`[Content Ideas] ${brand.name} | Generated ${ideas.length} ideas`);
 
-    // Persist so ideas survive refresh/brand-switch (Firestore in prod, local JSON in dev)
+    // Persist so ideas survive refresh/brand-switch
+    const idStart = startIndex || 0;
     if (brandId) {
       const formatted = ideas.map((idea, i) => ({
-        id: `AI-${i + 1}`,
+        id: `AI-${idStart + i + 1}`,
         title: idea.title,
         caption: idea.caption || '',
         slides: (idea.slides || []).map((s, si) => ({ ...s, number: s.number || si + 1, type: s.type || 'text' })),
       }));
-      await updateBrandFields(brandId, { contentIdeas: formatted });
+      if (idStart > 0) {
+        // Append to existing ideas
+        const freshBrand = await getBrandAsync(brandId, req.user?.uid);
+        const existing = freshBrand.contentIdeas || [];
+        await updateBrandFields(brandId, { contentIdeas: [...existing, ...formatted] });
+      } else {
+        await updateBrandFields(brandId, { contentIdeas: formatted });
+      }
     }
 
     res.json({ ok: true, ideas });
@@ -4597,7 +4743,8 @@ app.get('/api/download-carousel/:jobId', requireAuth, async (req, res) => {
 
   for (const slide of successSlides) {
     const filepath = path.join(outputDir, slide.filename);
-    archive.file(filepath, { name: `slide_${slide.slideNumber}.png` });
+    const ext = slide.isVideo ? '.mp4' : '.png';
+    archive.file(filepath, { name: `slide_${slide.slideNumber}${ext}` });
   }
 
   await archive.finalize();
@@ -4619,10 +4766,12 @@ app.post('/api/download-selected', requireAuth, async (req, res) => {
   archive.pipe(res);
 
   for (let i = 0; i < filenames.length; i++) {
-    const filepath = path.join(outputDir, path.basename(filenames[i]));
+    const fn = path.basename(filenames[i]);
+    const filepath = path.join(outputDir, fn);
+    const ext = fn.endsWith('.mp4') ? '.mp4' : '.png';
     try {
       await fs.access(filepath);
-      archive.file(filepath, { name: `slide_${i + 1}.png` });
+      archive.file(filepath, { name: `slide_${i + 1}${ext}` });
     } catch {
       // skip missing files
     }

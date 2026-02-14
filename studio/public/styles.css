@@ -465,6 +465,22 @@ body {
   flex-shrink: 0;
 }
 
+.sidebar-generate-more {
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+}
+.sidebar-more-btn {
+  width: 100%;
+  font-size: 0.8rem;
+  padding: 8px 12px;
+}
+.sidebar-more-status {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  margin-top: 6px;
+  text-align: center;
+}
+
 /* Main */
 
 .main-area {

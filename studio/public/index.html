@@ -371,6 +371,7 @@
                     <option value="photo">AI Photo</option>
                     <option value="text">Text Only</option>
                     <option value="mockup">App Mockup</option>
+                    <option value="video">Video Clip</option>
                   </select>
                   <p class="slide-type-hint" id="slideTypeHint"></p>
                 </div>
@@ -449,6 +450,56 @@
                       <option value="Layout C - Center Weighted">Layout C</option>
                       <option value="Layout D - Bottom Emphasis">Layout D</option>
                     </select>
+                  </div>
+                </div>
+              </div>
+
+              <div class="form-section" id="video-fields" style="display:none">
+                <div class="form-row">
+                  <div class="form-group full">
+                    <label class="label" for="video-scene">Scene Description</label>
+                    <textarea name="videoScene" id="video-scene" rows="2" placeholder="A runner mid-stride on an urban track at golden hour..."></textarea>
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label class="label" for="video-mood">Mood</label>
+                    <select name="videoMood" id="video-mood">
+                      <option value="energetic and dynamic">Energetic</option>
+                      <option value="calm and serene">Calm</option>
+                      <option value="dramatic and intense">Dramatic</option>
+                      <option value="playful and fun">Playful</option>
+                      <option value="professional and polished">Professional</option>
+                      <option value="inspiring and uplifting">Inspiring</option>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label class="label" for="video-camera">Camera Movement</label>
+                    <select name="videoCamera" id="video-camera">
+                      <option value="slow tracking shot">Tracking Shot</option>
+                      <option value="static wide angle">Static</option>
+                      <option value="smooth dolly-in">Dolly In</option>
+                      <option value="cinematic pan">Pan</option>
+                      <option value="handheld follow">Handheld</option>
+                      <option value="drone aerial pullback">Aerial</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label class="label" for="video-duration">Duration</label>
+                    <select name="videoDuration" id="video-duration">
+                      <option value="5">5 seconds</option>
+                      <option value="10">10 seconds</option>
+                    </select>
+                    <span class="field-hint">5s: ~$0.84 &middot; 10s: ~$1.68</span>
+                  </div>
+                  <div class="form-group">
+                    <label class="label">Audio</label>
+                    <label class="checkbox" style="margin-top:8px">
+                      <input type="checkbox" name="videoAudio" id="video-audio" />
+                      Generate audio (+~33% cost)
+                    </label>
                   </div>
                 </div>
               </div>
@@ -772,6 +823,7 @@
                   <div class="spinner-text" id="spinner-text">Generating image...</div>
                 </div>
                 <img id="preview-image" alt="Generated slide" />
+                <video id="preview-video" style="display:none;width:100%;max-height:100%;object-fit:contain" controls playsinline></video>
                 <div class="preview-drag-overlay" id="preview-drag-overlay" style="display:none">
                   <div class="preview-edit-group" id="preview-edit-group">
                     <div class="preview-edit-micro" id="preview-edit-micro"></div>
