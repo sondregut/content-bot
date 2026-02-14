@@ -1028,28 +1028,6 @@ function populatePersonSelectors() {
   }
 }
 
-if (addPersonBtn) {
-  addPersonBtn.addEventListener('click', async () => {
-    const name = prompt('Person name:');
-    if (!name?.trim()) return;
-    try {
-      const res = await authFetch('/api/persons', {
-        method: 'POST',
-        body: JSON.stringify({ name: name.trim() }),
-      });
-      const data = await res.json();
-      if (data.ok) {
-        userPersons.unshift(data.person);
-        renderPersonsList();
-        populatePersonSelectors();
-      } else {
-        alert(data.error || 'Failed to create person');
-      }
-    } catch (err) {
-      alert('Failed to create person: ' + err.message);
-    }
-  });
-}
 
 // --- AI Prompt Settings ---
 if (promptSettingsToggle) {
@@ -4436,12 +4414,15 @@ function openPersonalizeView() {
   editorArea.style.display = 'none';
   if (document.getElementById('meme-view')) document.getElementById('meme-view').style.display = 'none';
   personalizeView.style.display = 'block';
+  // Render person cards + detail
+  renderFaceStudioPersons();
+  renderFaceStudioPersonDetail();
   // Load brand-specific scenarios if not already loaded
   if (currentBrand && personalizedScenarios.length === 0 && !scenarioCache.has(currentBrand)) {
     loadPersonalizeScenarios(currentBrand);
   }
-  // Auto-load stored face photos if user hasn't manually added any
-  if (currentBrand && faceImageFiles.length === 0) {
+  // Auto-load stored face photos if user hasn't manually added any (for quick upload)
+  if (currentBrand && faceImageFiles.length === 0 && !selectedFaceStudioPerson) {
     loadStoredFacePhotos(currentBrand);
   }
 }
@@ -4703,8 +4684,7 @@ facePhotosGrid.addEventListener('drop', (e) => {
 
 // Generate personalized image(s)
 personalizeGenerateBtn.addEventListener('click', async () => {
-  const personSelect = document.getElementById('personalize-person-select');
-  const selectedPersonId = personSelect?.value || '';
+  const selectedPersonId = selectedFaceStudioPerson || '';
   const hasLocal = faceImageFiles.length > 0;
   const hasStored = storedFacePhotos.length > 0;
   const hasPerson = Boolean(selectedPersonId);
