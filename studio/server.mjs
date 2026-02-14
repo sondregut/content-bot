@@ -227,6 +227,51 @@ async function uploadToStorage(buffer, filename) {
   }
 }
 
+// --- Face Photo Helpers ---
+async function getFacePhotoUrls(facePhotos) {
+  if (!facePhotos || facePhotos.length === 0) return [];
+  if (!bucket) {
+    // Local dev — return local paths
+    return facePhotos.map(p => ({ ...p, url: `/output/${path.basename(p.storagePath)}` }));
+  }
+  return Promise.all(facePhotos.map(async (photo) => {
+    try {
+      const file = bucket.file(photo.storagePath);
+      const [url] = await file.getSignedUrl({ action: 'read', expires: Date.now() + 2 * 60 * 60 * 1000 });
+      return { ...photo, url };
+    } catch (err) {
+      console.warn('[getFacePhotoUrls] Failed for', photo.storagePath, err.message);
+      return { ...photo, url: null };
+    }
+  }));
+}
+
+async function downloadFacePhotosToTemp(brand) {
+  const photos = brand.facePhotos;
+  if (!photos || photos.length === 0) return [];
+  const tmpPaths = [];
+  for (const photo of photos) {
+    const tmpPath = path.join(uploadsDir, `face_${crypto.randomUUID().slice(0, 8)}.png`);
+    if (bucket) {
+      const file = bucket.file(photo.storagePath);
+      const [buffer] = await file.download();
+      await fs.writeFile(tmpPath, buffer);
+    } else {
+      // Local dev — copy from output dir
+      const src = path.join(outputDir, path.basename(photo.storagePath));
+      await fs.copyFile(src, tmpPath);
+    }
+    tmpPaths.push(tmpPath);
+  }
+  return tmpPaths;
+}
+
+async function cleanupTempFiles(paths) {
+  for (const p of paths) {
+    await fs.unlink(p).catch(() => {});
+  }
+}
+
 // --- Save image record to Firestore for vault ---
 async function saveImageRecord({ userId, brandId, filename, type }) {
   if (!db) return null;
@@ -1616,18 +1661,27 @@ app.put('/api/brands/:id', requireAuth, async (req, res) => {
 // Delete a brand
 app.delete('/api/brands/:id', requireAuth, async (req, res) => {
   try {
+    let facePhotos = [];
     if (db) {
       const doc = await db.collection('carousel_brands').doc(req.params.id).get();
       if (!doc.exists) return res.status(404).json({ error: 'Brand not found' });
       if (doc.data().createdBy !== req.user.uid) return res.status(403).json({ error: 'Not your brand' });
+      facePhotos = doc.data().facePhotos || [];
       await db.collection('carousel_brands').doc(req.params.id).delete();
     } else {
       const brands = await readLocalBrands();
       const brand = brands[req.params.id];
       if (!brand) return res.status(404).json({ error: 'Brand not found' });
       if (brand.createdBy !== req.user.uid) return res.status(403).json({ error: 'Not your brand' });
+      facePhotos = brand.facePhotos || [];
       delete brands[req.params.id];
       await writeLocalBrands(brands);
+    }
+    // Clean up face photos from storage
+    if (bucket && facePhotos.length > 0) {
+      for (const photo of facePhotos) {
+        try { await bucket.file(photo.storagePath).delete(); } catch (e) { /* ignore */ }
+      }
     }
     res.json({ ok: true });
   } catch (err) {
@@ -1641,9 +1695,18 @@ app.delete('/api/account', requireAuth, async (req, res) => {
   try {
     const uid = req.user.uid;
 
-    // Delete all user's brands from Firestore or local storage
+    // Delete all user's brands from Firestore or local storage (+ face photos)
     if (db) {
       const brands = await db.collection('carousel_brands').where('createdBy', '==', uid).get();
+      // Clean up face photos from storage
+      if (bucket) {
+        for (const doc of brands.docs) {
+          const photos = doc.data().facePhotos || [];
+          for (const photo of photos) {
+            try { await bucket.file(photo.storagePath).delete(); } catch (e) { /* ignore */ }
+          }
+        }
+      }
       const batch = db.batch();
       brands.forEach(doc => batch.delete(doc.ref));
       await batch.commit();
@@ -3495,15 +3558,23 @@ app.post('/api/personalize-scenarios', requireAuth, async (req, res) => {
 // --- Personalized Image Generation (Face + Scenario) ---
 
 app.post('/api/generate-personalized', requireAuth, upload.array('faceImages', 5), async (req, res) => {
+  let downloadedTempFiles = [];
   try {
     const openai = getOpenAI(req);
     const data = req.body || {};
     const brandId = data.brand;
     if (!brandId) return res.status(400).json({ error: 'Missing brand' });
-    if (!req.files || req.files.length === 0) return res.status(400).json({ error: 'Missing face image(s)' });
 
     const brand = await getBrandAsync(brandId, req.user?.uid);
-    const faceImagePaths = req.files.map(f => f.path);
+    let faceImagePaths;
+    if (req.files && req.files.length > 0) {
+      faceImagePaths = req.files.map(f => f.path);
+    } else if (brand.facePhotos && brand.facePhotos.length > 0) {
+      downloadedTempFiles = await downloadFacePhotosToTemp(brand);
+      faceImagePaths = downloadedTempFiles;
+    } else {
+      return res.status(400).json({ error: 'No face photos. Upload in brand settings or attach to request.' });
+    }
     const model = data.model || 'flux';
 
     const scenarioPrompt = data.prompt || buildPersonalizedPrompt(data, brand);
@@ -3544,8 +3615,10 @@ app.post('/api/generate-personalized', requireAuth, upload.array('faceImages', 5
     const url = await uploadToStorage(buffer, filename);
     saveImageRecord({ userId: req.user?.uid, brandId, filename, type: 'personalized' });
 
+    if (downloadedTempFiles.length > 0) await cleanupTempFiles(downloadedTempFiles);
     res.json({ ok: true, url, filename, model: model === 'flux' && isFalEnabled(req) ? 'flux' : 'gpt' });
   } catch (error) {
+    if (downloadedTempFiles.length > 0) await cleanupTempFiles(downloadedTempFiles);
     console.error('[Personalized]', error);
     res.status(500).json({ error: safeErrorMessage(error, 'Personalized generation failed') });
   }
@@ -3561,10 +3634,18 @@ app.post('/api/generate-personalized-carousel', requireAuth, upload.array('faceI
     return res.status(400).json({ error: 'Missing slides array' });
   }
   if (!brandId) return res.status(400).json({ error: 'Missing brand' });
-  if (!req.files || req.files.length === 0) return res.status(400).json({ error: 'Missing face image(s)' });
 
   const brand = await getBrandAsync(brandId, req.user?.uid);
-  const faceImagePaths = req.files.map(f => f.path);
+  let faceImagePaths;
+  let downloadedTempFiles = [];
+  if (req.files && req.files.length > 0) {
+    faceImagePaths = req.files.map(f => f.path);
+  } else if (brand.facePhotos && brand.facePhotos.length > 0) {
+    downloadedTempFiles = await downloadFacePhotosToTemp(brand);
+    faceImagePaths = downloadedTempFiles;
+  } else {
+    return res.status(400).json({ error: 'No face photos. Upload in brand settings or attach to request.' });
+  }
   const useFlux = (model || 'flux') === 'flux' && isFalEnabled(req);
 
   const jobId = crypto.randomUUID().slice(0, 12);
@@ -3621,9 +3702,13 @@ app.post('/api/generate-personalized-carousel', requireAuth, upload.array('faceI
       }
     }
     job.status = 'done';
+    if (downloadedTempFiles.length > 0) await cleanupTempFiles(downloadedTempFiles);
     console.log(`[Personalized Carousel ${jobId}] Complete — ${job.slides.filter((s) => s.ok).length}/${job.total} succeeded`);
     setTimeout(() => carouselJobs.delete(jobId), 30 * 60 * 1000);
-  })().catch(err => { job.status = 'error'; job.error = err.message; });
+  })().catch(err => {
+    job.status = 'error'; job.error = err.message;
+    if (downloadedTempFiles.length > 0) cleanupTempFiles(downloadedTempFiles);
+  });
 });
 
 // --- App Icon Upload ---
@@ -3661,6 +3746,157 @@ app.post('/api/upload-icon', requireAuth, upload.single('icon'), async (req, res
     });
   } catch (error) {
     console.error('[Icon Upload]', error);
+    res.status(500).json({ error: safeErrorMessage(error) });
+  }
+});
+
+// --- Face Photo Management ---
+
+// Upload face photos to brand profile
+app.post('/api/brands/:id/face-photos', requireAuth, upload.array('photos', 5), async (req, res) => {
+  try {
+    const brandId = req.params.id;
+
+    // Validate brand ownership
+    let brand;
+    if (db) {
+      const doc = await db.collection('carousel_brands').doc(brandId).get();
+      if (!doc.exists) return res.status(404).json({ error: 'Brand not found' });
+      if (doc.data().createdBy !== req.user.uid) return res.status(403).json({ error: 'Not your brand' });
+      brand = { id: brandId, ...doc.data() };
+    } else {
+      const brands = await readLocalBrands();
+      if (!brands[brandId]) return res.status(404).json({ error: 'Brand not found' });
+      if (brands[brandId].createdBy !== req.user.uid) return res.status(403).json({ error: 'Not your brand' });
+      brand = { id: brandId, ...brands[brandId] };
+    }
+
+    if (!req.files || req.files.length === 0) return res.status(400).json({ error: 'No photos uploaded' });
+
+    const existing = brand.facePhotos || [];
+    if (existing.length + req.files.length > 5) {
+      // Clean up uploaded temp files
+      for (const f of req.files) await fs.unlink(f.path).catch(() => {});
+      return res.status(400).json({ error: `Too many photos. You have ${existing.length}, max is 5.` });
+    }
+
+    // Validate and process each photo
+    const newPhotos = [];
+    for (const file of req.files) {
+      try {
+        await validateImageFile(file);
+      } catch {
+        await fs.unlink(file.path).catch(() => {});
+        continue;
+      }
+
+      const uuid = crypto.randomUUID().slice(0, 12);
+      const storagePath = `brands/${brandId}/face-photos/${uuid}.png`;
+
+      // Resize to 1024x1024 PNG
+      const processed = await sharp(file.path)
+        .resize(1024, 1024, { fit: 'cover' })
+        .png()
+        .toBuffer();
+
+      if (bucket) {
+        const storageFile = bucket.file(storagePath);
+        await storageFile.save(processed, { metadata: { contentType: 'image/png' } });
+      } else {
+        // Local dev — save to output dir
+        await fs.writeFile(path.join(outputDir, `${uuid}.png`), processed);
+      }
+
+      newPhotos.push({
+        storagePath,
+        filename: file.originalname,
+        uploadedAt: new Date().toISOString(),
+      });
+
+      await fs.unlink(file.path).catch(() => {});
+    }
+
+    const allPhotos = [...existing, ...newPhotos];
+
+    // Update brand doc
+    if (db) {
+      await db.collection('carousel_brands').doc(brandId).update({ facePhotos: allPhotos });
+    } else {
+      const brands = await readLocalBrands();
+      brands[brandId].facePhotos = allPhotos;
+      await writeLocalBrands(brands);
+    }
+
+    const withUrls = await getFacePhotoUrls(allPhotos);
+    res.json({ ok: true, facePhotos: withUrls });
+  } catch (error) {
+    // Clean up temp files on error
+    if (req.files) for (const f of req.files) await fs.unlink(f.path).catch(() => {});
+    console.error('[Face Photo Upload]', error);
+    res.status(500).json({ error: safeErrorMessage(error) });
+  }
+});
+
+// List face photos with fresh signed URLs
+app.get('/api/brands/:id/face-photos', requireAuth, async (req, res) => {
+  try {
+    const brandId = req.params.id;
+    const brand = await getBrandAsync(brandId, req.user.uid);
+    if (!brand || brand.id === 'generic') return res.status(404).json({ error: 'Brand not found' });
+
+    const withUrls = await getFacePhotoUrls(brand.facePhotos || []);
+    res.json({ facePhotos: withUrls });
+  } catch (error) {
+    console.error('[Face Photo List]', error);
+    res.status(500).json({ error: safeErrorMessage(error) });
+  }
+});
+
+// Delete a face photo by index
+app.delete('/api/brands/:id/face-photos/:photoIndex', requireAuth, async (req, res) => {
+  try {
+    const brandId = req.params.id;
+    const photoIndex = parseInt(req.params.photoIndex);
+
+    let brand;
+    if (db) {
+      const doc = await db.collection('carousel_brands').doc(brandId).get();
+      if (!doc.exists) return res.status(404).json({ error: 'Brand not found' });
+      if (doc.data().createdBy !== req.user.uid) return res.status(403).json({ error: 'Not your brand' });
+      brand = { id: brandId, ...doc.data() };
+    } else {
+      const brands = await readLocalBrands();
+      if (!brands[brandId]) return res.status(404).json({ error: 'Brand not found' });
+      if (brands[brandId].createdBy !== req.user.uid) return res.status(403).json({ error: 'Not your brand' });
+      brand = { id: brandId, ...brands[brandId] };
+    }
+
+    const photos = brand.facePhotos || [];
+    if (photoIndex < 0 || photoIndex >= photos.length) return res.status(400).json({ error: 'Invalid photo index' });
+
+    const removed = photos[photoIndex];
+
+    // Delete from storage
+    if (bucket) {
+      try { await bucket.file(removed.storagePath).delete(); } catch (e) { console.warn('[Face Photo Delete] Storage:', e.message); }
+    } else {
+      await fs.unlink(path.join(outputDir, path.basename(removed.storagePath))).catch(() => {});
+    }
+
+    photos.splice(photoIndex, 1);
+
+    if (db) {
+      await db.collection('carousel_brands').doc(brandId).update({ facePhotos: photos });
+    } else {
+      const brands = await readLocalBrands();
+      brands[brandId].facePhotos = photos;
+      await writeLocalBrands(brands);
+    }
+
+    const withUrls = await getFacePhotoUrls(photos);
+    res.json({ ok: true, facePhotos: withUrls });
+  } catch (error) {
+    console.error('[Face Photo Delete]', error);
     res.status(500).json({ error: safeErrorMessage(error) });
   }
 });

@@ -259,6 +259,7 @@ function resetAppState() {
   // Meme generator
   personalizedScenarios = [];
   faceImageFiles = [];
+  storedFacePhotos = [];
   selectedScenario = null;
   personalizeResults = [];
   memeFilename = null;
@@ -715,6 +716,16 @@ function openBrandModal(brand = null) {
     document.getElementById(`brand-color-${key}-hex`).textContent = input.value.toUpperCase();
   }
 
+  // Face photos section — only show for existing brands
+  const faceSection = document.getElementById('brand-face-photos-section');
+  if (brand) {
+    faceSection.style.display = '';
+    loadBrandFacePhotos(brand.id);
+  } else {
+    faceSection.style.display = 'none';
+    renderBrandFacePhotos([]);
+  }
+
   brandModal.style.display = 'flex';
 }
 
@@ -722,6 +733,104 @@ function closeBrandModal() {
   brandModal.style.display = 'none';
   editingBrandId = null;
 }
+
+// --- Brand Face Photos Management ---
+let brandFacePhotos = []; // current photos in brand modal
+
+async function loadBrandFacePhotos(brandId) {
+  renderBrandFacePhotos([]);
+  const status = document.getElementById('brand-face-photo-status');
+  status.textContent = 'Loading face photos...';
+  try {
+    const res = await authFetch(`/api/brands/${brandId}/face-photos`);
+    const data = await res.json();
+    brandFacePhotos = data.facePhotos || [];
+    renderBrandFacePhotos(brandFacePhotos);
+    status.textContent = '';
+  } catch (err) {
+    status.textContent = 'Could not load face photos.';
+    brandFacePhotos = [];
+  }
+}
+
+function renderBrandFacePhotos(photos) {
+  const grid = document.getElementById('brand-face-photos-grid');
+  const addBtn = document.getElementById('brand-face-photo-add');
+  const countEl = document.getElementById('brand-face-photo-count');
+
+  grid.querySelectorAll('.face-photo-thumb').forEach(el => el.remove());
+
+  photos.forEach((photo, idx) => {
+    if (!photo.url) return;
+    const thumb = document.createElement('div');
+    thumb.className = 'face-photo-thumb';
+    thumb.innerHTML = `
+      <img src="${photo.url}" alt="Face ${idx + 1}" />
+      <button class="face-photo-remove" data-idx="${idx}" title="Remove">&times;</button>
+      <span class="saved-badge">Saved</span>
+    `;
+    grid.insertBefore(thumb, addBtn);
+  });
+
+  countEl.textContent = `${photos.length} / 5`;
+  addBtn.style.display = photos.length >= 5 ? 'none' : 'flex';
+
+  // Attach remove handlers
+  grid.querySelectorAll('.face-photo-remove').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const idx = parseInt(btn.dataset.idx);
+      if (!editingBrandId) return;
+      btn.disabled = true;
+      const status = document.getElementById('brand-face-photo-status');
+      status.textContent = 'Removing...';
+      try {
+        const res = await authFetch(`/api/brands/${editingBrandId}/face-photos/${idx}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Delete failed');
+        brandFacePhotos = data.facePhotos || [];
+        renderBrandFacePhotos(brandFacePhotos);
+        status.textContent = 'Photo removed.';
+        setTimeout(() => { if (status.textContent === 'Photo removed.') status.textContent = ''; }, 2000);
+      } catch (err) {
+        status.textContent = `Error: ${err.message}`;
+      }
+    });
+  });
+}
+
+document.getElementById('brand-face-photo-add').addEventListener('click', () => {
+  document.getElementById('brand-face-photo-input').click();
+});
+
+document.getElementById('brand-face-photo-input').addEventListener('change', async () => {
+  const input = document.getElementById('brand-face-photo-input');
+  const files = Array.from(input.files);
+  input.value = '';
+  if (!files.length || !editingBrandId) return;
+
+  const remaining = 5 - brandFacePhotos.length;
+  const toUpload = files.slice(0, remaining);
+  if (toUpload.length === 0) return;
+
+  const status = document.getElementById('brand-face-photo-status');
+  status.textContent = `Uploading ${toUpload.length} photo${toUpload.length > 1 ? 's' : ''}...`;
+
+  const fd = new FormData();
+  toUpload.forEach(f => fd.append('photos', f));
+
+  try {
+    const res = await authFetch(`/api/brands/${editingBrandId}/face-photos`, { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Upload failed');
+    brandFacePhotos = data.facePhotos || [];
+    renderBrandFacePhotos(brandFacePhotos);
+    status.textContent = 'Photos saved!';
+    setTimeout(() => { if (status.textContent === 'Photos saved!') status.textContent = ''; }, 2000);
+  } catch (err) {
+    status.textContent = `Error: ${err.message}`;
+  }
+});
 
 // --- Sidebar Brand Creation ---
 let brandCreationEventSource = null;
@@ -3418,6 +3527,7 @@ let personalizedScenarios = [];
 const scenarioCache = new Map(); // client-side cache by brandId
 
 let faceImageFiles = []; // array of File objects (max 5)
+let storedFacePhotos = []; // photos loaded from brand profile
 let selectedScenario = null;
 let personalizeResults = [];
 
@@ -3442,6 +3552,21 @@ function openPersonalizeView() {
   if (currentBrand && personalizedScenarios.length === 0 && !scenarioCache.has(currentBrand)) {
     loadPersonalizeScenarios(currentBrand);
   }
+  // Auto-load stored face photos if user hasn't manually added any
+  if (currentBrand && faceImageFiles.length === 0) {
+    loadStoredFacePhotos(currentBrand);
+  }
+}
+
+async function loadStoredFacePhotos(brandId) {
+  try {
+    const res = await authFetch(`/api/brands/${brandId}/face-photos`);
+    const data = await res.json();
+    storedFacePhotos = (data.facePhotos || []).filter(p => p.url);
+    if (storedFacePhotos.length > 0 && faceImageFiles.length === 0) {
+      renderFacePhotos();
+    }
+  } catch { storedFacePhotos = []; }
 }
 
 function closePersonalizeView() {
@@ -3606,6 +3731,22 @@ function renderFacePhotos() {
   // Remove existing thumbnails (keep the add button and hidden input)
   facePhotosGrid.querySelectorAll('.face-photo-thumb').forEach(el => el.remove());
 
+  // Show stored photos if no local files uploaded
+  if (faceImageFiles.length === 0 && storedFacePhotos.length > 0) {
+    storedFacePhotos.forEach((photo, idx) => {
+      const thumb = document.createElement('div');
+      thumb.className = 'face-photo-thumb';
+      thumb.innerHTML = `
+        <img src="${photo.url}" alt="Saved ${idx + 1}" />
+        <span class="saved-badge">Saved</span>
+      `;
+      facePhotosGrid.insertBefore(thumb, faceAddBtn);
+    });
+    facePhotoCount.textContent = `${storedFacePhotos.length} saved`;
+    faceAddBtn.style.display = 'flex';
+    return;
+  }
+
   faceImageFiles.forEach((file, idx) => {
     const thumb = document.createElement('div');
     thumb.className = 'face-photo-thumb';
@@ -3656,8 +3797,10 @@ faceImageInput.addEventListener('change', () => {
 
 // Generate personalized image(s)
 personalizeGenerateBtn.addEventListener('click', async () => {
-  if (faceImageFiles.length === 0) {
-    personalizeStatus.textContent = 'Upload at least one face photo first.';
+  const hasLocal = faceImageFiles.length > 0;
+  const hasStored = storedFacePhotos.length > 0;
+  if (!hasLocal && !hasStored) {
+    personalizeStatus.textContent = 'Upload face photos first (in brand settings or here).';
     return;
   }
   if (!currentBrand) {
@@ -3679,10 +3822,12 @@ personalizeGenerateBtn.addEventListener('click', async () => {
 
   personalizeGenerateBtn.disabled = true;
 
-  // Build FormData with all face images
+  // Build FormData — attach local files if any (override stored), otherwise send empty (server uses stored)
+  const photoCount = hasLocal ? faceImageFiles.length : storedFacePhotos.length;
+  const photoLabel = hasLocal ? 'uploaded' : 'saved';
   function buildFormData() {
     const fd = new FormData();
-    faceImageFiles.forEach(file => fd.append('faceImages', file));
+    if (hasLocal) faceImageFiles.forEach(file => fd.append('faceImages', file));
     fd.append('brand', currentBrand);
     fd.append('model', model);
     return fd;
@@ -3690,7 +3835,7 @@ personalizeGenerateBtn.addEventListener('click', async () => {
 
   if (count === 1) {
     // Single image
-    personalizeStatus.textContent = `Generating personalized image (${faceImageFiles.length} ref photo${faceImageFiles.length > 1 ? 's' : ''})...`;
+    personalizeStatus.textContent = `Generating personalized image (${photoCount} ${photoLabel} photo${photoCount > 1 ? 's' : ''})...`;
 
     const fd = buildFormData();
 
@@ -3733,7 +3878,7 @@ personalizeGenerateBtn.addEventListener('click', async () => {
       }
     }
 
-    personalizeStatus.textContent = `Starting batch generation (${count} images, ${faceImageFiles.length} ref photo${faceImageFiles.length > 1 ? 's' : ''})...`;
+    personalizeStatus.textContent = `Starting batch generation (${count} images, ${photoCount} ${photoLabel} photo${photoCount > 1 ? 's' : ''})...`;
 
     const fd = buildFormData();
     fd.append('slides', JSON.stringify(slides));

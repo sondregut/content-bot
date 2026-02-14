@@ -925,6 +925,16 @@
             </div>
           </div>
 
+          <div class="form-group full" id="brand-face-photos-section" style="display:none">
+            <label class="label">Face Photos <span class="face-photo-count" id="brand-face-photo-count">0 / 5</span></label>
+            <p class="field-hint" style="margin:0 0 8px">Upload 2-3 clear face photos for AI personalization. Front-facing, good lighting works best.</p>
+            <div class="brand-face-photos-grid" id="brand-face-photos-grid">
+              <input type="file" id="brand-face-photo-input" accept="image/*" multiple style="display:none" />
+              <button type="button" class="face-add-btn" id="brand-face-photo-add" title="Add face photo" aria-label="Add face photo">+</button>
+            </div>
+            <div class="brand-face-photo-status" id="brand-face-photo-status"></div>
+          </div>
+
           <div class="form-group full">
             <label class="label">Image Style</label>
             <textarea id="brand-image-style" rows="3" placeholder="2-4 sentences describing lighting, composition, mood, camera feel for AI image generation..."></textarea>
