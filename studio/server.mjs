@@ -1190,7 +1190,7 @@ function buildPersonalizedPrompt(data, brand) {
   const mood = data.mood || 'confident professionalism';
 
   const subjectLine = sport
-    ? `Create a professional photo featuring the person from the reference image as a ${sport} athlete.`
+    ? `Create a professional photo featuring the person from the reference image as a ${sport} professional.`
     : `Create a professional photo featuring the person from the reference image.`;
 
   return [
@@ -1339,7 +1339,7 @@ const BASE_REFINEMENT_INSTRUCTIONS = `Your job: Take a raw image-generation prom
 
 CRITICAL: Respect the brand's visual style direction. Do not override it with generic realism instructions. Adapt your refinements to match the brand's stated aesthetic.
 - AVOID these words that make images look AI-generated: "perfect", "flawless", "ultra-smooth", "ultra-detailed", "8K", "hyper-realistic", "masterpiece"
-- Backgrounds should be simple and believable — not epic dramatic stadiums with god rays
+- Backgrounds should be simple and believable — not epic dramatic locations with god rays
 
 Return ONLY the refined prompt text. No preamble, no explanation, no markdown formatting.`;
 
@@ -1353,7 +1353,7 @@ async function refinePromptWithClaude(rawPrompt, slideType, formData, brand) {
     if (slideType === 'meme') {
       context = `This is a MEME for ${brand.name}. It must look like a genuine internet meme — informal, humorous, culturally aware. Do NOT apply carousel rules (no safe zones, no TikTok composition, no professional typography). Preserve the meme format and humor. Only refine for text legibility and spelling accuracy. Keep the raw, authentic meme aesthetic. CRITICAL: If the user prompt mentions real people by name (Drake, celebrities, public figures), replace them with generic characters — OpenAI will reject prompts depicting real people.`;
     } else if (slideType === 'photo') {
-      context = `This is a photo-led slide for ${brand.name} featuring a ${formData.sport || 'athlete'} scene with text overlay.`;
+      context = `This is a photo-led slide for ${brand.name} featuring a ${formData.sport || 'person in action'} scene with text overlay.`;
     } else {
       context = `This is a text-only minimalist slide for ${brand.name} with a ${formData.backgroundStyle || 'dark premium'} background.`;
     }
@@ -2495,8 +2495,8 @@ Return ONLY valid JSON (no markdown, no code fences) with:
 - defaultBackground: one-line visual description for slide backgrounds matching the brand aesthetic
 - imageStyle: 2-4 sentence visual/photography direction for AI image generation (describe lighting, composition style, mood, camera feel — NOT colors, those are separate)
 - tone: 2-3 word tone description (e.g. "bold, energetic")
-- microLabel: short uppercase label for slides (e.g. "SPORTYLAB")
-- watermarkText: website domain for watermark (e.g. "sportylab.no")
+- microLabel: short uppercase label for slides (e.g. "MYBRAND")
+- watermarkText: website domain for watermark (e.g. "mybrand.com")
 - contentPillars: array of 4-5 content theme strings suited to this brand (e.g. ["Product Features", "User Success Stories", "Industry Tips", "Behind the Scenes"])`
       }],
     });
@@ -2696,7 +2696,7 @@ Requirements:
 - The meme should make sense even to people who don't know the brand
 
 Return ONLY the meme description (no explanation, no preamble). Example format:
-"Two-panel approval meme — top (disapproval): manually tracking workouts in a notebook, bottom (approval): letting [brand] auto-track everything"`,
+"Two-panel approval meme — top (disapproval): doing repetitive tasks manually, bottom (approval): letting [brand] handle it automatically"`,
           }],
         });
 
@@ -3130,7 +3130,7 @@ Return ONLY valid JSON with this exact structure (no markdown, no explanation):
       "highlight": "key phrase to highlight in accent color",
       "sport": "only for photo type - sport shown",
       "setting": "only for photo type - location",
-      "action": "only for photo type - what athlete is doing",
+      "action": "only for photo type - what the person is doing",
       "mood": "only for photo type - emotional tone",
       "mockupLayout": "only for mockup type - phone-right, phone-left, or text-statement",
       "mockupTheme": "only for mockup type - dark or light"
@@ -3720,7 +3720,7 @@ Brand brief: ${brand.systemPrompt || 'General brand'}
 Based on the brand's product, industry, and target audience, generate 12 Pinterest search queries that would find great background images for TikTok/Instagram carousel slides.
 
 Guidelines:
-- 7-8 queries should be directly relevant to the product's domain, industry, and users (e.g. for a speed measurement app: "sprinter dark photography", "track and field cinematic", "motorsport close up")
+- 7-8 queries should be directly relevant to the product's domain, industry, and users (e.g. for a cooking app: "kitchen cinematic dark photography", "chef close up moody", "fresh ingredients overhead")
 - 4-5 queries for aesthetic/mood backgrounds that match the brand's color palette and vibe
 - Use specific, descriptive terms — avoid generic queries like "cool background", "abstract texture", or "gradient wallpaper"
 - Include tone words like "dark", "moody", "cinematic", "dramatic" that match the brand colors
