@@ -436,19 +436,17 @@ function getKeyPrefix() {
 
 function migrateApiKeys(uid) {
   const prefix = `carousel_${uid}_`;
-  // If user already has scoped keys, skip
-  if (localStorage.getItem(prefix + 'openai_key')) return;
-  // Migrate legacy un-scoped keys
+  // Migrate any legacy un-scoped keys that don't have a scoped equivalent yet
   const oldKeys = ['carousel_openai_key', 'carousel_anthropic_key', 'carousel_fal_key'];
   const newSuffixes = ['openai_key', 'anthropic_key', 'fal_key'];
   let migrated = false;
   oldKeys.forEach((oldKey, i) => {
     const val = localStorage.getItem(oldKey);
-    if (val) {
+    if (val && !localStorage.getItem(prefix + newSuffixes[i])) {
       localStorage.setItem(prefix + newSuffixes[i], val);
-      localStorage.removeItem(oldKey);
       migrated = true;
     }
+    if (val) localStorage.removeItem(oldKey);
   });
   if (migrated) console.log('[API Keys] Migrated legacy keys to user-scoped storage');
 }
