@@ -129,21 +129,22 @@ async function generateVideoSlide(prompt, options = {}) {
     throw new Error(`fal.ai video submit error (${submitRes.status}): ${errText}`);
   }
 
-  const { request_id } = await submitRes.json();
+  const submitData = await submitRes.json();
+  const { request_id, status_url, response_url } = submitData;
   if (!request_id) throw new Error('fal.ai did not return a request_id');
 
   // Poll for completion (timeout after 10 min)
   const deadline = Date.now() + 600_000;
   while (Date.now() < deadline) {
     await new Promise(r => setTimeout(r, 5000));
-    const statusRes = await fetch(`${FAL_VIDEO_ENDPOINT}/requests/${request_id}/status`, {
+    const statusRes = await fetch(status_url, {
       headers: { 'Authorization': `Key ${falKey}` },
     });
     if (!statusRes.ok) continue;
     const status = await statusRes.json();
     if (status.status === 'COMPLETED') {
       // Fetch the result
-      const resultRes = await fetch(`${FAL_VIDEO_ENDPOINT}/requests/${request_id}`, {
+      const resultRes = await fetch(response_url, {
         headers: { 'Authorization': `Key ${falKey}` },
       });
       if (!resultRes.ok) throw new Error(`fal.ai result fetch failed (${resultRes.status})`);
@@ -4821,9 +4822,33 @@ app.get('/api/download/:filename', requireAuth, async (req, res) => {
   try {
     const filename = path.basename(req.params.filename);
     const filepath = path.join(outputDir, filename);
-    await fs.access(filepath);
-    res.download(filepath, filename);
-  } catch {
+
+    // Try local disk first
+    try {
+      await fs.access(filepath);
+      return res.download(filepath, filename);
+    } catch {
+      // Not on local disk — try Firebase Storage
+    }
+
+    if (!bucket) {
+      return res.status(404).json({ error: 'File not found' });
+    }
+
+    const file = bucket.file(`carousel-studio/${filename}`);
+    const [exists] = await file.exists();
+    if (!exists) {
+      return res.status(404).json({ error: 'File not found' });
+    }
+
+    const [buffer] = await file.download();
+    const ext = path.extname(filename).toLowerCase();
+    const contentType = ext === '.mp4' ? 'video/mp4' : 'image/png';
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(buffer);
+  } catch (err) {
+    console.error('[Download]', err.message);
     res.status(404).json({ error: 'File not found' });
   }
 });
@@ -4849,9 +4874,24 @@ app.get('/api/download-carousel/:jobId', requireAuth, async (req, res) => {
   archive.pipe(res);
 
   for (const slide of successSlides) {
-    const filepath = path.join(outputDir, slide.filename);
+    const fn = slide.filename;
+    const filepath = path.join(outputDir, fn);
     const ext = slide.isVideo ? '.mp4' : '.png';
-    archive.file(filepath, { name: `slide_${slide.slideNumber}${ext}` });
+    const archiveName = `slide_${slide.slideNumber}${ext}`;
+    try {
+      await fs.access(filepath);
+      archive.file(filepath, { name: archiveName });
+    } catch {
+      // Not on local disk — try Firebase Storage
+      if (bucket) {
+        try {
+          const [buffer] = await bucket.file(`carousel-studio/${fn}`).download();
+          archive.append(buffer, { name: archiveName });
+        } catch {
+          // skip missing files
+        }
+      }
+    }
   }
 
   await archive.finalize();
@@ -4876,11 +4916,20 @@ app.post('/api/download-selected', requireAuth, async (req, res) => {
     const fn = path.basename(filenames[i]);
     const filepath = path.join(outputDir, fn);
     const ext = fn.endsWith('.mp4') ? '.mp4' : '.png';
+    const archiveName = `slide_${i + 1}${ext}`;
     try {
       await fs.access(filepath);
-      archive.file(filepath, { name: `slide_${i + 1}${ext}` });
+      archive.file(filepath, { name: archiveName });
     } catch {
-      // skip missing files
+      // Not on local disk — try Firebase Storage
+      if (bucket) {
+        try {
+          const [buffer] = await bucket.file(`carousel-studio/${fn}`).download();
+          archive.append(buffer, { name: archiveName });
+        } catch {
+          // skip missing files
+        }
+      }
     }
   }
 
