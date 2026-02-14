@@ -2471,7 +2471,7 @@ async function updateIconPreview() {
   const iconUrl = `/brands/${currentBrand}/assets/app-icon.png?t=${Date.now()}`;
   try {
     const res = await fetch(iconUrl, { method: 'HEAD' });
-    if (!res.ok) {
+    if (!res.ok || res.status === 204) {
       iconPreviewImg.style.display = 'none';
       mockupIconImg.style.display = 'none';
       return;

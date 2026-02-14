@@ -3593,6 +3593,17 @@ app.post('/api/settings', requireAuth, async (req, res) => {
   }
 });
 
+// Return 204 for missing brand icons (avoids noisy 404 in console)
+app.get('/brands/:brandId/assets/app-icon.png', async (req, res, next) => {
+  const iconPath = path.join(rootDir, 'brands', req.params.brandId, 'assets', 'app-icon.png');
+  try {
+    await fs.access(iconPath);
+    next(); // file exists, let express.static serve it
+  } catch {
+    res.status(204).end();
+  }
+});
+
 // Serve brand assets
 app.use('/brands', express.static(path.join(rootDir, 'brands')));
 
