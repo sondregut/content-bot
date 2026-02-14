@@ -1600,6 +1600,507 @@ Return ONLY valid JSON (no markdown, no code fences) with:
   }
 });
 
+// --- Full brand setup (SSE streaming pipeline) ---
+app.post('/api/brands/full-setup', requireAuth, async (req, res) => {
+  // SSE headers
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders();
+
+  function sendSSE(event, data) {
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  }
+
+  try {
+    let { url } = req.body;
+    if (!url) { sendSSE('error', { message: 'URL required' }); res.end(); return; }
+
+    url = url.trim();
+    if (!/^https?:\/\//i.test(url)) url = `https://${url}`;
+    if (!isUrlSafe(url)) { sendSSE('error', { message: 'URL not allowed' }); res.end(); return; }
+
+    // Step 1: Fetch website
+    sendSSE('status', { step: 'fetch', message: 'Analyzing website...' });
+
+    let html, finalUrl;
+    try {
+      const resp = await fetch(url, {
+        signal: AbortSignal.timeout(8000),
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; CarouselStudio/1.0)' },
+        redirect: 'follow',
+      });
+      finalUrl = resp.url;
+      const contentLength = parseInt(resp.headers.get('content-length') || '0', 10);
+      if (contentLength > 1024 * 1024) { sendSSE('error', { message: 'Website too large' }); res.end(); return; }
+      html = await resp.text();
+    } catch (e) {
+      sendSSE('error', { message: `Could not reach website: ${e.message}` }); res.end(); return;
+    }
+
+    // Step 2: Extract brand info
+    const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+    const pageTitle = titleMatch ? titleMatch[1].replace(/\s+/g, ' ').trim() : '';
+
+    const metaTag = (name) => {
+      const re = new RegExp(`<meta[^>]*(?:name|property)=["']${name}["'][^>]*content=["']([^"']*)["']`, 'i');
+      const re2 = new RegExp(`<meta[^>]*content=["']([^"']*)["'][^>]*(?:name|property)=["']${name}["']`, 'i');
+      return (html.match(re)?.[1] || html.match(re2)?.[1] || '').trim();
+    };
+
+    const metaDesc = metaTag('description') || metaTag('og:description');
+    const ogImage = metaTag('og:image');
+    const ogSiteName = metaTag('og:site_name');
+    const themeColor = metaTag('theme-color');
+
+    const brandName = ogSiteName || pageTitle.split(/[|\-–—]/)[0]?.trim() || new URL(finalUrl).hostname.replace(/^www\./, '');
+    sendSSE('brand-info', { name: brandName, description: metaDesc });
+
+    // Step 3: Extract colors from CSS
+    sendSSE('status', { step: 'colors', message: 'Extracting colors...' });
+
+    const hexRegex = /#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b/g;
+    const rgbRegex = /rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})(?:\s*,\s*[\d.]+)?\s*\)/g;
+    const styleBlocks = html.match(/<style[\s\S]*?<\/style>/gi) || [];
+    const inlineStyles = html.match(/style=["'][^"']*["']/gi) || [];
+    const customPropRegex = /--[\w-]+:\s*(#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b)/g;
+
+    // Fetch external CSS
+    let externalCssText = '';
+    try {
+      const cssLinkRegex = /<link[^>]*rel=["']stylesheet["'][^>]*href=["']([^"']+)["']/gi;
+      const cssLinkRegex2 = /<link[^>]*href=["']([^"']+)["'][^>]*rel=["']stylesheet["']/gi;
+      const cssUrls = [];
+      let cssMatch;
+      while ((cssMatch = cssLinkRegex.exec(html)) !== null) cssUrls.push(cssMatch[1]);
+      while ((cssMatch = cssLinkRegex2.exec(html)) !== null) {
+        if (!cssUrls.includes(cssMatch[1])) cssUrls.push(cssMatch[1]);
+      }
+      const cssBaseUrl = new URL(finalUrl);
+      const sameDomain = cssUrls.filter(u => {
+        try {
+          const parsed = new URL(u, cssBaseUrl);
+          return parsed.hostname === cssBaseUrl.hostname || cssBaseUrl.hostname.endsWith(parsed.hostname) || parsed.hostname.endsWith(cssBaseUrl.hostname);
+        } catch { return false; }
+      }).slice(0, 3);
+      for (const cssSrc of sameDomain) {
+        try {
+          const cssUrl = new URL(cssSrc, cssBaseUrl).href;
+          const cssResp = await fetch(cssUrl, {
+            signal: AbortSignal.timeout(3000),
+            headers: { 'User-Agent': 'Mozilla/5.0 (compatible; CarouselStudio/1.0)' },
+          });
+          if (cssResp.ok) externalCssText += ' ' + await cssResp.text();
+        } catch { /* skip */ }
+      }
+    } catch { /* ignore */ }
+
+    const allCssSources = styleBlocks.join(' ') + ' ' + inlineStyles.join(' ') + ' ' + externalCssText;
+
+    // Extract hex colors
+    const colorFreq = {};
+    for (const m of allCssSources.matchAll(hexRegex)) {
+      let c = m[0].toLowerCase();
+      // Expand 3-char hex to 6-char
+      if (c.length === 4) c = '#' + c[1] + c[1] + c[2] + c[2] + c[3] + c[3];
+      if (c === '#ffffff' || c === '#000000') continue;
+      colorFreq[c] = (colorFreq[c] || 0) + 1;
+    }
+    // Extract CSS custom properties
+    for (const m of allCssSources.matchAll(customPropRegex)) {
+      let c = (m[1] || m[0]).toLowerCase();
+      if (c.length === 4) c = '#' + c[1] + c[1] + c[2] + c[2] + c[3] + c[3];
+      if (c === '#ffffff' || c === '#000000') continue;
+      colorFreq[c] = (colorFreq[c] || 0) + 1;
+    }
+    // Extract rgb/rgba and convert to hex
+    for (const m of allCssSources.matchAll(rgbRegex)) {
+      const r = parseInt(m[1]), g = parseInt(m[2]), b = parseInt(m[3]);
+      if (r === 255 && g === 255 && b === 255) continue;
+      if (r === 0 && g === 0 && b === 0) continue;
+      const hex = '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('');
+      colorFreq[hex] = (colorFreq[hex] || 0) + 1;
+    }
+
+    const extractedColors = Object.entries(colorFreq).sort((a, b) => b[1] - a[1]).slice(0, 15).map(([c]) => c);
+    if (themeColor && !extractedColors.includes(themeColor.toLowerCase())) {
+      extractedColors.unshift(themeColor.toLowerCase());
+    }
+    sendSSE('colors', { extracted: extractedColors.slice(0, 10) });
+
+    // Step 4: Fetch icon
+    sendSSE('status', { step: 'icon', message: 'Finding icon...' });
+
+    const faviconMatch = html.match(/<link[^>]*rel=["'](?:apple-touch-icon)["'][^>]*href=["']([^"']*)["']/i)
+      || html.match(/<link[^>]*href=["']([^"']*)["'][^>]*rel=["'](?:apple-touch-icon)["']/i)
+      || html.match(/<link[^>]*rel=["'](?:icon|shortcut icon)["'][^>]*href=["']([^"']*)["']/i)
+      || html.match(/<link[^>]*href=["']([^"']*)["'][^>]*rel=["'](?:icon|shortcut icon)["']/i);
+    const baseUrl = new URL(finalUrl);
+    const resolveUrl = (src) => {
+      if (!src || src.startsWith('data:')) return null;
+      try { return new URL(src, baseUrl).href; } catch { return null; }
+    };
+    let iconUrl = faviconMatch ? resolveUrl(faviconMatch[1]) : `${baseUrl.origin}/favicon.ico`;
+    sendSSE('icon', { url: iconUrl });
+
+    // Step 5: Discover images (with Next.js /_next/image fix)
+    sendSSE('status', { step: 'images', message: 'Finding images...' });
+
+    const rawImages = [];
+    const imgRegex = /<img[^>]*src=["']([^"']+)["']/gi;
+    let imgMatch;
+    while ((imgMatch = imgRegex.exec(html)) !== null) rawImages.push(imgMatch[1]);
+    const lazySrcRegex = /(?:data-src|data-lazy-src|data-original)=["']([^"']+)["']/gi;
+    while ((imgMatch = lazySrcRegex.exec(html)) !== null) rawImages.push(imgMatch[1]);
+    const srcsetRegex = /srcset=["']([^"']+)["']/gi;
+    while ((imgMatch = srcsetRegex.exec(html)) !== null) {
+      for (const entry of imgMatch[1].split(',')) {
+        const srcUrl = entry.trim().split(/\s+/)[0];
+        if (srcUrl) rawImages.push(srcUrl);
+      }
+    }
+    const bgImageRegex = /background-image:\s*url\(["']?([^"')]+)["']?\)/gi;
+    while ((imgMatch = bgImageRegex.exec(html)) !== null) rawImages.push(imgMatch[1]);
+    const anyImageUrlRegex = /["']((?:https?:\/\/[^"'\s]+|\/[^"'\s]+)\.(?:png|jpg|jpeg|webp|avif))(?:\?[^"']*)?\b/gi;
+    while ((imgMatch = anyImageUrlRegex.exec(html)) !== null) rawImages.push(imgMatch[1]);
+
+    // Scan JS bundles
+    try {
+      const scriptSrcRegex = /<script[^>]*src=["']([^"']+\.js)["']/gi;
+      const bundleUrls = [];
+      let scriptMatch;
+      while ((scriptMatch = scriptSrcRegex.exec(html)) !== null) {
+        const src = scriptMatch[1];
+        if (/^https?:\/\//i.test(src)) {
+          try {
+            const scriptHost = new URL(src).hostname;
+            const pageHost = new URL(finalUrl).hostname;
+            if (!scriptHost.endsWith(pageHost) && !pageHost.endsWith(scriptHost)) continue;
+          } catch { continue; }
+        }
+        bundleUrls.push(src);
+        if (bundleUrls.length >= 2) break;
+      }
+      const baseForResolve = new URL(finalUrl);
+      for (const bundleSrc of bundleUrls) {
+        try {
+          const bundleUrl = new URL(bundleSrc, baseForResolve).href;
+          const bundleResp = await fetch(bundleUrl, {
+            signal: AbortSignal.timeout(3000),
+            headers: { 'User-Agent': 'Mozilla/5.0 (compatible; CarouselStudio/1.0)' },
+          });
+          if (!bundleResp.ok) continue;
+          const jsText = await bundleResp.text();
+          const jsImageRegex = /["']((?:https?:\/\/[^"'\s]+|\/[^"'\s]+)\.(?:png|jpg|jpeg|webp|avif))["']/gi;
+          let jsMatch;
+          while ((jsMatch = jsImageRegex.exec(jsText)) !== null) rawImages.push(jsMatch[1]);
+        } catch { /* skip */ }
+      }
+    } catch { /* ignore */ }
+
+    // Process images: resolve URLs, filter junk, fix /_next/image URLs
+    const seenUrls = new Set();
+    const images = [];
+    if (ogImage) {
+      const resolved = resolveUrl(ogImage);
+      if (resolved) { images.push({ url: resolved, type: 'og:image' }); seenUrls.add(resolved); }
+    }
+    for (let src of rawImages) {
+      // Fix Next.js /_next/image URLs — extract the raw url parameter
+      if (src.includes('/_next/image')) {
+        try {
+          const parsed = new URL(src, baseUrl);
+          const rawUrl = parsed.searchParams.get('url');
+          if (rawUrl) src = rawUrl;
+        } catch { /* keep original */ }
+      }
+      const resolved = resolveUrl(src);
+      if (!resolved || seenUrls.has(resolved)) continue;
+      if (/\.svg(\?|$)/i.test(resolved)) continue;
+      if (/\b(pixel|tracking|spacer|blank|1x1)\b/i.test(resolved)) continue;
+      if (/\.(gif)(\?|$)/i.test(resolved) && !/\.(gifv)(\?|$)/i.test(resolved)) continue;
+      // Skip remaining /_next/image optimization URLs
+      if (resolved.includes('/_next/image')) continue;
+      seenUrls.add(resolved);
+      images.push({ url: resolved, type: 'img' });
+      if (images.length >= 20) break;
+    }
+    sendSSE('images', images.slice(0, 12));
+
+    // Step 6: Claude generates brand config
+    sendSSE('status', { step: 'config', message: 'Generating brand profile...' });
+
+    if (!anthropic) { sendSSE('error', { message: 'Claude API not configured' }); res.end(); return; }
+
+    const textContent = html
+      .replace(/<script[\s\S]*?<\/script>/gi, '')
+      .replace(/<style[\s\S]*?<\/style>/gi, '')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 3000);
+
+    const msg = await anthropic.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 1024,
+      messages: [{
+        role: 'user',
+        content: `Analyze this website and generate a brand configuration for a social media carousel creation tool.
+
+Page URL: ${finalUrl}
+Page title: ${pageTitle}
+Meta description: ${metaDesc}
+OG site name: ${ogSiteName}
+OG image: ${ogImage || 'none'}
+Theme color: ${themeColor || 'none'}
+CSS colors extracted from the website (sorted by frequency, most used first): ${extractedColors.join(', ') || 'none'}
+Page text (first 3000 chars): ${textContent}
+
+COLOR RULES — STRICTLY FOLLOW THESE:
+1. You MUST pick colors ONLY from the "CSS colors extracted" list above. Copy the exact hex values.
+2. Do NOT invent, guess, or generate new hex color codes. Every color in your response must appear in the extracted list.
+3. Map the extracted colors to roles:
+   - primary: the dominant dark/background color from the site
+   - accent: the most prominent brand/highlight color
+   - white: the main text color (often #ffffff or a light color — you MAY use #ffffff even though it's filtered from the list)
+   - secondary: an alternate background color
+   - cta: the button/action color
+4. If fewer than 5 extracted colors exist, you may reuse colors across roles or use #ffffff for white.
+
+Return ONLY valid JSON (no markdown, no code fences) with:
+- name: brand name (short, clean)
+- description: 1-2 sentence brand description
+- colors: { primary, accent, white, secondary, cta } — exact hex codes from the extracted list
+- systemPrompt: 150-200 word brand brief for AI content generation describing tone, audience, content pillars, visual style
+- defaultBackground: one-line visual description for slide backgrounds matching the brand aesthetic
+- imageStyle: 2-4 sentence visual/photography direction for AI image generation (lighting, composition, mood, camera feel — NOT colors)
+- tone: 2-3 word tone description
+- microLabel: short uppercase label for slides
+- watermarkText: website domain for watermark
+- contentPillars: array of 4-5 content theme strings`
+      }],
+    });
+
+    const brandText = msg.content[0]?.text || '';
+    let brandConfig;
+    try {
+      brandConfig = JSON.parse(brandText);
+    } catch {
+      const match = brandText.match(/\{[\s\S]*\}/);
+      brandConfig = match ? JSON.parse(match[0]) : null;
+    }
+    if (!brandConfig) { sendSSE('error', { message: 'Failed to parse AI response' }); res.end(); return; }
+
+    sendSSE('brand-config', brandConfig);
+
+    // Step 7: Save brand to DB
+    sendSSE('status', { step: 'saving', message: 'Saving brand...' });
+
+    const brandData = {
+      name: brandConfig.name || brandName,
+      website: new URL(finalUrl).hostname.replace(/^www\./, ''),
+      colors: {
+        primary: brandConfig.colors?.primary || GENERIC_BRAND.colors.primary,
+        accent: brandConfig.colors?.accent || GENERIC_BRAND.colors.accent,
+        white: brandConfig.colors?.white || GENERIC_BRAND.colors.white,
+        secondary: brandConfig.colors?.secondary || GENERIC_BRAND.colors.secondary,
+        cta: brandConfig.colors?.cta || GENERIC_BRAND.colors.cta,
+      },
+      systemPrompt: brandConfig.systemPrompt || '',
+      imageStyle: brandConfig.imageStyle || '',
+      defaultMicroLabel: brandConfig.microLabel || (brandConfig.name || brandName).toUpperCase(),
+      defaultBackground: brandConfig.defaultBackground || GENERIC_BRAND.defaultBackground,
+      iconOverlayText: brandConfig.watermarkText || new URL(finalUrl).hostname.replace(/^www\./, ''),
+      contentPillars: brandConfig.contentPillars || [],
+      createdBy: req.user.uid,
+    };
+
+    const brandId = slugify(brandData.name) + '-' + crypto.randomUUID().slice(0, 6);
+    if (db) {
+      brandData.createdAt = admin.firestore.FieldValue.serverTimestamp();
+      await db.collection('carousel_brands').doc(brandId).set(brandData);
+    } else {
+      brandData.createdAt = Date.now();
+      const allBrands = await readLocalBrands();
+      allBrands[brandId] = brandData;
+      await writeLocalBrands(allBrands);
+    }
+
+    // Upload icon from website
+    if (iconUrl) {
+      try {
+        const iconResp = await fetch(iconUrl, { signal: AbortSignal.timeout(3000) });
+        if (iconResp.ok) {
+          const iconBuffer = Buffer.from(await iconResp.arrayBuffer());
+          const brandDir = path.join(rootDir, 'brands', brandId, 'assets');
+          await fs.mkdir(brandDir, { recursive: true });
+          await fs.writeFile(path.join(brandDir, 'app-icon.png'), iconBuffer);
+        }
+      } catch { /* skip icon */ }
+    }
+
+    sendSSE('brand-saved', { id: brandId, name: brandData.name });
+
+    // Step 8: Generate content ideas
+    sendSSE('status', { step: 'content-ideas', message: 'Creating content ideas...' });
+
+    let contentIdeas = [];
+    try {
+      const websiteUrl = finalUrl;
+      const microLabel = brandData.defaultMicroLabel;
+      const brandContext = [
+        brandData.systemPrompt || '',
+        `Brand: ${brandData.name}`,
+        brandData.website ? `Website: ${brandData.website}` : '',
+        brandData.contentPillars?.length ? `Content pillars: ${brandData.contentPillars.join(', ')}` : '',
+      ].filter(Boolean).join('\n');
+
+      const ideasResponse = await anthropic.messages.create({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 4096,
+        system: brandContext,
+        messages: [{
+          role: 'user',
+          content: `Based on this website content, generate 5 carousel content ideas for ${brandData.name}'s social media (TikTok/Instagram).
+
+Website: ${websiteUrl}
+Page title: ${pageTitle}
+Description: ${metaDesc}
+Website text: ${textContent}
+
+Generate exactly 5 carousel concepts. Each should have 6-7 slides and be based on real content/features/value props from the website.
+
+Return ONLY valid JSON (no markdown, no code fences) with this structure:
+{
+  "ideas": [
+    {
+      "title": "Short carousel title",
+      "caption": "Instagram/TikTok caption with hashtags",
+      "slides": [
+        {
+          "number": 1,
+          "label": "Hook",
+          "type": "photo, text, or mockup",
+          "microLabel": "${microLabel}",
+          "headline": "Main headline text",
+          "body": "Supporting body text (1-2 sentences)",
+          "highlight": "key phrase to highlight"
+        }
+      ]
+    }
+  ]
+}
+
+Rules:
+- Each idea MUST include a "caption" field: a ready-to-post caption (2-3 sentences + 5-8 hashtags)
+- Each idea should cover a DISTINCTLY different angle
+- First slide: strong hook (photo or text type)
+- Last slide: CTA with "${brandData.name} — link in bio"
+- Mix photo, text, and mockup types
+- Headlines: punchy, under 15 words
+- Content based on REAL information from the website`
+        }],
+      });
+
+      const ideasText = ideasResponse.content?.[0]?.text?.trim();
+      if (ideasText) {
+        const jsonMatch = ideasText.match(/\{[\s\S]*\}/);
+        const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : ideasText);
+        contentIdeas = parsed.ideas || [];
+      }
+    } catch (e) {
+      console.warn('[Full Setup] Content ideas generation failed:', e.message);
+    }
+
+    if (contentIdeas.length > 0) {
+      sendSSE('content-ideas', contentIdeas.map((idea, i) => ({
+        id: `AI-${i + 1}`,
+        title: idea.title,
+        caption: idea.caption || '',
+        slides: (idea.slides || []).map((s, si) => ({
+          ...s,
+          number: s.number || si + 1,
+          type: s.type || 'text',
+        })),
+      })));
+    }
+
+    // Step 9: Generate first carousel slides (slide 1 = AI, rest = mockup)
+    sendSSE('status', { step: 'carousel', message: 'Generating first carousel...' });
+
+    const brand = { id: brandId, ...brandData };
+    if (contentIdeas.length > 0 && openai) {
+      const firstIdea = contentIdeas[0];
+      const slides = firstIdea.slides || [];
+      for (let i = 0; i < Math.min(slides.length, 5); i++) {
+        const slide = slides[i];
+        try {
+          if (i === 0 && slide.type === 'photo') {
+            // AI-generated first slide
+            const rawPrompt = buildPhotoPrompt({
+              sport: '', setting: '', action: '', mood: '',
+              microLabel: slide.microLabel || brandData.defaultMicroLabel,
+              headline: slide.headline || '',
+              body: slide.body || '',
+              highlightPhrase: slide.highlight || '',
+              overlayStyle: 'dark gradient',
+              overlayPlacement: 'bottom third',
+            }, brand);
+            const refinedPrompt = await refinePromptWithClaude(rawPrompt, 'photo', slide, brand);
+            const prompt = refinedPrompt || rawPrompt;
+            const response = await openai.images.generate({
+              model: resolveImageModel(),
+              prompt,
+              size: '1024x1536',
+              quality: 'high',
+              output_format: 'png',
+            });
+            const b64 = response.data?.[0]?.b64_json;
+            if (b64) {
+              let buffer = Buffer.from(b64, 'base64');
+              buffer = await addAppIconOverlay(buffer, 'bottom-right', brand);
+              const slug = crypto.randomUUID().slice(0, 8);
+              const filename = `carousel_${brandId}_setup_s${i + 1}_${slug}.png`;
+              const slideUrl = await uploadToStorage(buffer, filename);
+              sendSSE('slide', { index: i, imageUrl: slideUrl, type: 'ai' });
+            }
+          } else {
+            // Mockup slide
+            const mockupData = {
+              slideType: 'mockup',
+              mockupLayout: 'text-statement',
+              mockupTheme: 'dark',
+              microLabel: slide.microLabel || brandData.defaultMicroLabel,
+              headline: slide.headline || '',
+              body: slide.body || '',
+              highlightPhrase: slide.highlight || '',
+              highlightStyle: 'subtle',
+              includeOwl: true,
+              owlPosition: 'bottom-right',
+            };
+            const mockupBuffer = await generateMockupSlide(mockupData, brand);
+            const slug = crypto.randomUUID().slice(0, 8);
+            const filename = `carousel_${brandId}_setup_s${i + 1}_${slug}.png`;
+            const slideUrl = await uploadToStorage(mockupBuffer, filename);
+            sendSSE('slide', { index: i, imageUrl: slideUrl, type: 'mockup' });
+          }
+        } catch (slideErr) {
+          console.warn(`[Full Setup] Slide ${i + 1} failed:`, slideErr.message);
+          sendSSE('slide-error', { index: i, message: slideErr.message });
+        }
+      }
+    }
+
+    sendSSE('done', { brandId });
+    res.end();
+  } catch (err) {
+    console.error('[Full Setup]', err);
+    try { sendSSE('error', { message: safeErrorMessage(err) }); } catch { /* headers sent */ }
+    res.end();
+  }
+});
+
 // Analyze website — fetch HTML, extract meta/images/colors, generate brand config
 app.post('/api/brands/analyze-website', requireAuth, async (req, res) => {
   try {
@@ -1750,22 +2251,37 @@ app.post('/api/brands/analyze-website', requireAuth, async (req, res) => {
       }
     } catch { /* ignore CSS fetch errors */ }
 
-    // Extract CSS colors (hex codes from style blocks, inline styles, and external CSS)
+    // Extract CSS colors (hex + rgb/rgba from style blocks, inline styles, and external CSS)
     const colorRegex = /#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b/g;
+    const rgbRegex = /rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})(?:\s*,\s*[\d.]+)?\s*\)/g;
     const styleBlocks = html.match(/<style[\s\S]*?<\/style>/gi) || [];
     const inlineStyles = html.match(/style=["'][^"']*["']/gi) || [];
-    // Also extract CSS custom property values (--var: #hex)
     const customPropRegex = /--[\w-]+:\s*(#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b)/g;
     const allCssSources = styleBlocks.join(' ') + ' ' + inlineStyles.join(' ') + ' ' + externalCssText;
-    const cssColorsRaw = [...allCssSources.matchAll(colorRegex), ...allCssSources.matchAll(customPropRegex)].map(m => m[1] || m[0]);
-    // Deduplicate and count frequency
     const colorFreq = {};
-    for (const c of cssColorsRaw) {
-      const normalized = c.toLowerCase();
-      if (normalized === '#fff' || normalized === '#ffffff' || normalized === '#000' || normalized === '#000000') continue; // skip black/white
-      colorFreq[normalized] = (colorFreq[normalized] || 0) + 1;
+    // Extract hex colors
+    for (const m of allCssSources.matchAll(colorRegex)) {
+      let c = m[0].toLowerCase();
+      if (c.length === 4) c = '#' + c[1] + c[1] + c[2] + c[2] + c[3] + c[3];
+      if (c === '#ffffff' || c === '#000000') continue;
+      colorFreq[c] = (colorFreq[c] || 0) + 1;
     }
-    const extractedColors = Object.entries(colorFreq).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([c]) => c);
+    // Extract CSS custom properties
+    for (const m of allCssSources.matchAll(customPropRegex)) {
+      let c = (m[1] || m[0]).toLowerCase();
+      if (c.length === 4) c = '#' + c[1] + c[1] + c[2] + c[2] + c[3] + c[3];
+      if (c === '#ffffff' || c === '#000000') continue;
+      colorFreq[c] = (colorFreq[c] || 0) + 1;
+    }
+    // Extract rgb/rgba and convert to hex
+    for (const m of allCssSources.matchAll(rgbRegex)) {
+      const r = parseInt(m[1]), g = parseInt(m[2]), b = parseInt(m[3]);
+      if (r === 255 && g === 255 && b === 255) continue;
+      if (r === 0 && g === 0 && b === 0) continue;
+      const hex = '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('');
+      colorFreq[hex] = (colorFreq[hex] || 0) + 1;
+    }
+    const extractedColors = Object.entries(colorFreq).sort((a, b) => b[1] - a[1]).slice(0, 15).map(([c]) => c);
 
     // Extract text content
     const textContent = html
@@ -1787,7 +2303,7 @@ app.post('/api/brands/analyze-website', requireAuth, async (req, res) => {
 
     favicon = resolveUrl(favicon) || `${baseUrl.origin}/favicon.ico`;
 
-    // Process images: resolve URLs, filter junk
+    // Process images: resolve URLs, filter junk, fix /_next/image URLs
     const seenUrls = new Set();
     const images = [];
     // Add og:image first
@@ -1798,13 +2314,23 @@ app.post('/api/brands/analyze-website', requireAuth, async (req, res) => {
         seenUrls.add(resolved);
       }
     }
-    for (const src of rawImages) {
+    for (let src of rawImages) {
+      // Fix Next.js /_next/image URLs — extract the raw url parameter
+      if (src.includes('/_next/image')) {
+        try {
+          const parsed = new URL(src, baseUrl);
+          const rawUrl = parsed.searchParams.get('url');
+          if (rawUrl) src = rawUrl;
+        } catch { /* keep original */ }
+      }
       const resolved = resolveUrl(src);
       if (!resolved || seenUrls.has(resolved)) continue;
       // Filter out tiny tracking pixels, svgs, data URIs
       if (/\.svg(\?|$)/i.test(resolved)) continue;
       if (/\b(pixel|tracking|spacer|blank|1x1)\b/i.test(resolved)) continue;
       if (/\.(gif)(\?|$)/i.test(resolved) && !/\.(gifv)(\?|$)/i.test(resolved)) continue;
+      // Skip remaining /_next/image optimization URLs
+      if (resolved.includes('/_next/image')) continue;
       seenUrls.add(resolved);
       images.push({ url: resolved, type: 'img' });
       if (images.length >= 20) break;
@@ -1863,18 +2389,22 @@ Theme color: ${themeColor || 'none'}
 CSS colors found on site (by frequency): ${extractedColors.join(', ') || 'none'}
 Page text (first 3000 chars): ${textContent}
 
-IMPORTANT for colors: You MUST use the exact hex codes from the "CSS colors found on site" list above. Do NOT invent new hex values. Map the extracted colors to their roles:
-- primary: the dominant dark background color from the site
-- accent: the most prominent brand/highlight color
-- white: the main text color (often #ffffff or a light color)
-- secondary: an alternate background color
-- cta: the button/action color (often same as accent)
-If the CSS colors list is empty, use the theme-color and make reasonable guesses from the page content.
+COLOR RULES — STRICTLY FOLLOW THESE:
+1. You MUST pick colors ONLY from the "CSS colors found on site" list above. Copy the exact hex values.
+2. Do NOT invent, guess, or generate new hex color codes. Every color in your response must appear in the extracted list.
+3. Map the extracted colors to roles:
+   - primary: the dominant dark/background color from the site
+   - accent: the most prominent brand/highlight color
+   - white: the main text color (often #ffffff or a light color — you MAY use #ffffff even though it's filtered from the list)
+   - secondary: an alternate background color
+   - cta: the button/action color
+4. If fewer than 5 extracted colors exist, you may reuse colors across roles or use #ffffff for white.
+5. If the CSS colors list is empty, use the theme-color and make reasonable guesses from the page content.
 
 Return ONLY valid JSON (no markdown, no code fences) with:
 - name: brand name (short, clean)
 - description: 1-2 sentence brand description
-- colors: { primary, accent, white, secondary, cta } — hex codes mapped from the actual CSS colors above
+- colors: { primary, accent, white, secondary, cta } — exact hex codes from the extracted list
 - systemPrompt: 150-200 word brand brief for AI content generation describing tone, audience, content pillars, visual style
 - defaultBackground: one-line visual description for slide backgrounds matching the brand aesthetic
 - imageStyle: 2-4 sentence visual/photography direction for AI image generation (describe lighting, composition style, mood, camera feel — NOT colors, those are separate)

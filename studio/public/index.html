@@ -214,9 +214,9 @@
                 <div class="form-group">
                   <label class="label">Slide Type</label>
                   <select name="slideType" id="slideType">
-                    <option value="photo">Photo-led</option>
-                    <option value="text">Text-only</option>
-                    <option value="mockup">Mockup (Sharp)</option>
+                    <option value="photo">AI Photo</option>
+                    <option value="text">Text Only</option>
+                    <option value="mockup">App Mockup</option>
                   </select>
                   <p class="slide-type-hint" id="slideTypeHint"></p>
                 </div>
@@ -350,7 +350,7 @@
                   <div class="form-group">
                     <label class="label">Accent Color</label>
                     <div class="color-override-row">
-                      <input type="color" name="mockupAccentColor" id="mockupAccentColor" value="#73A6D1" />
+                      <input type="color" name="mockupAccentColor" id="mockupAccentColor" value="#E94560" />
                       <label class="checkbox"><input type="checkbox" id="mockupAccentColorEnabled" /> Override</label>
                     </div>
                   </div>
@@ -634,6 +634,77 @@
             </div><!-- /.editor-columns -->
           </div>
         </main>
+      </div>
+    </div>
+
+    <!-- Full-Page Brand Creation -->
+    <div class="brand-creation-page" id="brand-creation-page" style="display:none">
+      <div class="brand-creation-inner">
+        <div class="brand-creation-header">
+          <button class="btn small" id="brand-creation-back">&larr; Back</button>
+          <h1>Create Your Brand</h1>
+        </div>
+
+        <div class="brand-creation-input-row">
+          <input type="text" id="brand-creation-url" placeholder="https://yourwebsite.com" class="brand-creation-url-input" />
+          <button class="btn primary" id="brand-creation-generate-btn">Generate</button>
+        </div>
+
+        <div class="brand-creation-progress" id="brand-creation-progress" style="display:none">
+          <div class="creation-progress-steps" id="creation-progress-steps">
+            <div class="creation-step" data-step="fetch"><span class="creation-step-dot"></span> Analyzing website</div>
+            <div class="creation-step" data-step="colors"><span class="creation-step-dot"></span> Extracting colors</div>
+            <div class="creation-step" data-step="config"><span class="creation-step-dot"></span> Generating brand profile</div>
+            <div class="creation-step" data-step="content-ideas"><span class="creation-step-dot"></span> Creating content ideas</div>
+            <div class="creation-step" data-step="carousel"><span class="creation-step-dot"></span> Generating first carousel</div>
+          </div>
+        </div>
+
+        <div class="brand-creation-error" id="brand-creation-error" style="display:none"></div>
+
+        <div class="brand-creation-sections">
+          <div class="creation-section" id="creation-section-brand" style="display:none">
+            <h3>Brand</h3>
+            <div class="creation-brand-info">
+              <strong id="creation-brand-name"></strong>
+              <p id="creation-brand-desc"></p>
+            </div>
+          </div>
+
+          <div class="creation-section" id="creation-section-colors" style="display:none">
+            <h3>Colors</h3>
+            <div class="creation-color-swatches" id="creation-color-swatches"></div>
+          </div>
+
+          <div class="creation-section" id="creation-section-icon" style="display:none">
+            <h3>Icon</h3>
+            <img class="creation-icon-preview" id="creation-icon-preview" />
+          </div>
+
+          <div class="creation-section" id="creation-section-images" style="display:none">
+            <h3>Website Images</h3>
+            <div class="creation-images-grid" id="creation-images-grid"></div>
+          </div>
+
+          <div class="creation-section" id="creation-section-config" style="display:none">
+            <h3>Brand Voice &amp; Style</h3>
+            <div class="creation-config-content" id="creation-config-content"></div>
+          </div>
+
+          <div class="creation-section" id="creation-section-ideas" style="display:none">
+            <h3>Content Ideas</h3>
+            <div class="creation-ideas-list" id="creation-ideas-list"></div>
+          </div>
+
+          <div class="creation-section" id="creation-section-carousel" style="display:none">
+            <h3>First Carousel Preview</h3>
+            <div class="creation-carousel-strip" id="creation-carousel-strip"></div>
+          </div>
+        </div>
+
+        <div class="brand-creation-footer" id="brand-creation-footer" style="display:none">
+          <button class="btn primary" id="brand-creation-continue">Continue to Studio &rarr;</button>
+        </div>
       </div>
     </div>
 

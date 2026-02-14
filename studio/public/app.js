@@ -52,8 +52,8 @@ async function authFetch(url, opts = {}) {
       }
       renderBrandSelector();
       // Auto-open brand creation for new users with no brands
-      if (brands.length === 0 && typeof openBrandModal === 'function') {
-        setTimeout(() => openBrandModal(), 300);
+      if (brands.length === 0 && typeof openBrandCreationPage === 'function') {
+        setTimeout(() => openBrandCreationPage(), 300);
       }
     } catch (err) {
       console.error('Failed to load brands:', err);
@@ -579,7 +579,305 @@ function closeBrandModal() {
   editingBrandId = null;
 }
 
-document.getElementById('create-brand-btn').addEventListener('click', () => openBrandModal());
+// --- Full-Page Brand Creation ---
+let brandCreationEventSource = null;
+
+function openBrandCreationPage() {
+  const page = document.getElementById('brand-creation-page');
+  page.style.display = 'block';
+  document.getElementById('brand-creation-url').value = '';
+  document.getElementById('brand-creation-url').focus();
+  document.getElementById('brand-creation-error').style.display = 'none';
+  document.getElementById('brand-creation-progress').style.display = 'none';
+  document.getElementById('brand-creation-footer').style.display = 'none';
+  document.getElementById('brand-creation-generate-btn').disabled = false;
+  // Reset all sections
+  document.querySelectorAll('.creation-section').forEach(el => el.style.display = 'none');
+  // Reset progress steps
+  document.querySelectorAll('.creation-step').forEach(el => {
+    el.className = 'creation-step';
+  });
+}
+
+function closeBrandCreationPage() {
+  document.getElementById('brand-creation-page').style.display = 'none';
+  if (brandCreationEventSource) {
+    brandCreationEventSource.close();
+    brandCreationEventSource = null;
+  }
+}
+
+document.getElementById('brand-creation-back').addEventListener('click', closeBrandCreationPage);
+document.getElementById('brand-creation-generate-btn').addEventListener('click', () => {
+  const url = document.getElementById('brand-creation-url').value.trim();
+  if (!url) return;
+  startBrandGeneration(url);
+});
+document.getElementById('brand-creation-url').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    document.getElementById('brand-creation-generate-btn').click();
+  }
+});
+
+document.getElementById('brand-creation-continue').addEventListener('click', async () => {
+  closeBrandCreationPage();
+  // Refresh brands list and select the new one
+  try {
+    const res = await authFetch('/api/brands');
+    const data = await res.json();
+    brands = data.brands || [];
+    renderBrandSelector();
+    if (currentBrand) {
+      await loadContentIdeas();
+      updateIconPreview();
+    }
+  } catch (err) {
+    console.error('Failed to refresh brands:', err);
+  }
+});
+
+async function startBrandGeneration(url) {
+  const generateBtn = document.getElementById('brand-creation-generate-btn');
+  const errorEl = document.getElementById('brand-creation-error');
+  const progressEl = document.getElementById('brand-creation-progress');
+  const footerEl = document.getElementById('brand-creation-footer');
+
+  generateBtn.disabled = true;
+  errorEl.style.display = 'none';
+  progressEl.style.display = 'block';
+  footerEl.style.display = 'none';
+
+  // Reset all sections and progress
+  document.querySelectorAll('.creation-section').forEach(el => el.style.display = 'none');
+  document.querySelectorAll('.creation-step').forEach(el => el.className = 'creation-step');
+
+  const token = await getIdToken();
+
+  // Use fetch with streaming for SSE (EventSource doesn't support POST)
+  try {
+    const response = await fetch('/api/brands/full-setup', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ url }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Server error: ${response.status}`);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+
+      // Parse SSE events from buffer
+      const lines = buffer.split('\n');
+      buffer = lines.pop(); // Keep incomplete line in buffer
+
+      let currentEvent = null;
+      for (const line of lines) {
+        if (line.startsWith('event: ')) {
+          currentEvent = line.slice(7).trim();
+        } else if (line.startsWith('data: ') && currentEvent) {
+          try {
+            const data = JSON.parse(line.slice(6));
+            handleCreationEvent(currentEvent, data);
+          } catch { /* skip parse errors */ }
+          currentEvent = null;
+        }
+      }
+    }
+  } catch (err) {
+    errorEl.textContent = err.message;
+    errorEl.style.display = 'block';
+    generateBtn.disabled = false;
+  }
+}
+
+function setCreationStep(stepName, state) {
+  const step = document.querySelector(`.creation-step[data-step="${stepName}"]`);
+  if (!step) return;
+  step.className = 'creation-step ' + state;
+}
+
+function handleCreationEvent(event, data) {
+  const errorEl = document.getElementById('brand-creation-error');
+
+  switch (event) {
+    case 'status': {
+      // Mark previous steps as done, current as active
+      const steps = ['fetch', 'colors', 'icon', 'images', 'config', 'saving', 'content-ideas', 'carousel'];
+      const idx = steps.indexOf(data.step);
+      for (let i = 0; i < steps.length; i++) {
+        const el = document.querySelector(`.creation-step[data-step="${steps[i]}"]`);
+        if (!el) continue;
+        if (i < idx) el.className = 'creation-step done';
+        else if (i === idx) el.className = 'creation-step active';
+      }
+      break;
+    }
+
+    case 'brand-info': {
+      const section = document.getElementById('creation-section-brand');
+      document.getElementById('creation-brand-name').textContent = data.name || '';
+      document.getElementById('creation-brand-desc').textContent = data.description || '';
+      section.style.display = 'block';
+      break;
+    }
+
+    case 'colors': {
+      const section = document.getElementById('creation-section-colors');
+      const container = document.getElementById('creation-color-swatches');
+      container.innerHTML = '';
+      (data.extracted || []).forEach(hex => {
+        const swatch = document.createElement('div');
+        swatch.className = 'creation-swatch';
+        swatch.innerHTML = `<div class="creation-swatch-circle" style="background:${hex}"></div><span class="creation-swatch-hex">${hex}</span>`;
+        container.appendChild(swatch);
+      });
+      section.style.display = 'block';
+      break;
+    }
+
+    case 'icon': {
+      if (data.url) {
+        const section = document.getElementById('creation-section-icon');
+        const img = document.getElementById('creation-icon-preview');
+        img.src = data.url;
+        img.onerror = () => { section.style.display = 'none'; };
+        section.style.display = 'block';
+      }
+      break;
+    }
+
+    case 'images': {
+      if (Array.isArray(data) && data.length > 0) {
+        const section = document.getElementById('creation-section-images');
+        const grid = document.getElementById('creation-images-grid');
+        grid.innerHTML = '';
+        data.forEach(img => {
+          const el = document.createElement('img');
+          el.src = img.url;
+          el.loading = 'lazy';
+          el.onerror = () => el.remove();
+          grid.appendChild(el);
+        });
+        section.style.display = 'block';
+      }
+      break;
+    }
+
+    case 'brand-config': {
+      const section = document.getElementById('creation-section-config');
+      const content = document.getElementById('creation-config-content');
+
+      // Update color swatches with the assigned brand colors
+      if (data.colors) {
+        const container = document.getElementById('creation-color-swatches');
+        container.innerHTML = '';
+        const colorEntries = Object.entries(data.colors);
+        colorEntries.forEach(([role, hex]) => {
+          const swatch = document.createElement('div');
+          swatch.className = 'creation-swatch';
+          swatch.innerHTML = `<div class="creation-swatch-circle" style="background:${hex}"></div><span class="creation-swatch-label">${role}</span><span class="creation-swatch-hex">${hex}</span>`;
+          container.appendChild(swatch);
+        });
+      }
+
+      let html = '';
+      if (data.tone) html += `<div class="config-field"><span class="config-label">Tone</span>${data.tone}</div>`;
+      if (data.imageStyle) html += `<div class="config-field"><span class="config-label">Image Style</span>${data.imageStyle}</div>`;
+      if (data.defaultBackground) html += `<div class="config-field"><span class="config-label">Background</span>${data.defaultBackground}</div>`;
+      if (data.contentPillars?.length) html += `<div class="config-field"><span class="config-label">Content Pillars</span>${data.contentPillars.join(' &middot; ')}</div>`;
+      content.innerHTML = html;
+      section.style.display = 'block';
+      break;
+    }
+
+    case 'brand-saved': {
+      currentBrand = data.id;
+      // Mark config steps done
+      setCreationStep('config', 'done');
+      break;
+    }
+
+    case 'content-ideas': {
+      if (Array.isArray(data) && data.length > 0) {
+        const section = document.getElementById('creation-section-ideas');
+        const list = document.getElementById('creation-ideas-list');
+        list.innerHTML = '';
+        data.forEach((idea, i) => {
+          const item = document.createElement('div');
+          item.className = 'creation-idea-item';
+          item.innerHTML = `<span class="creation-idea-num">${i + 1}</span><span class="creation-idea-title">${idea.title}</span><span class="creation-idea-slides">${idea.slides?.length || 0} slides</span>`;
+          list.appendChild(item);
+        });
+        section.style.display = 'block';
+
+        // Store content ideas for the studio
+        const brandObj = { name: data[0]?.slides?.[0]?.microLabel || '' };
+        contentData = {
+          apps: [{
+            appName: currentBrand,
+            brandId: currentBrand,
+            categories: [{
+              name: 'AI-Generated Ideas',
+              ideas: data,
+            }],
+          }],
+        };
+      }
+      break;
+    }
+
+    case 'slide': {
+      const section = document.getElementById('creation-section-carousel');
+      const strip = document.getElementById('creation-carousel-strip');
+      section.style.display = 'block';
+      if (data.imageUrl) {
+        const img = document.createElement('img');
+        img.src = data.imageUrl;
+        img.loading = 'lazy';
+        strip.appendChild(img);
+      }
+      break;
+    }
+
+    case 'slide-error':
+      // Non-critical; just skip
+      break;
+
+    case 'done': {
+      // Mark all steps done
+      document.querySelectorAll('.creation-step').forEach(el => {
+        if (!el.classList.contains('error')) el.className = 'creation-step done';
+      });
+      document.getElementById('brand-creation-footer').style.display = 'block';
+      document.getElementById('brand-creation-generate-btn').disabled = false;
+      break;
+    }
+
+    case 'error': {
+      errorEl.textContent = data.message || 'Something went wrong';
+      errorEl.style.display = 'block';
+      document.getElementById('brand-creation-generate-btn').disabled = false;
+      // Mark current active step as error
+      document.querySelectorAll('.creation-step.active').forEach(el => el.className = 'creation-step error');
+      break;
+    }
+  }
+}
+
+document.getElementById('create-brand-btn').addEventListener('click', () => openBrandCreationPage());
 document.getElementById('edit-brand-btn').addEventListener('click', () => {
   const brand = brands.find((b) => b.id === currentBrand);
   if (brand) openBrandModal(brand);
@@ -1444,7 +1742,7 @@ function updatePreviewMockup() {
   const brand = brands.find((b) => b.id === currentBrand);
   const accentColorEnabled = document.getElementById('mockupAccentColorEnabled')?.checked;
   const textColorEnabled = document.getElementById('mockupTextColorEnabled')?.checked;
-  const accentColor = accentColorEnabled ? (form.elements.mockupAccentColor?.value || '#73a6d1') : (brand?.colors?.accent || '#73a6d1');
+  const accentColor = accentColorEnabled ? (form.elements.mockupAccentColor?.value || '#E94560') : (brand?.colors?.accent || '#E94560');
   const primaryColor = brand?.colors?.primary || '#072f57';
 
   const isMockup = (form.elements.slideType?.value || slide.type) === 'mockup';
