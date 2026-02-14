@@ -14,6 +14,28 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
+// --- Focus trapping for modals ---
+function trapFocus(modal) {
+  const focusable = modal.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+  if (focusable.length === 0) return null;
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  const previousFocus = document.activeElement;
+  first.focus();
+  function handler(e) {
+    if (e.key !== 'Tab') return;
+    if (e.shiftKey) {
+      if (document.activeElement === first) { e.preventDefault(); last.focus(); }
+    } else {
+      if (document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+  }
+  modal.addEventListener('keydown', handler);
+  return { restore() { modal.removeEventListener('keydown', handler); if (previousFocus) previousFocus.focus(); } };
+}
+
+let _activeFocusTrap = null;
+
 // --- Hex to RGB for highlight bars ---
 function hexToRgb(hex) {
   const c = hex.replace('#', '');
@@ -518,6 +540,7 @@ function getHeaders() {
 
 settingsBtn.addEventListener('click', () => {
   settingsModal.style.display = 'flex';
+  _activeFocusTrap = trapFocus(settingsModal);
   settingsStatus.textContent = '';
   settingsStatus.className = 'settings-status';
   const user = firebase.apps.length ? firebase.auth().currentUser : null;
@@ -532,10 +555,11 @@ settingsBtn.addEventListener('click', () => {
 
 settingsClose.addEventListener('click', () => {
   settingsModal.style.display = 'none';
+  if (_activeFocusTrap) { _activeFocusTrap.restore(); _activeFocusTrap = null; }
 });
 
 settingsModal.addEventListener('click', (e) => {
-  if (e.target === settingsModal) settingsModal.style.display = 'none';
+  if (e.target === settingsModal) { settingsModal.style.display = 'none'; if (_activeFocusTrap) { _activeFocusTrap.restore(); _activeFocusTrap = null; } }
 });
 
 settingsSaveBtn.addEventListener('click', async () => {
@@ -744,11 +768,13 @@ function openBrandModal(brand = null) {
   }
 
   brandModal.style.display = 'flex';
+  _activeFocusTrap = trapFocus(brandModal);
 }
 
 function closeBrandModal() {
   brandModal.style.display = 'none';
   editingBrandId = null;
+  if (_activeFocusTrap) { _activeFocusTrap.restore(); _activeFocusTrap = null; }
 }
 
 // --- Brand Face Photos Management ---
@@ -4283,10 +4309,12 @@ function openTikTokModal() {
   document.getElementById('tiktok-privacy').value = 'SELF_ONLY';
 
   tiktokModal.style.display = 'flex';
+  _activeFocusTrap = trapFocus(tiktokModal);
 }
 
 function closeTikTokModal() {
   tiktokModal.style.display = 'none';
+  if (_activeFocusTrap) { _activeFocusTrap.restore(); _activeFocusTrap = null; }
   if (tiktokPostPollTimer) {
     clearInterval(tiktokPostPollTimer);
     tiktokPostPollTimer = null;
@@ -4717,11 +4745,13 @@ const bgCategoryTabs = document.getElementById('bg-category-tabs');
 
 function openBgLibrary() {
   bgLibraryOverlay.style.display = 'flex';
+  _activeFocusTrap = trapFocus(bgLibraryOverlay);
   loadBgLibrary();
 }
 
 function closeBgLibrary() {
   bgLibraryOverlay.style.display = 'none';
+  if (_activeFocusTrap) { _activeFocusTrap.restore(); _activeFocusTrap = null; }
   if (bgPollTimer) { clearInterval(bgPollTimer); bgPollTimer = null; }
 }
 

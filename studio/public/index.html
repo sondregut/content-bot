@@ -365,7 +365,7 @@
             <form id="slide-form" class="slide-form">
               <div class="form-row">
                 <div class="form-group">
-                  <label class="label">Slide Type</label>
+                  <label class="label" for="slideType">Slide Type</label>
                   <select name="slideType" id="slideType">
                     <option value="photo">AI Photo</option>
                     <option value="text">Text Only</option>
@@ -374,7 +374,7 @@
                   <p class="slide-type-hint" id="slideTypeHint"></p>
                 </div>
                 <div class="form-group">
-                  <label class="label">Label</label>
+                  <label class="label" for="slideLabel">Label</label>
                   <input name="slideLabel" id="slideLabel" type="text" placeholder="Hook, Define, CTA..." />
                 </div>
               </div>
@@ -387,22 +387,22 @@
               <div class="form-section" id="photo-fields" style="display:none">
                 <div class="form-row">
                   <div class="form-group">
-                    <label class="label">Sport</label>
-                    <input name="sport" type="text" placeholder="topic or activity..." />
+                    <label class="label" for="field-sport">Sport</label>
+                    <input name="sport" id="field-sport" type="text" placeholder="topic or activity..." />
                   </div>
                   <div class="form-group">
-                    <label class="label">Setting</label>
-                    <input name="setting" type="text" placeholder="office, outdoors..." />
+                    <label class="label" for="field-setting">Setting</label>
+                    <input name="setting" id="field-setting" type="text" placeholder="office, outdoors..." />
                   </div>
                 </div>
                 <div class="form-row">
                   <div class="form-group">
-                    <label class="label">Action / Moment</label>
-                    <input name="action" type="text" placeholder="speaking, working..." />
+                    <label class="label" for="field-action">Action / Moment</label>
+                    <input name="action" id="field-action" type="text" placeholder="speaking, working..." />
                   </div>
                   <div class="form-group">
-                    <label class="label">Mood</label>
-                    <input name="mood" type="text" placeholder="calm intensity..." />
+                    <label class="label" for="field-mood">Mood</label>
+                    <input name="mood" id="field-mood" type="text" placeholder="calm intensity..." />
                   </div>
                 </div>
                 <div class="form-row">
@@ -638,21 +638,21 @@
               <div class="form-section">
                 <div class="form-row">
                   <div class="form-group">
-                    <label class="label">Micro-label</label>
-                    <input name="microLabel" type="text" placeholder="BRAND NAME" />
+                    <label class="label" for="field-micro">Micro-label</label>
+                    <input name="microLabel" id="field-micro" type="text" placeholder="BRAND NAME" />
                   </div>
                   <div class="form-group">
-                    <label class="label">Highlight Phrase</label>
-                    <input name="highlightPhrase" type="text" placeholder="phrase to highlight" />
+                    <label class="label" for="field-highlight">Highlight Phrase</label>
+                    <input name="highlightPhrase" id="field-highlight" type="text" placeholder="phrase to highlight" />
                   </div>
                 </div>
                 <div class="form-group full">
-                  <label class="label">Headline</label>
-                  <textarea name="headline" rows="2" placeholder="Main headline text"></textarea>
+                  <label class="label" for="field-headline">Headline</label>
+                  <textarea name="headline" id="field-headline" rows="2" placeholder="Main headline text"></textarea>
                 </div>
                 <div class="form-group full">
-                  <label class="label">Body</label>
-                  <textarea name="body" rows="2" placeholder="Supporting body text"></textarea>
+                  <label class="label" for="field-body">Body</label>
+                  <textarea name="body" id="field-body" rows="2" placeholder="Supporting body text"></textarea>
                 </div>
               </div>
 
@@ -819,7 +819,7 @@
     </div>
 
     <!-- Vault Lightbox -->
-    <div class="vault-lightbox" id="vault-lightbox">
+    <div class="vault-lightbox" id="vault-lightbox" role="dialog" aria-modal="true" aria-label="Image viewer">
       <button class="vault-lightbox-close" id="vault-lightbox-close" aria-label="Close">&times;</button>
       <button class="vault-lightbox-nav vault-lightbox-prev" id="vault-lightbox-prev" aria-label="Previous">&#8249;</button>
       <button class="vault-lightbox-nav vault-lightbox-next" id="vault-lightbox-next" aria-label="Next">&#8250;</button>
@@ -831,7 +831,7 @@
 
     <!-- Settings Modal -->
     <!-- Brand Creation / Edit Modal -->
-    <div class="modal-overlay" id="brand-modal" style="display:none">
+    <div class="modal-overlay" id="brand-modal" style="display:none" role="dialog" aria-modal="true" aria-labelledby="brand-modal-title">
       <div class="modal brand-modal-wide">
         <div class="modal-header">
           <h3 id="brand-modal-title">Create Brand</h3>
@@ -839,11 +839,11 @@
         </div>
         <div class="modal-body">
           <div class="form-group full">
-            <label class="label">Brand Name *</label>
+            <label class="label" for="brand-name">Brand Name *</label>
             <input type="text" id="brand-name" placeholder="e.g. My Startup" required />
           </div>
           <div class="form-group full">
-            <label class="label">Website URL</label>
+            <label class="label" for="brand-website">Website URL</label>
             <input type="text" id="brand-website" placeholder="e.g. myapp.com — paste a URL and we'll auto-fill everything" />
           </div>
 
@@ -982,10 +982,10 @@
       </div>
     </div>
 
-    <div class="modal-overlay" id="settings-modal" style="display:none">
+    <div class="modal-overlay" id="settings-modal" style="display:none" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
       <div class="modal">
         <div class="modal-header">
-          <h3>Settings</h3>
+          <h3 id="settings-modal-title">Settings</h3>
           <button class="modal-close" id="settings-close" aria-label="Close">&times;</button>
         </div>
         <div class="modal-body">
@@ -1007,7 +1007,7 @@
           </details>
           <div class="settings-divider"></div>
           <div class="form-group full">
-            <label class="label">OpenAI API Key (image generation)</label>
+            <label class="label" for="settings-openai-key">OpenAI API Key (image generation)</label>
             <div class="api-key-input-wrap">
               <input type="password" id="settings-openai-key" placeholder="sk-..." />
               <button type="button" class="api-key-toggle" data-target="settings-openai-key" title="Show/hide key">
@@ -1017,7 +1017,7 @@
             <span class="field-hint">Used for gpt-image-1.5 slide generation</span>
           </div>
           <div class="form-group full">
-            <label class="label">Anthropic API Key (text/prompt refinement)</label>
+            <label class="label" for="settings-anthropic-key">Anthropic API Key (text/prompt refinement)</label>
             <div class="api-key-input-wrap">
               <input type="password" id="settings-anthropic-key" placeholder="sk-ant-..." />
               <button type="button" class="api-key-toggle" data-target="settings-anthropic-key" title="Show/hide key">
@@ -1027,7 +1027,7 @@
             <span class="field-hint">Used for Claude prompt refinement and freeform content generation</span>
           </div>
           <div class="form-group full">
-            <label class="label">Fal.ai API Key (face personalization)</label>
+            <label class="label" for="settings-fal-key">Fal.ai API Key (face personalization)</label>
             <div class="api-key-input-wrap">
               <input type="password" id="settings-fal-key" placeholder="fal-..." />
               <button type="button" class="api-key-toggle" data-target="settings-fal-key" title="Show/hide key">
@@ -1039,7 +1039,7 @@
           <div class="settings-divider"></div>
           <p class="field-hint" style="margin-bottom:12px">To post carousels to TikTok, create a TikTok Developer App at <a href="https://developers.tiktok.com" target="_blank" style="color:var(--cyan)">developers.tiktok.com</a> and add this callback URL: <code style="color:var(--cyan);font-size:0.85em">&lt;your-domain&gt;/api/tiktok/callback</code></p>
           <div class="form-group full">
-            <label class="label">TikTok Client Key</label>
+            <label class="label" for="settings-tiktok-client-key">TikTok Client Key</label>
             <div class="api-key-input-wrap">
               <input type="password" id="settings-tiktok-client-key" placeholder="Client Key from TikTok Developer Portal" />
               <button type="button" class="api-key-toggle" data-target="settings-tiktok-client-key" title="Show/hide key">
@@ -1048,7 +1048,7 @@
             </div>
           </div>
           <div class="form-group full">
-            <label class="label">TikTok Client Secret</label>
+            <label class="label" for="settings-tiktok-client-secret">TikTok Client Secret</label>
             <div class="api-key-input-wrap">
               <input type="password" id="settings-tiktok-client-secret" placeholder="Client Secret from TikTok Developer Portal" />
               <button type="button" class="api-key-toggle" data-target="settings-tiktok-client-secret" title="Show/hide key">
@@ -1083,10 +1083,10 @@
     </div>
 
     <!-- TikTok Post Modal -->
-    <div class="tiktok-modal-overlay" id="tiktok-modal" style="display:none">
+    <div class="tiktok-modal-overlay" id="tiktok-modal" style="display:none" role="dialog" aria-modal="true" aria-labelledby="tiktok-modal-title">
       <div class="tiktok-modal">
         <div class="tiktok-modal-header">
-          <h2>Post to TikTok</h2>
+          <h2 id="tiktok-modal-title">Post to TikTok</h2>
           <button class="tiktok-modal-close" id="tiktok-modal-close" aria-label="Close">&times;</button>
         </div>
         <div class="tiktok-modal-body">
@@ -1149,10 +1149,10 @@
     </div>
 
     <!-- Background Library Modal -->
-    <div class="modal-overlay" id="bg-library-overlay" style="display:none">
+    <div class="modal-overlay" id="bg-library-overlay" style="display:none" role="dialog" aria-modal="true" aria-labelledby="bg-library-title">
       <div class="modal bg-library-modal-wide">
         <div class="modal-header">
-          <h3>Background Library</h3>
+          <h3 id="bg-library-title">Background Library</h3>
           <button class="modal-close" id="bg-library-close" aria-label="Close">&times;</button>
         </div>
         <div class="modal-body">
