@@ -3,6 +3,7 @@ import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 import dotenv from 'dotenv';
 import fs from 'fs/promises';
+import { createWriteStream } from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import sharp from 'sharp';
@@ -3743,29 +3744,38 @@ app.post('/api/generate-carousel', requireAuth, generationLimiter, async (req, r
           try {
             const person = await getPersonById(slideData.personId, req.user?.uid);
             if (person && person.photos?.length > 0) {
-              personTempFiles = await downloadPersonPhotosToTemp(person);
               const rawPrompt = buildPhotoImagePrompt(slideData, brand);
               const refined = await refinePromptWithClaude(rawPrompt, 'photo', slideData, brand, req);
               const prompt = refined || rawPrompt;
 
-              console.log(`[Carousel ${jobId}] ${brand.name} | Slide ${i + 1}/${slides.length} (hybrid + person "${person.name}")`);
-
               let buffer;
-              if (isFalEnabled(req) && personTempFiles.length > 0) {
-                buffer = await generateWithFlux(personTempFiles, prompt, { falKey: req.headers['x-fal-key'] });
-              } else {
-                const refBuffer = await fs.readFile(personTempFiles[0]);
-                const response = await openai.images.generate({
-                  model: resolveImageModel(imageModel),
-                  prompt,
-                  image: [{ image: refBuffer, detail: 'auto' }],
-                  size: '1024x1536',
-                  quality: slideData.quality || 'high',
-                  output_format: 'png',
+              if (person.loraStatus === 'ready' && person.loraUrl && isFalEnabled(req)) {
+                const loraPrompt = `${person.loraTriggerWord} ${prompt}`;
+                console.log(`[Carousel ${jobId}] ${brand.name} | Slide ${i + 1}/${slides.length} (LoRA + person "${person.name}")`);
+                buffer = await generateWithLoRA(person.loraUrl, loraPrompt, {
+                  loraModel: person.loraModel,
+                  falKey: req.headers['x-fal-key'],
                 });
-                const b64 = response.data?.[0]?.b64_json;
-                if (!b64) throw new Error('No image returned');
-                buffer = Buffer.from(b64, 'base64');
+              } else {
+                personTempFiles = await downloadPersonPhotosToTemp(person);
+                console.log(`[Carousel ${jobId}] ${brand.name} | Slide ${i + 1}/${slides.length} (hybrid + person "${person.name}")`);
+
+                if (isFalEnabled(req) && personTempFiles.length > 0) {
+                  buffer = await generateWithFlux(personTempFiles, prompt, { falKey: req.headers['x-fal-key'] });
+                } else {
+                  const refBuffer = await fs.readFile(personTempFiles[0]);
+                  const response = await openai.images.generate({
+                    model: resolveImageModel(imageModel),
+                    prompt,
+                    image: [{ image: refBuffer, detail: 'auto' }],
+                    size: '1024x1536',
+                    quality: slideData.quality || 'high',
+                    output_format: 'png',
+                  });
+                  const b64 = response.data?.[0]?.b64_json;
+                  if (!b64) throw new Error('No image returned');
+                  buffer = Buffer.from(b64, 'base64');
+                }
               }
 
               const meta = await sharp(buffer).metadata();
@@ -4239,47 +4249,61 @@ app.post('/api/generate-personalized', requireAuth, upload.array('faceImages', 5
     if (!brandId) return res.status(400).json({ error: 'Missing brand' });
 
     const brand = await getBrandAsync(brandId, req.user?.uid);
-    let faceImagePaths;
-    if (req.files && req.files.length > 0) {
-      faceImagePaths = req.files.map(f => f.path);
-    } else if (data.personId) {
-      // Use person-level photos
-      const person = await getPersonById(data.personId, req.user?.uid);
-      if (person && person.photos?.length > 0) {
-        downloadedTempFiles = await downloadPersonPhotosToTemp(person);
-        faceImagePaths = downloadedTempFiles;
-      } else {
-        return res.status(400).json({ error: 'Person not found or has no photos.' });
-      }
-    } else if (brand.facePhotos && brand.facePhotos.length > 0) {
-      downloadedTempFiles = await downloadFacePhotosToTemp(brand);
-      faceImagePaths = downloadedTempFiles;
-    } else {
-      return res.status(400).json({ error: 'No face photos. Select a person or upload photos.' });
-    }
     const model = data.model || 'flux';
+
+    // Check for LoRA-trained person first
+    let loraUsed = false;
+    let person = null;
+    if (data.personId) {
+      person = await getPersonById(data.personId, req.user?.uid);
+    }
 
     const scenarioPrompt = data.prompt || buildPersonalizedPrompt(data, brand);
     const refined = await refinePromptWithClaude(scenarioPrompt, 'photo', data, brand, req);
     const finalPrompt = refined || scenarioPrompt;
 
     let buffer;
-    if (model === 'flux' && isFalEnabled(req)) {
-      buffer = await generateWithFlux(faceImagePaths, finalPrompt, { falKey: req.headers['x-fal-key'] });
-    } else {
-      // GPT fallback — use first image only (doesn't support multi-ref)
-      const refBuffer = await fs.readFile(faceImagePaths[0]);
-      const response = await openai.images.generate({
-        model: resolveImageModel(data.imageModel),
-        prompt: finalPrompt,
-        image: [{ image: refBuffer, detail: 'auto' }],
-        size: '1024x1536',
-        quality: data.quality || 'high',
-        output_format: 'png',
+    if (person && person.loraStatus === 'ready' && person.loraUrl && isFalEnabled(req)) {
+      // LoRA inference — trained person model
+      const loraPrompt = `${person.loraTriggerWord} ${finalPrompt}`;
+      console.log(`[Personalized] LoRA inference for "${person.name}" (${person.loraModel})`);
+      buffer = await generateWithLoRA(person.loraUrl, loraPrompt, {
+        loraModel: person.loraModel,
+        falKey: req.headers['x-fal-key'],
       });
-      const b64 = response.data?.[0]?.b64_json;
-      if (!b64) throw new Error('No image returned');
-      buffer = Buffer.from(b64, 'base64');
+      loraUsed = true;
+    } else {
+      // Fallback: raw reference photos
+      let faceImagePaths;
+      if (req.files && req.files.length > 0) {
+        faceImagePaths = req.files.map(f => f.path);
+      } else if (person && person.photos?.length > 0) {
+        downloadedTempFiles = await downloadPersonPhotosToTemp(person);
+        faceImagePaths = downloadedTempFiles;
+      } else if (brand.facePhotos && brand.facePhotos.length > 0) {
+        downloadedTempFiles = await downloadFacePhotosToTemp(brand);
+        faceImagePaths = downloadedTempFiles;
+      } else {
+        return res.status(400).json({ error: 'No face photos. Select a person or upload photos.' });
+      }
+
+      if (model === 'flux' && isFalEnabled(req)) {
+        buffer = await generateWithFlux(faceImagePaths, finalPrompt, { falKey: req.headers['x-fal-key'] });
+      } else {
+        // GPT fallback — use first image only (doesn't support multi-ref)
+        const refBuffer = await fs.readFile(faceImagePaths[0]);
+        const response = await openai.images.generate({
+          model: resolveImageModel(data.imageModel),
+          prompt: finalPrompt,
+          image: [{ image: refBuffer, detail: 'auto' }],
+          size: '1024x1536',
+          quality: data.quality || 'high',
+          output_format: 'png',
+        });
+        const b64 = response.data?.[0]?.b64_json;
+        if (!b64) throw new Error('No image returned');
+        buffer = Buffer.from(b64, 'base64');
+      }
     }
 
     // Resize to exact dimensions if needed
@@ -4298,7 +4322,7 @@ app.post('/api/generate-personalized', requireAuth, upload.array('faceImages', 5
     saveImageRecord({ userId: req.user?.uid, brandId, filename, type: 'personalized' });
 
     if (downloadedTempFiles.length > 0) await cleanupTempFiles(downloadedTempFiles);
-    res.json({ ok: true, url, filename, model: model === 'flux' && isFalEnabled(req) ? 'flux' : 'gpt' });
+    res.json({ ok: true, url, filename, model: loraUsed ? 'lora' : model === 'flux' && isFalEnabled(req) ? 'flux' : 'gpt' });
   } catch (error) {
     if (downloadedTempFiles.length > 0) await cleanupTempFiles(downloadedTempFiles);
     console.error('[Personalized]', error);
@@ -4319,18 +4343,23 @@ app.post('/api/generate-personalized-carousel', requireAuth, upload.array('faceI
 
   const brand = await getBrandAsync(brandId, req.user?.uid);
   const personId = req.body?.personId;
+
+  // Check for LoRA-trained person
+  let loraPerson = null;
   let faceImagePaths;
   let downloadedTempFiles = [];
-  if (req.files && req.files.length > 0) {
-    faceImagePaths = req.files.map(f => f.path);
-  } else if (personId) {
+  if (personId) {
     const person = await getPersonById(personId, req.user?.uid);
-    if (person && person.photos?.length > 0) {
+    if (person && person.loraStatus === 'ready' && person.loraUrl && isFalEnabled(req)) {
+      loraPerson = person;
+    } else if (person && person.photos?.length > 0) {
       downloadedTempFiles = await downloadPersonPhotosToTemp(person);
       faceImagePaths = downloadedTempFiles;
     } else {
       return res.status(400).json({ error: 'Person not found or has no photos.' });
     }
+  } else if (req.files && req.files.length > 0) {
+    faceImagePaths = req.files.map(f => f.path);
   } else if (brand.facePhotos && brand.facePhotos.length > 0) {
     downloadedTempFiles = await downloadFacePhotosToTemp(brand);
     faceImagePaths = downloadedTempFiles;
@@ -4354,7 +4383,13 @@ app.post('/api/generate-personalized-carousel', requireAuth, upload.array('faceI
         const finalPrompt = refined || scenarioPrompt;
 
         let buffer;
-        if (useFlux) {
+        if (loraPerson) {
+          const loraPrompt = `${loraPerson.loraTriggerWord} ${finalPrompt}`;
+          buffer = await generateWithLoRA(loraPerson.loraUrl, loraPrompt, {
+            loraModel: loraPerson.loraModel,
+            falKey: req.headers['x-fal-key'],
+          });
+        } else if (useFlux) {
           buffer = await generateWithFlux(faceImagePaths, finalPrompt, { falKey: req.headers['x-fal-key'] });
         } else {
           const refBuffer = await fs.readFile(faceImagePaths[0]);
@@ -4606,7 +4641,12 @@ app.get('/api/persons', requireAuth, async (req, res) => {
     for (const doc of snap.docs) {
       const data = doc.data();
       const photos = await getFacePhotoUrls(data.photos || []);
-      persons.push({ id: doc.id, name: data.name, photos, createdAt: data.createdAt, updatedAt: data.updatedAt });
+      persons.push({
+        id: doc.id, name: data.name, photos, createdAt: data.createdAt, updatedAt: data.updatedAt,
+        loraStatus: data.loraStatus || null, loraUrl: data.loraUrl || null,
+        loraTrainedAt: data.loraTrainedAt || null, loraError: data.loraError || null,
+        loraModel: data.loraModel || null, loraTriggerWord: data.loraTriggerWord || null,
+      });
     }
     res.json({ persons });
   } catch (error) {
@@ -4686,7 +4726,7 @@ app.delete('/api/persons/:id', requireAuth, async (req, res) => {
 });
 
 // Upload photos to person
-app.post('/api/persons/:id/photos', requireAuth, upload.array('photos', 5), async (req, res) => {
+app.post('/api/persons/:id/photos', requireAuth, upload.array('photos', 20), async (req, res) => {
   try {
     if (!db) return res.status(503).json({ error: 'Database not available' });
     const person = await getPersonById(req.params.id, req.user.uid);
@@ -4695,9 +4735,9 @@ app.post('/api/persons/:id/photos', requireAuth, upload.array('photos', 5), asyn
     if (!req.files || req.files.length === 0) return res.status(400).json({ error: 'No photos uploaded' });
 
     const existing = person.photos || [];
-    if (existing.length + req.files.length > 5) {
+    if (existing.length + req.files.length > 20) {
       for (const f of req.files) await fs.unlink(f.path).catch(() => {});
-      return res.status(400).json({ error: `Too many photos. You have ${existing.length}, max is 5.` });
+      return res.status(400).json({ error: `Too many photos. You have ${existing.length}, max is 20.` });
     }
 
     const newPhotos = [];
@@ -4776,6 +4816,229 @@ app.delete('/api/persons/:id/photos/:idx', requireAuth, async (req, res) => {
     res.json({ ok: true, photos: withUrls });
   } catch (error) {
     console.error('[Person Photo Delete]', error);
+    res.status(500).json({ error: safeErrorMessage(error) });
+  }
+});
+
+// --- LoRA Training ---
+
+// Train LoRA model for a person
+app.post('/api/persons/:id/train-lora', requireAuth, async (req, res) => {
+  try {
+    if (!db) return res.status(503).json({ error: 'Database not available' });
+    const falKey = req.headers['x-fal-key'];
+    if (!falKey) return res.status(400).json({ error: 'Fal.ai API key required for LoRA training. Add it in Settings.' });
+
+    const person = await getPersonById(req.params.id, req.user.uid);
+    if (!person) return res.status(404).json({ error: 'Person not found' });
+
+    if (person.loraStatus === 'queued' || person.loraStatus === 'training') {
+      return res.status(400).json({ error: 'Training already in progress' });
+    }
+
+    const photos = person.photos || [];
+    if (photos.length < 4) {
+      return res.status(400).json({ error: `Need at least 4 photos for LoRA training. You have ${photos.length}.` });
+    }
+
+    const { model } = req.body || {};
+    const trainerModel = ['flux-2', 'portrait', 'fast'].includes(model) ? model : 'flux-2';
+
+    // Download person photos to temp
+    const tmpPaths = await downloadPersonPhotosToTemp(person);
+
+    try {
+      // Create zip from photos
+      const zipPath = path.join(uploadsDir, `lora_${req.params.id}_${Date.now()}.zip`);
+      await new Promise((resolve, reject) => {
+        const output = createWriteStream(zipPath);
+        const archive = archiver('zip', { zlib: { level: 6 } });
+        output.on('close', resolve);
+        archive.on('error', reject);
+        archive.pipe(output);
+        for (let i = 0; i < tmpPaths.length; i++) {
+          archive.file(tmpPaths[i], { name: `photo_${i + 1}.png` });
+        }
+        archive.finalize();
+      });
+
+      // Upload zip to Firebase Storage
+      const zipStoragePath = `users/${req.user.uid}/persons/${req.params.id}/training/photos.zip`;
+      let zipUrl;
+      if (bucket) {
+        const zipBuffer = await fs.readFile(zipPath);
+        const storageFile = bucket.file(zipStoragePath);
+        await storageFile.save(zipBuffer, { metadata: { contentType: 'application/zip' } });
+        await storageFile.makePublic();
+        zipUrl = `https://storage.googleapis.com/${bucket.name}/${zipStoragePath}`;
+      } else {
+        return res.status(503).json({ error: 'Firebase Storage required for LoRA training' });
+      }
+
+      // Generate trigger word
+      const triggerWord = `PERSON_${crypto.randomUUID().slice(0, 6)}`;
+
+      // Build training request based on model
+      const trainerEndpoints = {
+        'flux-2': 'fal-ai/flux-2-trainer',
+        'portrait': 'fal-ai/flux-lora-portrait-trainer',
+        'fast': 'fal-ai/flux-lora-fast-training',
+      };
+      const endpoint = trainerEndpoints[trainerModel];
+
+      let trainingInput = { images_data_url: zipUrl };
+      if (trainerModel === 'flux-2') {
+        trainingInput.trigger_word = triggerWord;
+        trainingInput.steps = 1000;
+        trainingInput.learning_rate = 0.00005;
+      } else if (trainerModel === 'portrait') {
+        trainingInput.trigger_word = triggerWord;
+        trainingInput.steps = 2500;
+        trainingInput.learning_rate = 0.00009;
+        trainingInput.subject_crop = true;
+      } else if (trainerModel === 'fast') {
+        trainingInput.trigger_word = triggerWord;
+        trainingInput.steps = 1000;
+        trainingInput.is_style = false;
+        trainingInput.create_masks = true;
+      }
+
+      // Submit to fal.ai queue
+      const submitRes = await fetch(`https://queue.fal.run/${endpoint}`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Key ${falKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(trainingInput),
+      });
+
+      if (!submitRes.ok) {
+        const errText = await submitRes.text();
+        throw new Error(`fal.ai training submit error (${submitRes.status}): ${errText}`);
+      }
+
+      const submitData = await submitRes.json();
+      const { request_id, status_url, response_url } = submitData;
+      if (!request_id) throw new Error('fal.ai did not return a request_id');
+
+      // Store training state in Firestore
+      await db.collection('carousel_persons').doc(req.params.id).update({
+        loraStatus: 'queued',
+        loraModel: trainerModel,
+        loraTriggerWord: triggerWord,
+        loraRequestId: request_id,
+        loraStatusUrl: status_url,
+        loraResponseUrl: response_url,
+        loraError: null,
+        loraUrl: null,
+        loraConfigUrl: null,
+        loraTrainedAt: null,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      console.log(`[LoRA Train] Person "${person.name}" | model=${trainerModel} | request_id=${request_id}`);
+
+      // Cleanup
+      await fs.unlink(zipPath).catch(() => {});
+      await cleanupTempFiles(tmpPaths);
+
+      res.json({ ok: true, status: 'queued', requestId: request_id });
+    } catch (err) {
+      await cleanupTempFiles(tmpPaths);
+      throw err;
+    }
+  } catch (error) {
+    console.error('[LoRA Train]', error);
+    res.status(500).json({ error: safeErrorMessage(error, 'LoRA training failed') });
+  }
+});
+
+// Poll LoRA training status
+app.get('/api/persons/:id/lora-status', requireAuth, async (req, res) => {
+  try {
+    if (!db) return res.status(503).json({ error: 'Database not available' });
+    const falKey = req.headers['x-fal-key'];
+
+    const person = await getPersonById(req.params.id, req.user.uid);
+    if (!person) return res.status(404).json({ error: 'Person not found' });
+
+    // If already terminal state, return cached
+    if (!person.loraStatus || person.loraStatus === 'ready' || person.loraStatus === 'failed') {
+      return res.json({
+        status: person.loraStatus || null,
+        loraUrl: person.loraUrl || null,
+        loraModel: person.loraModel || null,
+        loraError: person.loraError || null,
+        loraTrainedAt: person.loraTrainedAt || null,
+      });
+    }
+
+    // Poll fal.ai for current status
+    if (!person.loraStatusUrl || !falKey) {
+      return res.json({ status: person.loraStatus, loraModel: person.loraModel });
+    }
+
+    const statusRes = await fetch(person.loraStatusUrl, {
+      headers: { 'Authorization': `Key ${falKey}` },
+    });
+
+    if (!statusRes.ok) {
+      return res.json({ status: person.loraStatus, loraModel: person.loraModel });
+    }
+
+    const statusData = await statusRes.json();
+
+    if (statusData.status === 'COMPLETED') {
+      // Fetch the result
+      const resultRes = await fetch(person.loraResponseUrl, {
+        headers: { 'Authorization': `Key ${falKey}` },
+      });
+      if (!resultRes.ok) throw new Error('Failed to fetch training result');
+      const result = await resultRes.json();
+
+      const loraUrl = result.diffusers_lora_file?.url;
+      const loraConfigUrl = result.config_file?.url;
+
+      if (!loraUrl) throw new Error('No LoRA weights URL in training result');
+
+      await db.collection('carousel_persons').doc(req.params.id).update({
+        loraStatus: 'ready',
+        loraUrl,
+        loraConfigUrl: loraConfigUrl || null,
+        loraTrainedAt: admin.firestore.FieldValue.serverTimestamp(),
+        loraRequestId: null,
+        loraStatusUrl: null,
+        loraResponseUrl: null,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      console.log(`[LoRA Train] Person "${person.name}" training complete — ${loraUrl}`);
+      return res.json({ status: 'ready', loraUrl, loraModel: person.loraModel, loraTrainedAt: new Date().toISOString() });
+    }
+
+    if (statusData.status === 'FAILED') {
+      const errorMsg = statusData.error || 'Training failed';
+      await db.collection('carousel_persons').doc(req.params.id).update({
+        loraStatus: 'failed',
+        loraError: errorMsg,
+        loraRequestId: null,
+        loraStatusUrl: null,
+        loraResponseUrl: null,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      console.error(`[LoRA Train] Person "${person.name}" training failed:`, errorMsg);
+      return res.json({ status: 'failed', loraError: errorMsg, loraModel: person.loraModel });
+    }
+
+    // Still in progress
+    const newStatus = statusData.status === 'IN_PROGRESS' ? 'training' : 'queued';
+    if (newStatus !== person.loraStatus) {
+      await db.collection('carousel_persons').doc(req.params.id).update({ loraStatus: newStatus });
+    }
+    return res.json({ status: newStatus, loraModel: person.loraModel });
+  } catch (error) {
+    console.error('[LoRA Status]', error);
     res.status(500).json({ error: safeErrorMessage(error) });
   }
 });
