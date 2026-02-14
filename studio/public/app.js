@@ -79,11 +79,13 @@ async function authFetch(url, opts = {}) {
   const _prefix = getKeyPrefix();
   const openaiKey = localStorage.getItem(_prefix + 'openai_key');
   const anthropicKey = localStorage.getItem(_prefix + 'anthropic_key');
+  const geminiKey = localStorage.getItem(_prefix + 'gemini_key');
   const falKey = localStorage.getItem(_prefix + 'fal_key');
   const tiktokClientKey = localStorage.getItem(_prefix + 'tiktok_client_key');
   const tiktokClientSecret = localStorage.getItem(_prefix + 'tiktok_client_secret');
   if (openaiKey) opts.headers['X-OpenAI-Key'] = openaiKey;
   if (anthropicKey) opts.headers['X-Anthropic-Key'] = anthropicKey;
+  if (geminiKey) opts.headers['X-Gemini-Key'] = geminiKey;
   if (falKey) opts.headers['X-Fal-Key'] = falKey;
   if (tiktokClientKey) opts.headers['X-TikTok-Client-Key'] = tiktokClientKey;
   if (tiktokClientSecret) opts.headers['X-TikTok-Client-Secret'] = tiktokClientSecret;
@@ -118,7 +120,17 @@ async function authFetch(url, opts = {}) {
       const data = await res.json();
       brands = data.brands || [];
       if (brands.length > 0) {
-        currentBrand = brands[0].id;
+        // Restore saved brand if it still exists in user's list
+        let restoredBrand = null;
+        if (savedSessionRaw) {
+          try {
+            const s = JSON.parse(savedSessionRaw);
+            if (s.currentBrand && brands.some(b => b.id === s.currentBrand)) {
+              restoredBrand = s.currentBrand;
+            }
+          } catch {}
+        }
+        currentBrand = restoredBrand || brands[0].id;
       } else {
         currentBrand = null;
       }
@@ -260,6 +272,7 @@ let screenshotImageFilename = null;
 let slideReferenceImages = {}; // { slideIndex: { filename, displayName } }
 let generateAbort = null; // AbortController for in-flight single-slide generation
 let userPersons = []; // User-level persons for face-consistent photo generation
+let selectedFaceStudioPerson = null; // Currently selected person in Face Studio
 
 function resetAppState() {
   // Core brand/content state
@@ -288,6 +301,7 @@ function resetAppState() {
 
   // Persons
   userPersons = [];
+  selectedFaceStudioPerson = null;
 
   // Reference images
   referenceImageFilename = null;
@@ -460,6 +474,12 @@ function getSelectedImageModel() {
   return imageModelSelect ? imageModelSelect.value : 'gpt-image-1.5';
 }
 
+// Text model selector
+const textModelSelect = document.getElementById('text-model-select');
+function getSelectedTextModel() {
+  return textModelSelect ? textModelSelect.value : 'claude-haiku-4-5-20251001';
+}
+
 // Loading spinner refs
 const loadingSpinner = document.getElementById('loading-spinner');
 const spinnerText = document.getElementById('spinner-text');
@@ -543,6 +563,7 @@ let selectedElement = 'headline'; // which element is selected for dragging
 // --- Init (handled by onAuthStateChanged above) ---
 
 // --- API Key Settings ---
+const settingsGeminiKey = document.getElementById('settings-gemini-key');
 const settingsFalKey = document.getElementById('settings-fal-key');
 const settingsTiktokClientKey = document.getElementById('settings-tiktok-client-key');
 const settingsTiktokClientSecret = document.getElementById('settings-tiktok-client-secret');
@@ -573,11 +594,13 @@ function loadApiKeysFromStorage() {
   const prefix = getKeyPrefix();
   const openai = localStorage.getItem(prefix + 'openai_key') || '';
   const anthropic = localStorage.getItem(prefix + 'anthropic_key') || '';
+  const gemini = localStorage.getItem(prefix + 'gemini_key') || '';
   const fal = localStorage.getItem(prefix + 'fal_key') || '';
   const tiktokKey = localStorage.getItem(prefix + 'tiktok_client_key') || '';
   const tiktokSecret = localStorage.getItem(prefix + 'tiktok_client_secret') || '';
   settingsOpenaiKey.value = openai;
   settingsAnthropicKey.value = anthropic;
+  if (settingsGeminiKey) settingsGeminiKey.value = gemini;
   if (settingsFalKey) settingsFalKey.value = fal;
   if (settingsTiktokClientKey) settingsTiktokClientKey.value = tiktokKey;
   if (settingsTiktokClientSecret) settingsTiktokClientSecret.value = tiktokSecret;
@@ -626,6 +649,7 @@ settingsModal.addEventListener('click', (e) => {
 settingsSaveBtn.addEventListener('click', async () => {
   const openaiKey = settingsOpenaiKey.value.trim();
   const anthropicKey = settingsAnthropicKey.value.trim();
+  const geminiKey = settingsGeminiKey ? settingsGeminiKey.value.trim() : '';
   const falKey = settingsFalKey ? settingsFalKey.value.trim() : '';
 
   const prefix = getKeyPrefix();
@@ -634,6 +658,9 @@ settingsSaveBtn.addEventListener('click', async () => {
 
   if (anthropicKey) localStorage.setItem(prefix + 'anthropic_key', anthropicKey);
   else localStorage.removeItem(prefix + 'anthropic_key');
+
+  if (geminiKey) localStorage.setItem(prefix + 'gemini_key', geminiKey);
+  else localStorage.removeItem(prefix + 'gemini_key');
 
   if (falKey) localStorage.setItem(prefix + 'fal_key', falKey);
   else localStorage.removeItem(prefix + 'fal_key');
@@ -2152,6 +2179,7 @@ async function generateMoreIdeas() {
         brand: currentBrand, existingTitles, numIdeas: 1, startIndex,
         userTopic: document.getElementById('sidebar-prompt-input')?.value?.trim() || '',
         slidesPerIdea: parseInt(document.getElementById('sidebar-slides-input')?.value) || 0,
+        textModel: getSelectedTextModel(),
       }),
     });
     const data = await res.json();
@@ -3633,6 +3661,7 @@ function buildSlidePayload(slide, slideIndex) {
     quality: form.elements.quality.value,
     brand: currentBrand,
     imageModel: getSelectedImageModel(),
+    textModel: getSelectedTextModel(),
   };
 
   if (payload.slideType === 'photo') {
@@ -3819,6 +3848,7 @@ applyEditBtn.addEventListener('click', async () => {
         instructions,
         quality: form.elements.quality.value,
         imageModel: getSelectedImageModel(),
+        textModel: getSelectedTextModel(),
         brand: currentBrand,
       }),
       signal,
@@ -3943,6 +3973,7 @@ async function startBatchGeneration() {
     quality: form.elements.quality.value,
     brand: currentBrand,
     imageModel: getSelectedImageModel(),
+    textModel: getSelectedTextModel(),
   };
 
   progressSection.style.display = 'block';
@@ -4152,6 +4183,7 @@ freeformGenerateBtn.addEventListener('click', async () => {
         prompt,
         brand: currentBrand,
         slideCount: freeformSlideCount.value,
+        textModel: getSelectedTextModel(),
       }),
     });
 
@@ -4251,7 +4283,7 @@ autoGenerateBtn.addEventListener('click', async () => {
   try {
     const res = await authFetch('/api/generate-content-ideas', {
       method: 'POST',
-      body: JSON.stringify({ brand: currentBrand }),
+      body: JSON.stringify({ brand: currentBrand, textModel: getSelectedTextModel() }),
     });
 
     const data = await res.json();
@@ -4439,7 +4471,8 @@ document.getElementById('generate-meme-btn').addEventListener('click', async () 
         description,
         aspectRatio: memeAspectRatio.value,
         brand: currentBrand,
-        imageModel: 'gpt',
+        imageModel: getSelectedImageModel(),
+        textModel: getSelectedTextModel(),
         includeOwl: true,
         owlPosition: 'bottom-right',
       }),
@@ -5080,7 +5113,10 @@ function restoreSession(rawSession) {
     const raw = rawSession || localStorage.getItem(SESSION_KEY);
     if (!raw) return;
     const session = JSON.parse(raw);
-    if (session.currentBrand !== currentBrand) return; // brand changed
+    if (session.currentBrand !== currentBrand) {
+      console.warn('[Session] Brand mismatch — saved:', session.currentBrand, 'current:', currentBrand);
+      return;
+    }
     if (session.generatedImages && Object.keys(session.generatedImages).length > 0) {
       generatedImages = session.generatedImages;
     }
@@ -5109,7 +5145,7 @@ function restoreSession(rawSession) {
         updateGallery();
       }
     }
-  } catch { /* parse error — ignore */ }
+  } catch (err) { console.warn('[Session] Restore failed:', err); }
 }
 
 function clearSession() {
