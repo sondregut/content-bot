@@ -1274,6 +1274,21 @@ function parseContentIdeas(markdown, brandId, brandName) {
 
 // --- API Routes ---
 
+// Firebase client config (unauthenticated — needed before auth is available)
+app.get('/api/firebase-config', (req, res) => {
+  const apiKey = process.env.FIREBASE_API_KEY;
+  if (!apiKey) return res.json({ available: false });
+  res.json({
+    available: true,
+    apiKey,
+    authDomain: process.env.FIREBASE_AUTH_DOMAIN,
+    projectId: process.env.FIREBASE_PROJECT_ID,
+    storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
+    messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID,
+    appId: process.env.FIREBASE_APP_ID,
+  });
+});
+
 // List available brands (hardcoded for admins only + user's Firestore brands)
 app.get('/api/brands', requireAuth, async (req, res) => {
   try {

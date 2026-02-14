@@ -23,8 +23,15 @@ async function authFetch(url, opts = {}) {
   return fetch(url, opts);
 }
 
-// Auth state listener
-firebase.auth().onAuthStateChanged(async (user) => {
+// Auth state listener — wait for Firebase config to load from server
+(window.__firebaseReady || Promise.resolve()).then(() => {
+  if (!firebase.apps.length) {
+    // Firebase not configured (local dev without env vars) — show app without auth
+    document.getElementById('login-overlay').classList.remove('visible');
+    document.getElementById('app-shell').style.display = 'flex';
+    return;
+  }
+  firebase.auth().onAuthStateChanged(async (user) => {
   const overlay = document.getElementById('login-overlay');
   const appShell = document.getElementById('app-shell');
 
@@ -63,6 +70,7 @@ firebase.auth().onAuthStateChanged(async (user) => {
     overlay.classList.add('visible');
     appShell.style.display = 'none';
   }
+  });
 });
 
 // Login / Create Account toggle

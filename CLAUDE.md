@@ -22,7 +22,12 @@ Required in `studio/.env`:
 OPENAI_API_KEY=         # gpt-image-1.5 generation
 ANTHROPIC_API_KEY=      # Claude prompt refinement + freeform content
 FIREBASE_SERVICE_ACCOUNT=  # JSON string (escaped newlines)
-FIREBASE_STORAGE_BUCKET=
+FIREBASE_API_KEY=          # Firebase client API key
+FIREBASE_AUTH_DOMAIN=      # e.g. myproject.firebaseapp.com
+FIREBASE_PROJECT_ID=       # Firebase project ID
+FIREBASE_STORAGE_BUCKET=   # e.g. myproject.firebasestorage.app
+FIREBASE_MESSAGING_SENDER_ID=  # Firebase messaging sender ID
+FIREBASE_APP_ID=           # Firebase web app ID
 ```
 
 ## Deployment
@@ -53,6 +58,7 @@ Vercel auto-deploys from `main` branch. Config in root `vercel.json`.
 
 | Method | Path | Auth | Purpose |
 |--------|------|------|---------|
+| GET | `/api/firebase-config` | No | Firebase client config from env vars |
 | GET | `/api/brands` | Yes | List user's Firestore brands |
 | POST | `/api/brands` | Yes | Create brand in Firestore |
 | PUT | `/api/brands/:id` | Yes | Update own brand |

@@ -10,14 +10,10 @@
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
     <script>
-      firebase.initializeApp({
-        apiKey: "AIzaSyCJYaaGX94krV32Exuo7Tu-B6n93QOPgo8",
-        authDomain: "fabled-emissary-476021-g0.firebaseapp.com",
-        projectId: "fabled-emissary-476021-g0",
-        storageBucket: "fabled-emissary-476021-g0.firebasestorage.app",
-        messagingSenderId: "343836617249",
-        appId: "1:343836617249:web:526cfa5f1af63f75bc1160"
-      });
+      window.__firebaseReady = fetch('/api/firebase-config')
+        .then(r => r.json())
+        .then(cfg => { if (cfg.available) firebase.initializeApp(cfg); })
+        .catch(() => {});
     </script>
   </head>
   <body>
