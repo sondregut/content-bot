@@ -1159,7 +1159,7 @@ function buildMemePrompt(data, brand) {
     '',
     'FORMAT & STYLE:',
     '- This is an internet MEME — not a polished ad, not a carousel slide, not a brand graphic.',
-    '- If the concept references a known meme template (Drake, distracted boyfriend, expanding brain, "nobody:", POV, comparison, etc.), follow that template\'s exact visual structure and panel layout.',
+    '- If the concept references a meme format (two-panel approval/disapproval, expanding brain tiers, "nobody:" reaction, POV, side-by-side comparison, etc.), follow that format\'s visual structure and panel layout. Do NOT depict real celebrities or identifiable public figures — use generic illustrated or cartoon characters instead.',
     '- The aesthetic must feel native to social media — raw, authentic, shareable. Not over-produced.',
     '- Fill the entire canvas. No safe zones, no padding, no decorative borders.',
     '',
@@ -1315,7 +1315,8 @@ TEXT RENDERING (your #1 priority):
 - Demand verbatim rendering: "no extra characters, exactly as written"
 
 MEME FORMAT:
-- Preserve the meme template structure — if it's a Drake meme, keep the two-panel layout
+- Preserve the meme template structure (e.g. two-panel approval/disapproval, tier list, comparison grid)
+- CRITICAL: Replace any references to real people (Drake, celebrities, public figures) with generic characters — OpenAI will reject prompts depicting real people
 - Do NOT turn it into a polished brand ad or carousel slide
 - Keep the raw, authentic, internet-native aesthetic
 - Fill the entire canvas — no safe zones, no padding
@@ -1350,7 +1351,7 @@ async function refinePromptWithClaude(rawPrompt, slideType, formData, brand) {
     const systemPrompt = `${brand.systemPrompt}\n\n${refinementInstructions}`;
     let context;
     if (slideType === 'meme') {
-      context = `This is a MEME for ${brand.name}. It must look like a genuine internet meme — informal, humorous, culturally aware. Do NOT apply carousel rules (no safe zones, no TikTok composition, no professional typography). Preserve the meme format and humor. Only refine for text legibility and spelling accuracy. Keep the raw, authentic meme aesthetic.`;
+      context = `This is a MEME for ${brand.name}. It must look like a genuine internet meme — informal, humorous, culturally aware. Do NOT apply carousel rules (no safe zones, no TikTok composition, no professional typography). Preserve the meme format and humor. Only refine for text legibility and spelling accuracy. Keep the raw, authentic meme aesthetic. CRITICAL: If the user prompt mentions real people by name (Drake, celebrities, public figures), replace them with generic characters — OpenAI will reject prompts depicting real people.`;
     } else if (slideType === 'photo') {
       context = `This is a photo-led slide for ${brand.name} featuring a ${formData.sport || 'athlete'} scene with text overlay.`;
     } else {
@@ -2688,14 +2689,14 @@ Website: ${websiteUrl}
 Website content: ${websiteText}
 
 Requirements:
-- Pick a specific meme format (Drake, expanding brain, distracted boyfriend, comparison, "nobody:", POV, etc.)
+- Pick a specific meme format (two-panel approval/disapproval, expanding brain tiers, comparison, "nobody:" reaction, POV, etc.) — do NOT reference real celebrities like Drake or specific actors
 - The joke should be about the brand's actual product, features, or industry — something their audience would relate to
 - Include exact text for each panel/section of the meme
 - Keep it funny, relatable, and shareable — not corporate or salesy
 - The meme should make sense even to people who don't know the brand
 
 Return ONLY the meme description (no explanation, no preamble). Example format:
-"Drake meme — top: manually tracking workouts in a notebook, bottom: letting [brand] auto-track everything"`,
+"Two-panel approval meme — top (disapproval): manually tracking workouts in a notebook, bottom (approval): letting [brand] auto-track everything"`,
           }],
         });
 
@@ -2719,13 +2720,36 @@ Return ONLY the meme description (no explanation, no preamble). Example format:
 
       console.log(`[Meme] ${brand.name} | ${refinedPrompt ? 'refined' : 'raw'} | ${data.aspectRatio || '1:1'}`);
 
-      const response = await openai.images.generate({
-        model: resolveImageModel(data.imageModel),
-        prompt,
-        size: openaiSize,
-        quality: data.quality || 'high',
-        output_format: 'png',
-      });
+      let response;
+      try {
+        response = await openai.images.generate({
+          model: resolveImageModel(data.imageModel),
+          prompt,
+          size: openaiSize,
+          quality: data.quality || 'high',
+          output_format: 'png',
+        });
+      } catch (genErr) {
+        if (genErr.message?.includes('safety') || genErr.status === 400) {
+          console.warn(`[Meme] Safety rejection, retrying with sanitized prompt`);
+          const sanitized = await anthropic?.messages.create({
+            model: 'claude-haiku-4-5-20251001',
+            max_tokens: 1024,
+            messages: [{ role: 'user', content: `This image prompt was rejected by OpenAI's safety system. Rewrite it to avoid depicting real people, celebrities, or copyrighted characters. Keep the same meme concept and humor but use generic/illustrated characters instead.\n\nOriginal prompt:\n${prompt}` }],
+          });
+          const safePrompt = sanitized?.content?.[0]?.text?.trim();
+          if (!safePrompt) throw genErr;
+          response = await openai.images.generate({
+            model: resolveImageModel(data.imageModel),
+            prompt: safePrompt,
+            size: openaiSize,
+            quality: data.quality || 'high',
+            output_format: 'png',
+          });
+        } else {
+          throw genErr;
+        }
+      }
 
       const b64 = response.data?.[0]?.b64_json;
       if (!b64) throw new Error('No image returned from API');
@@ -2830,7 +2854,11 @@ Return ONLY the meme description (no explanation, no preamble). Example format:
     });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ error: safeErrorMessage(error, 'Generation failed') });
+    const isSafety = error.message?.includes('safety') || error.message?.includes('rejected');
+    const msg = isSafety
+      ? 'OpenAI rejected this prompt — try avoiding references to real people or celebrities.'
+      : safeErrorMessage(error, 'Generation failed');
+    res.status(isSafety ? 422 : 500).json({ error: msg });
   }
 });
 
