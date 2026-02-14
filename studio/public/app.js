@@ -681,26 +681,14 @@ settingsSaveBtn.addEventListener('click', async () => {
   checkTikTokStatus();
 });
 
-// --- Persons Management ---
-const personsSettingsToggle = document.getElementById('persons-settings-toggle');
-const personsSettingsSection = document.getElementById('persons-settings-section');
-const personsList = document.getElementById('persons-list');
-const addPersonBtn = document.getElementById('add-person-btn');
-
-if (personsSettingsToggle) {
-  personsSettingsToggle.addEventListener('click', () => {
-    const isOpen = personsSettingsSection.style.display !== 'none';
-    personsSettingsSection.style.display = isOpen ? 'none' : 'block';
-    personsSettingsToggle.classList.toggle('open', !isOpen);
-  });
-}
+// --- Persons Management (Face Studio) ---
 
 async function loadUserPersons() {
   try {
     const res = await authFetch('/api/persons');
     const data = await res.json();
     userPersons = data.persons || [];
-    renderPersonsList();
+    renderFaceStudioPersons();
     populatePersonSelectors();
   } catch (err) {
     console.error('Failed to load persons:', err);
@@ -708,198 +696,44 @@ async function loadUserPersons() {
   }
 }
 
-function renderPersonsList() {
-  if (!personsList) return;
-  personsList.innerHTML = '';
-  if (userPersons.length === 0) {
-    personsList.innerHTML = '<p class="field-hint">No people added yet.</p>';
-    return;
-  }
+function renderFaceStudioPersons() {
+  const container = document.getElementById('face-studio-people');
+  if (!container) return;
+  container.innerHTML = '';
+
   for (const person of userPersons) {
     const card = document.createElement('div');
-    card.className = 'person-card';
+    card.className = 'face-studio-person-card' + (selectedFaceStudioPerson === person.id ? ' active' : '');
+    card.dataset.personId = person.id;
     const photoCount = person.photos?.length || 0;
+    const firstPhoto = person.photos?.find(p => p.url);
     const ls = person.loraStatus;
 
-    let loraHtml = '';
-    if (ls === 'ready') {
-      const modelLabel = person.loraModel === 'flux-2' ? 'Flux 2' : person.loraModel === 'portrait' ? 'Portrait' : 'Fast';
-      loraHtml = `<div class="person-lora-status lora-ready">
-        <span class="lora-badge ready">LoRA Trained (${modelLabel})</span>
-        <button class="btn small person-retrain-btn" data-person-id="${person.id}">Retrain</button>
-      </div>`;
-    } else if (ls === 'queued' || ls === 'training') {
-      loraHtml = `<div class="person-lora-status lora-training">
-        <span class="lora-badge training">${ls === 'training' ? 'Training...' : 'Queued...'}</span>
-        <span class="lora-spinner"></span>
-      </div>`;
-    } else if (ls === 'failed') {
-      loraHtml = `<div class="person-lora-status lora-failed">
-        <span class="lora-badge failed">Training Failed</span>
-        <button class="btn small person-train-btn" data-person-id="${person.id}">Retry</button>
-      </div>`;
-    } else {
-      const canTrain = photoCount >= 4;
-      loraHtml = `<div class="person-lora-status">
-        <select class="person-train-model" data-person-id="${person.id}">
-          <option value="flux-2">Flux 2 (~$8)</option>
-          <option value="portrait">Portrait (~$6)</option>
-          <option value="fast">Fast ($2)</option>
-        </select>
-        <button class="btn small primary person-train-btn" data-person-id="${person.id}" ${canTrain ? '' : 'disabled'}>Train LoRA</button>
-        ${canTrain ? '' : '<span class="field-hint">Need 4+ photos</span>'}
-      </div>`;
-    }
+    let statusBadge = '';
+    if (ls === 'ready') statusBadge = '<span class="lora-badge ready">LoRA</span>';
+    else if (ls === 'queued' || ls === 'training') statusBadge = '<span class="lora-badge training">Training</span>';
+    else if (ls === 'failed') statusBadge = '<span class="lora-badge failed">Failed</span>';
 
     card.innerHTML = `
-      <div class="person-card-header">
-        <input type="text" value="${escapeHtml(person.name)}" data-person-id="${person.id}" class="person-name-input" />
-        <button type="button" class="person-delete-btn" data-person-id="${person.id}">Delete</button>
-      </div>
-      <div class="person-photos-grid" data-person-id="${person.id}">
-        ${(person.photos || []).map((p, idx) =>
-          p.url ? `<div class="face-photo-thumb"><img src="${p.url}" alt="Photo" /><button class="face-photo-remove" data-person-id="${person.id}" data-idx="${idx}" title="Remove">&times;</button></div>` : ''
-        ).join('')}
-        ${photoCount < 20 ? `<button type="button" class="face-add-btn person-photo-add" data-person-id="${person.id}" title="Add photo">+</button>` : ''}
-      </div>
-      <div class="person-photo-count">${photoCount} / 20 photos</div>
-      ${loraHtml}
+      ${firstPhoto ? `<img class="face-studio-person-thumb" src="${firstPhoto.url}" alt="${escapeHtml(person.name)}" />` : '<div class="face-studio-person-thumb face-studio-person-placeholder">?</div>'}
+      <div class="face-studio-person-name">${escapeHtml(person.name)}</div>
+      <div class="face-studio-person-meta">${photoCount} photo${photoCount !== 1 ? 's' : ''}</div>
+      ${statusBadge}
     `;
-    personsList.appendChild(card);
+    card.addEventListener('click', () => {
+      selectedFaceStudioPerson = selectedFaceStudioPerson === person.id ? null : person.id;
+      renderFaceStudioPersons();
+      renderFaceStudioPersonDetail();
+    });
+    container.appendChild(card);
   }
 
-  // Name edit handlers (blur = save)
-  personsList.querySelectorAll('.person-name-input').forEach(input => {
-    input.addEventListener('blur', async () => {
-      const personId = input.dataset.personId;
-      const newName = input.value.trim();
-      if (!newName) return;
-      try {
-        await authFetch(`/api/persons/${personId}`, {
-          method: 'PUT',
-          body: JSON.stringify({ name: newName }),
-        });
-        const person = userPersons.find(p => p.id === personId);
-        if (person) person.name = newName;
-        populatePersonSelectors();
-      } catch { /* ignore */ }
-    });
-  });
-
-  // Delete person handlers
-  personsList.querySelectorAll('.person-delete-btn').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const personId = btn.dataset.personId;
-      if (!confirm('Delete this person and all their photos?')) return;
-      try {
-        await authFetch(`/api/persons/${personId}`, { method: 'DELETE' });
-        userPersons = userPersons.filter(p => p.id !== personId);
-        renderPersonsList();
-        populatePersonSelectors();
-      } catch (err) {
-        console.error('Failed to delete person:', err);
-      }
-    });
-  });
-
-  // Delete individual photo handlers
-  personsList.querySelectorAll('.face-photo-remove').forEach(btn => {
-    btn.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      const personId = btn.dataset.personId;
-      const idx = btn.dataset.idx;
-      try {
-        const res = await authFetch(`/api/persons/${personId}/photos/${idx}`, { method: 'DELETE' });
-        const data = await res.json();
-        if (data.ok) {
-          const person = userPersons.find(p => p.id === personId);
-          if (person) person.photos = data.photos;
-          renderPersonsList();
-        }
-      } catch (err) {
-        console.error('Failed to delete photo:', err);
-      }
-    });
-  });
-
-  // Add photo handlers
-  personsList.querySelectorAll('.person-photo-add').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const personId = btn.dataset.personId;
-      const input = document.createElement('input');
-      input.type = 'file';
-      input.accept = 'image/*';
-      input.multiple = true;
-      input.addEventListener('change', async () => {
-        if (!input.files?.length) return;
-        const fd = new FormData();
-        for (const f of input.files) fd.append('photos', f);
-        btn.textContent = '...';
-        btn.disabled = true;
-        try {
-          const res = await authFetch(`/api/persons/${personId}/photos`, { method: 'POST', body: fd });
-          const data = await res.json();
-          if (data.ok) {
-            const person = userPersons.find(p => p.id === personId);
-            if (person) person.photos = data.photos;
-            renderPersonsList();
-          } else {
-            alert(data.error || 'Upload failed');
-          }
-        } catch (err) {
-          alert('Upload failed: ' + err.message);
-        }
-      });
-      input.click();
-    });
-  });
-
-  // LoRA train button handlers
-  personsList.querySelectorAll('.person-train-btn').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const personId = btn.dataset.personId;
-      const select = personsList.querySelector(`.person-train-model[data-person-id="${personId}"]`);
-      const model = select ? select.value : 'flux-2';
-      btn.disabled = true;
-      btn.textContent = 'Starting...';
-      try {
-        const res = await authFetch(`/api/persons/${personId}/train-lora`, {
-          method: 'POST',
-          body: JSON.stringify({ model }),
-        });
-        const data = await res.json();
-        if (data.ok) {
-          const person = userPersons.find(p => p.id === personId);
-          if (person) {
-            person.loraStatus = 'queued';
-            person.loraModel = model;
-          }
-          renderPersonsList();
-          startLoraPolling(personId);
-        } else {
-          alert(data.error || 'Training failed to start');
-          btn.disabled = false;
-          btn.textContent = 'Train LoRA';
-        }
-      } catch (err) {
-        alert('Training failed: ' + err.message);
-        btn.disabled = false;
-        btn.textContent = 'Train LoRA';
-      }
-    });
-  });
-
-  // LoRA retrain button handlers
-  personsList.querySelectorAll('.person-retrain-btn').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const personId = btn.dataset.personId;
-      const person = userPersons.find(p => p.id === personId);
-      if (person) {
-        person.loraStatus = null;
-        renderPersonsList();
-      }
-    });
-  });
+  // Add person card
+  const addCard = document.createElement('div');
+  addCard.className = 'face-studio-person-card face-studio-add-card';
+  addCard.innerHTML = '<span style="font-size:1.5rem">+</span><span style="font-size:0.75rem">Add Person</span>';
+  addCard.addEventListener('click', addFaceStudioPerson);
+  container.appendChild(addCard);
 
   // Auto-resume polling for persons in training
   for (const person of userPersons) {
@@ -908,6 +742,227 @@ function renderPersonsList() {
     }
   }
 }
+
+async function addFaceStudioPerson() {
+  const name = prompt('Person name:');
+  if (!name?.trim()) return;
+  try {
+    const res = await authFetch('/api/persons', {
+      method: 'POST',
+      body: JSON.stringify({ name: name.trim() }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      userPersons.unshift(data.person);
+      selectedFaceStudioPerson = data.person.id;
+      renderFaceStudioPersons();
+      renderFaceStudioPersonDetail();
+      populatePersonSelectors();
+    } else {
+      alert(data.error || 'Failed to create person');
+    }
+  } catch (err) {
+    alert('Failed to create person: ' + err.message);
+  }
+}
+
+function renderFaceStudioPersonDetail() {
+  const detailPanel = document.getElementById('face-studio-person-detail');
+  const quickUpload = document.getElementById('face-studio-quick-upload');
+  if (!detailPanel) return;
+
+  if (!selectedFaceStudioPerson) {
+    detailPanel.style.display = 'none';
+    if (quickUpload) quickUpload.style.display = 'block';
+    return;
+  }
+
+  const person = userPersons.find(p => p.id === selectedFaceStudioPerson);
+  if (!person) {
+    selectedFaceStudioPerson = null;
+    detailPanel.style.display = 'none';
+    if (quickUpload) quickUpload.style.display = 'block';
+    return;
+  }
+
+  detailPanel.style.display = 'block';
+  if (quickUpload) quickUpload.style.display = 'none';
+
+  // Name input
+  const nameInput = document.getElementById('face-studio-person-name');
+  if (nameInput) {
+    nameInput.value = person.name;
+    nameInput.onblur = async () => {
+      const newName = nameInput.value.trim();
+      if (!newName || newName === person.name) return;
+      try {
+        await authFetch(`/api/persons/${person.id}`, {
+          method: 'PUT',
+          body: JSON.stringify({ name: newName }),
+        });
+        person.name = newName;
+        renderFaceStudioPersons();
+        populatePersonSelectors();
+      } catch { /* ignore */ }
+    };
+  }
+
+  // Delete button
+  const deleteBtn = document.getElementById('face-studio-person-delete');
+  if (deleteBtn) {
+    deleteBtn.onclick = async () => {
+      if (!confirm('Delete this person and all their photos?')) return;
+      try {
+        await authFetch(`/api/persons/${person.id}`, { method: 'DELETE' });
+        userPersons = userPersons.filter(p => p.id !== person.id);
+        selectedFaceStudioPerson = null;
+        renderFaceStudioPersons();
+        renderFaceStudioPersonDetail();
+        populatePersonSelectors();
+      } catch (err) {
+        console.error('Failed to delete person:', err);
+      }
+    };
+  }
+
+  // Photo grid
+  const photoGrid = document.getElementById('face-studio-photo-grid');
+  if (photoGrid) {
+    const photoCount = person.photos?.length || 0;
+    photoGrid.innerHTML = (person.photos || []).map((p, idx) =>
+      p.url ? `<div class="face-photo-thumb"><img src="${p.url}" alt="Photo" /><button class="face-photo-remove" data-idx="${idx}" title="Remove">&times;</button></div>` : ''
+    ).join('');
+
+    if (photoCount < 20) {
+      const addBtn = document.createElement('button');
+      addBtn.type = 'button';
+      addBtn.className = 'face-add-btn';
+      addBtn.title = 'Add photo';
+      addBtn.textContent = '+';
+      addBtn.addEventListener('click', () => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.multiple = true;
+        input.addEventListener('change', async () => {
+          if (!input.files?.length) return;
+          const fd = new FormData();
+          for (const f of input.files) fd.append('photos', f);
+          addBtn.textContent = '...';
+          addBtn.disabled = true;
+          try {
+            const res = await authFetch(`/api/persons/${person.id}/photos`, { method: 'POST', body: fd });
+            const data = await res.json();
+            if (data.ok) {
+              person.photos = data.photos;
+              renderFaceStudioPersons();
+              renderFaceStudioPersonDetail();
+            } else {
+              alert(data.error || 'Upload failed');
+            }
+          } catch (err) {
+            alert('Upload failed: ' + err.message);
+          }
+        });
+        input.click();
+      });
+      photoGrid.appendChild(addBtn);
+    }
+
+    // Photo count
+    const countEl = document.getElementById('face-studio-photo-count');
+    if (countEl) countEl.textContent = `${photoCount} / 20 photos`;
+
+    // Delete photo handlers
+    photoGrid.querySelectorAll('.face-photo-remove').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const idx = btn.dataset.idx;
+        try {
+          const res = await authFetch(`/api/persons/${person.id}/photos/${idx}`, { method: 'DELETE' });
+          const data = await res.json();
+          if (data.ok) {
+            person.photos = data.photos;
+            renderFaceStudioPersons();
+            renderFaceStudioPersonDetail();
+          }
+        } catch (err) {
+          console.error('Failed to delete photo:', err);
+        }
+      });
+    });
+  }
+
+  // LoRA section
+  const loraContainer = document.getElementById('face-studio-lora');
+  if (loraContainer) {
+    const photoCount = person.photos?.length || 0;
+    const ls = person.loraStatus;
+
+    if (ls === 'ready') {
+      const modelLabel = person.loraModel === 'flux-2' ? 'Flux 2' : person.loraModel === 'portrait' ? 'Portrait' : 'Fast';
+      loraContainer.innerHTML = `<div class="person-lora-status lora-ready">
+        <span class="lora-badge ready">LoRA Trained (${modelLabel})</span>
+        <button class="btn small" id="face-studio-retrain">Retrain</button>
+      </div>`;
+      document.getElementById('face-studio-retrain').addEventListener('click', () => {
+        person.loraStatus = null;
+        renderFaceStudioPersons();
+        renderFaceStudioPersonDetail();
+      });
+    } else if (ls === 'queued' || ls === 'training') {
+      loraContainer.innerHTML = `<div class="person-lora-status lora-training">
+        <span class="lora-badge training">${ls === 'training' ? 'Training...' : 'Queued...'}</span>
+        <span class="lora-spinner"></span>
+      </div>`;
+    } else if (ls === 'failed') {
+      loraContainer.innerHTML = `<div class="person-lora-status lora-failed">
+        <span class="lora-badge failed">Training Failed</span>
+        <button class="btn small" id="face-studio-retry-train">Retry</button>
+      </div>`;
+      document.getElementById('face-studio-retry-train').addEventListener('click', () => trainLoraForPerson(person));
+    } else {
+      const canTrain = photoCount >= 4;
+      loraContainer.innerHTML = `<div class="person-lora-status">
+        <select class="person-train-model" id="face-studio-train-model">
+          <option value="flux-2">Flux 2 (~$8)</option>
+          <option value="portrait">Portrait (~$6)</option>
+          <option value="fast">Fast ($2)</option>
+        </select>
+        <button class="btn small primary" id="face-studio-train-btn" ${canTrain ? '' : 'disabled'}>Train LoRA</button>
+        ${canTrain ? '' : '<span class="field-hint">Need 4+ photos</span>'}
+      </div>`;
+      const trainBtn = document.getElementById('face-studio-train-btn');
+      if (trainBtn) trainBtn.addEventListener('click', () => trainLoraForPerson(person));
+    }
+  }
+}
+
+async function trainLoraForPerson(person) {
+  const modelSelect = document.getElementById('face-studio-train-model');
+  const model = modelSelect ? modelSelect.value : 'flux-2';
+  try {
+    const res = await authFetch(`/api/persons/${person.id}/train-lora`, {
+      method: 'POST',
+      body: JSON.stringify({ model }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      person.loraStatus = 'queued';
+      person.loraModel = model;
+      renderFaceStudioPersons();
+      renderFaceStudioPersonDetail();
+      startLoraPolling(person.id);
+    } else {
+      alert(data.error || 'Training failed to start');
+    }
+  } catch (err) {
+    alert('Training failed: ' + err.message);
+  }
+}
+
+// "Add Person" button in Face Studio header
+document.getElementById('face-studio-add-person')?.addEventListener('click', addFaceStudioPerson);
 
 // --- LoRA Training Polling ---
 const loraPollingTimers = new Map();
@@ -943,7 +998,8 @@ async function pollLoraStatus(personId) {
       stopLoraPolling(personId);
     }
 
-    renderPersonsList();
+    renderFaceStudioPersons();
+    renderFaceStudioPersonDetail();
     populatePersonSelectors();
   } catch (err) {
     console.error('LoRA poll failed:', err);
@@ -951,28 +1007,24 @@ async function pollLoraStatus(personId) {
 }
 
 function populatePersonSelectors() {
-  const selectors = [
-    document.getElementById('person-select'),
-    document.getElementById('personalize-person-select'),
-  ].filter(Boolean);
+  const select = document.getElementById('person-select');
+  if (!select) return;
 
-  for (const select of selectors) {
-    const currentVal = select.value;
-    const firstOption = select.querySelector('option');
-    const defaultText = firstOption?.textContent || 'None';
-    select.innerHTML = `<option value="">${escapeHtml(defaultText)}</option>`;
-    for (const person of userPersons) {
-      const photoCount = person.photos?.length || 0;
-      const opt = document.createElement('option');
-      opt.value = person.id;
-      const loraBadge = person.loraStatus === 'ready' ? ' [LoRA]' : '';
-      opt.textContent = `${person.name} (${photoCount} photo${photoCount !== 1 ? 's' : ''})${loraBadge}`;
-      if (photoCount === 0 && person.loraStatus !== 'ready') opt.disabled = true;
-      select.appendChild(opt);
-    }
-    if (currentVal && userPersons.some(p => p.id === currentVal)) {
-      select.value = currentVal;
-    }
+  const currentVal = select.value;
+  const firstOption = select.querySelector('option');
+  const defaultText = firstOption?.textContent || 'None';
+  select.innerHTML = `<option value="">${escapeHtml(defaultText)}</option>`;
+  for (const person of userPersons) {
+    const photoCount = person.photos?.length || 0;
+    const opt = document.createElement('option');
+    opt.value = person.id;
+    const loraBadge = person.loraStatus === 'ready' ? ' [LoRA]' : '';
+    opt.textContent = `${person.name} (${photoCount} photo${photoCount !== 1 ? 's' : ''})${loraBadge}`;
+    if (photoCount === 0 && person.loraStatus !== 'ready') opt.disabled = true;
+    select.appendChild(opt);
+  }
+  if (currentVal && userPersons.some(p => p.id === currentVal)) {
+    select.value = currentVal;
   }
 }
 

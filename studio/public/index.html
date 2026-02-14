@@ -54,9 +54,31 @@
             <span id="tiktok-btn-text">Connect TikTok</span>
           </button>
           <select class="app-dropdown" id="image-model-select">
-            <option value="gpt-image-1.5">GPT Image 1.5</option>
-            <option value="gpt-image-1">GPT Image 1</option>
-            <option value="dall-e-3">DALL-E 3</option>
+            <optgroup label="OpenAI">
+              <option value="gpt-image-1.5">GPT Image 1.5</option>
+              <option value="gpt-image-1">GPT Image 1</option>
+              <option value="dall-e-3">DALL-E 3</option>
+            </optgroup>
+            <optgroup label="Gemini">
+              <option value="gemini-2.5-flash-preview-image-generation">Gemini 2.5 Flash</option>
+              <option value="gemini-2.0-flash-preview-image-generation">Gemini 2.0 Flash</option>
+            </optgroup>
+            <optgroup label="Imagen">
+              <option value="imagen-4.0-fast-generate-001">Imagen 4.0 Fast</option>
+              <option value="imagen-4.0-generate-001">Imagen 4.0</option>
+              <option value="imagen-4.0-ultra-generate-001">Imagen 4.0 Ultra</option>
+            </optgroup>
+          </select>
+          <select class="app-dropdown" id="text-model-select">
+            <optgroup label="Claude">
+              <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
+              <option value="claude-sonnet-4-5-20250929">Sonnet 4.5</option>
+              <option value="claude-opus-4-6">Opus 4.6</option>
+            </optgroup>
+            <optgroup label="Gemini">
+              <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+              <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+            </optgroup>
           </select>
           <button class="header-btn" id="settings-btn" title="Settings" aria-label="Settings">&#9881;</button>
         </div>
@@ -203,31 +225,49 @@
             <div class="content-plan-grid" id="content-plan-grid"></div>
           </div>
 
-          <!-- Full-Page Personalization View -->
+          <!-- Full-Page Personalization View (Face Studio) -->
           <div class="personalize-view" id="personalize-view" style="display:none">
             <div class="personalize-header">
               <button type="button" class="btn small" id="personalize-back-btn">&larr; Back</button>
-              <h2>Personalize with Your Face</h2>
+              <h2>Face Studio</h2>
+            </div>
+
+            <!-- People bar -->
+            <div class="face-studio-section">
+              <div class="face-studio-section-header">
+                <label class="label">Your People</label>
+                <button type="button" class="btn small" id="face-studio-add-person">+ Add Person</button>
+              </div>
+              <div class="face-studio-people" id="face-studio-people"></div>
+            </div>
+
+            <!-- Person detail panel (hidden when no person selected) -->
+            <div class="face-studio-detail" id="face-studio-person-detail" style="display:none">
+              <div class="face-studio-detail-header">
+                <input type="text" id="face-studio-person-name" placeholder="Person name" />
+                <button type="button" class="btn small danger" id="face-studio-person-delete">Delete</button>
+              </div>
+              <div class="face-studio-photo-grid" id="face-studio-photo-grid"></div>
+              <div class="face-studio-photo-meta">
+                <span class="face-photo-count" id="face-studio-photo-count">0 / 20 photos</span>
+              </div>
+              <div class="face-studio-lora" id="face-studio-lora"></div>
+            </div>
+
+            <!-- Quick upload fallback (shown when no person selected) -->
+            <div class="face-studio-quick-upload" id="face-studio-quick-upload">
+              <label class="label">Or upload photos for one-time use <span class="face-photo-count" id="face-photo-count">0 / 5</span></label>
+              <p class="freeform-hint" style="margin:0 0 8px">Multiple angles give better face consistency.</p>
+              <div class="face-photos-grid" id="face-photos-grid">
+                <input type="file" id="face-image-input" accept="image/*" multiple style="display:none" />
+                <button type="button" class="face-add-btn" id="face-add-btn" title="Add photo" aria-label="Add photo">+</button>
+              </div>
             </div>
 
             <div class="personalize-layout">
-              <!-- Left column: Photos + Scenario + Generate -->
+              <!-- Left column: Scenario + Generate -->
               <div class="personalize-controls-col">
-                <div class="form-group full" style="margin-bottom:12px">
-                  <label class="label">Person</label>
-                  <select id="personalize-person-select">
-                    <option value="">Use uploaded photos below</option>
-                  </select>
-                  <span class="field-hint">Or select a saved person from Settings</span>
-                </div>
-                <label class="label">Your Photos <span class="face-photo-count" id="face-photo-count">0 / 5</span></label>
-                <p class="freeform-hint" style="margin:0 0 8px">Multiple angles give better face consistency.</p>
-                <div class="face-photos-grid" id="face-photos-grid">
-                  <input type="file" id="face-image-input" accept="image/*" multiple style="display:none" />
-                  <button type="button" class="face-add-btn" id="face-add-btn" title="Add photo" aria-label="Add photo">+</button>
-                </div>
-
-                <label class="label" style="margin-top:16px">Choose a Scenario</label>
+                <label class="label">Choose a Scenario</label>
                 <div class="scenario-grid" id="scenario-grid"></div>
 
                 <div class="form-row" style="margin-top:12px">
@@ -1096,6 +1136,16 @@
             <span class="field-hint">Used for Claude prompt refinement and freeform content generation</span>
           </div>
           <div class="form-group full">
+            <label class="label" for="settings-gemini-key">Google Gemini API Key (image + text)</label>
+            <div class="api-key-input-wrap">
+              <input type="password" id="settings-gemini-key" placeholder="AIza..." />
+              <button type="button" class="api-key-toggle" data-target="settings-gemini-key" title="Show/hide key">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path class="eye-open" d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle class="eye-open" cx="12" cy="12" r="3"/><line class="eye-closed" style="display:none" x1="1" y1="1" x2="23" y2="23"/><path class="eye-closed" style="display:none" d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/></svg>
+              </button>
+            </div>
+            <span class="field-hint">Used for Gemini/Imagen image generation and Gemini text models. Get one at <a href="https://aistudio.google.com/apikey" target="_blank" style="color:var(--cyan)">aistudio.google.com/apikey</a></span>
+          </div>
+          <div class="form-group full">
             <label class="label" for="settings-fal-key">Fal.ai API Key (face personalization)</label>
             <div class="api-key-input-wrap">
               <input type="password" id="settings-fal-key" placeholder="fal-..." />
@@ -1126,16 +1176,6 @@
             </div>
           </div>
           <div class="settings-status" id="settings-status"></div>
-          <div class="settings-divider"></div>
-          <div class="settings-section-header" id="persons-settings-toggle">
-            <span>People (Face Photos)</span>
-            <span class="collapse-arrow">&#9660;</span>
-          </div>
-          <div class="persons-settings-section" id="persons-settings-section" style="display:none">
-            <p class="field-hint">Manage people for face-consistent photo generation. Photos are shared across all your brands.</p>
-            <div id="persons-list"></div>
-            <button type="button" class="btn primary small" id="add-person-btn">+ Add Person</button>
-          </div>
           <div class="settings-divider"></div>
           <div class="settings-section-header" id="prompt-settings-toggle">
             <span>AI Prompt Settings</span>

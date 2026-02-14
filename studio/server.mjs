@@ -14,6 +14,7 @@ import admin from 'firebase-admin';
 import { spawn, execSync } from 'child_process';
 import rateLimit from 'express-rate-limit';
 import ffmpegPath from 'ffmpeg-static';
+import { GoogleGenAI } from '@google/genai';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -26,9 +27,26 @@ const ALLOWED_IMAGE_MODELS = {
   'gpt-image-1.5': 'GPT Image 1.5',
   'gpt-image-1': 'GPT Image 1',
   'dall-e-3': 'DALL-E 3',
+  'gemini-2.5-flash-preview-image-generation': 'Gemini 2.5 Flash Image',
+  'gemini-2.0-flash-preview-image-generation': 'Gemini 2.0 Flash Image',
+  'imagen-4.0-generate-001': 'Imagen 4.0',
+  'imagen-4.0-fast-generate-001': 'Imagen 4.0 Fast',
+  'imagen-4.0-ultra-generate-001': 'Imagen 4.0 Ultra',
 };
 function resolveImageModel(requested) {
   return (requested && ALLOWED_IMAGE_MODELS[requested]) ? requested : DEFAULT_IMAGE_MODEL;
+}
+
+const DEFAULT_TEXT_MODEL = 'claude-haiku-4-5-20251001';
+const ALLOWED_TEXT_MODELS = {
+  'claude-haiku-4-5-20251001': 'Claude Haiku 4.5',
+  'claude-sonnet-4-5-20250929': 'Claude Sonnet 4.5',
+  'claude-opus-4-6': 'Claude Opus 4.6',
+  'gemini-2.5-flash': 'Gemini 2.5 Flash',
+  'gemini-2.5-pro': 'Gemini 2.5 Pro',
+};
+function resolveTextModel(requested) {
+  return (requested && ALLOWED_TEXT_MODELS[requested]) ? requested : DEFAULT_TEXT_MODEL;
 }
 
 // --- BYOK: Per-request API client helpers ---
@@ -43,8 +61,115 @@ function getAnthropic(req) {
   if (!key) return null;
   return new Anthropic({ apiKey: key });
 }
+function getGemini(req) {
+  const key = req.headers['x-gemini-key'];
+  if (!key) return null;
+  return new GoogleGenAI({ apiKey: key });
+}
 function isFalEnabled(req) {
   return Boolean(req.headers['x-fal-key']);
+}
+
+// --- Unified text generation (Claude + Gemini) ---
+async function generateText({ model, system, messages, maxTokens, req }) {
+  const resolvedModel = resolveTextModel(model);
+
+  if (resolvedModel.startsWith('gemini-')) {
+    const gemini = getGemini(req);
+    if (!gemini) throw new Error('Add your Google Gemini API key in Settings to use Gemini models.');
+    const contents = messages.map(m => ({
+      role: m.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: typeof m.content === 'string' ? m.content : JSON.stringify(m.content) }],
+    }));
+    const response = await gemini.models.generateContent({
+      model: resolvedModel,
+      contents,
+      config: {
+        systemInstruction: system || undefined,
+        maxOutputTokens: maxTokens || 2048,
+      },
+    });
+    return response.text || '';
+  }
+
+  // Claude (default)
+  const anthropic = getAnthropic(req);
+  if (!anthropic) throw new Error('Add your Anthropic API key in Settings.');
+  const response = await anthropic.messages.create({
+    model: resolvedModel,
+    max_tokens: maxTokens || 2048,
+    system: system || undefined,
+    messages,
+  });
+  return response.content?.[0]?.text?.trim() || '';
+}
+
+// --- Unified image generation (OpenAI + Gemini + Imagen) ---
+async function generateImage({ model, prompt, size, quality, referenceImage, req }) {
+  const resolvedModel = resolveImageModel(model);
+
+  // Gemini native image generation
+  if (resolvedModel.startsWith('gemini-')) {
+    const gemini = getGemini(req);
+    if (!gemini) throw new Error('Add your Google Gemini API key in Settings to use Gemini models.');
+    const parts = [];
+    if (referenceImage) {
+      parts.push({ inlineData: { data: referenceImage.toString('base64'), mimeType: 'image/png' } });
+    }
+    parts.push({ text: prompt });
+    const response = await gemini.models.generateContent({
+      model: resolvedModel,
+      contents: [{ parts }],
+      config: { responseModalities: ['TEXT', 'IMAGE'] },
+    });
+    const imagePart = response.candidates?.[0]?.content?.parts?.find(p => p.inlineData);
+    if (!imagePart?.inlineData?.data) throw new Error('No image returned from Gemini');
+    return Buffer.from(imagePart.inlineData.data, 'base64');
+  }
+
+  // Imagen (Google)
+  if (resolvedModel.startsWith('imagen-')) {
+    const gemini = getGemini(req);
+    if (!gemini) throw new Error('Add your Google Gemini API key in Settings to use Imagen models.');
+    const aspectMap = { '1024x1536': '9:16', '1536x1024': '16:9', '1024x1024': '1:1' };
+    const response = await gemini.models.generateImages({
+      model: resolvedModel,
+      prompt,
+      config: { numberOfImages: 1, aspectRatio: aspectMap[size] || '9:16' },
+    });
+    const imageBytes = response.generatedImages?.[0]?.image?.imageBytes;
+    if (!imageBytes) throw new Error('No image returned from Imagen');
+    return Buffer.from(imageBytes, 'base64');
+  }
+
+  // OpenAI (default)
+  const openai = getOpenAI(req);
+  if (!openai) throw new Error('Add your OpenAI API key in Settings to generate images.');
+
+  if (referenceImage) {
+    const imageFile = new File([referenceImage], 'reference.png', { type: 'image/png' });
+    const response = await openai.images.edit({
+      model: resolvedModel,
+      image: imageFile,
+      prompt,
+      size: size || '1024x1536',
+      quality: quality || 'high',
+    });
+    const b64 = response.data?.[0]?.b64_json;
+    if (!b64) throw new Error('No image returned from API');
+    return Buffer.from(b64, 'base64');
+  }
+
+  const response = await openai.images.generate({
+    model: resolvedModel,
+    prompt,
+    size: size || '1024x1536',
+    quality: quality || 'high',
+    output_format: 'png',
+  });
+  const b64 = response.data?.[0]?.b64_json;
+  if (!b64) throw new Error('No image returned from API');
+  return Buffer.from(b64, 'base64');
 }
 
 async function generateWithFlux(faceImagePaths, prompt, { aspectRatio = '9:16', falKey } = {}) {
@@ -1395,7 +1520,7 @@ async function overlayPngOnVideo(videoBuffer, overlayPngBuffer, outputPath) {
       const args = [
         '-i', videoTmp,
         '-i', overlayTmp,
-        '-filter_complex', 'overlay=0:0',
+        '-filter_complex', '[1:v]scale2ref[ovl][base];[base][ovl]overlay=0:0',
         '-codec:a', 'copy',
         '-codec:v', 'libx264',
         '-preset', 'ultrafast',
@@ -1809,9 +1934,6 @@ CRITICAL: Respect the brand's visual style direction. Do not override it with ge
 Return ONLY the refined prompt text. No preamble, no explanation, no markdown formatting.`;
 
 async function refinePromptWithClaude(rawPrompt, slideType, formData, brand, req) {
-  const anthropic = getAnthropic(req);
-  if (!anthropic) return null;
-
   try {
     const refinementInstructions = slideType === 'meme' ? MEME_REFINEMENT_INSTRUCTIONS : BASE_REFINEMENT_INSTRUCTIONS;
     const systemPrompt = `${brand.systemPrompt}\n\n${refinementInstructions}`;
@@ -1831,9 +1953,8 @@ async function refinePromptWithClaude(rawPrompt, slideType, formData, brand, req
       context += `\n\nIMPORTANT: A reference image will be passed directly to the image model via the edit API. The model can SEE the image — do NOT describe what might be in the reference image. Instead, instruct the model on HOW to use the reference (e.g. "match the color palette", "use the same composition style", "incorporate the background elements").`;
     }
 
-    const response = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 1024,
+    const refined = await generateText({
+      model: req.body?.textModel,
       system: systemPrompt,
       messages: [
         {
@@ -1841,16 +1962,16 @@ async function refinePromptWithClaude(rawPrompt, slideType, formData, brand, req
           content: `${context}\n\nRefine this ${slideType === 'video' ? 'video' : 'image'}-generation prompt:\n\n${rawPrompt}`,
         },
       ],
+      maxTokens: 1024,
+      req,
     });
-
-    const refined = response.content?.[0]?.text?.trim();
     if (refined) {
-      console.log(`[Claude] Prompt refined for ${brand.name}`);
+      console.log(`[Text] Prompt refined for ${brand.name}`);
       return refined;
     }
     return null;
   } catch (err) {
-    console.warn('[Claude] Refinement failed, using raw prompt:', err.message);
+    console.warn('[Text] Refinement failed, using raw prompt:', err.message);
     return null;
   }
 }
@@ -2282,20 +2403,17 @@ app.post('/api/brands/ai-setup', requireAuth, async (req, res) => {
       }
     }
 
-    const anthropic = getAnthropic(req);
-    if (!anthropic) return res.status(500).json({ error: 'Add your Anthropic API key in Settings.' });
-
-    const msg = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 1024,
+    const text = await generateText({
+      model: req.body?.textModel,
       system: BRAND_STRATEGIST_SYSTEM,
       messages: [{
         role: 'user',
         content: buildBrandConfigPrompt({ name, description, textContent: websiteContent }),
       }],
+      maxTokens: 1024,
+      req,
     });
 
-    const text = msg.content[0]?.text || '';
     // Try to parse JSON from the response
     let parsed;
     try {
@@ -2545,9 +2663,6 @@ app.post('/api/brands/full-setup', requireAuth, async (req, res) => {
     // Step 6: Claude generates brand config
     sendSSE('status', { step: 'config', message: 'Generating brand profile...' });
 
-    const anthropic = getAnthropic(req);
-    if (!anthropic) { sendSSE('error', { message: 'Add your Anthropic API key in Settings.' }); res.end(); return; }
-
     const textContent = html
       .replace(/<script[\s\S]*?<\/script>/gi, '')
       .replace(/<style[\s\S]*?<\/style>/gi, '')
@@ -2556,17 +2671,21 @@ app.post('/api/brands/full-setup', requireAuth, async (req, res) => {
       .trim()
       .slice(0, 3000);
 
-    const msg = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 1024,
-      system: BRAND_STRATEGIST_SYSTEM,
-      messages: [{
-        role: 'user',
-        content: buildBrandConfigPrompt({ url: finalUrl, pageTitle, metaDesc, ogSiteName, ogImage, themeColor, extractedColors, textContent }),
-      }],
-    });
-
-    const brandText = msg.content[0]?.text || '';
+    let brandText;
+    try {
+      brandText = await generateText({
+        model: req.body?.textModel,
+        system: BRAND_STRATEGIST_SYSTEM,
+        messages: [{
+          role: 'user',
+          content: buildBrandConfigPrompt({ url: finalUrl, pageTitle, metaDesc, ogSiteName, ogImage, themeColor, extractedColors, textContent }),
+        }],
+        maxTokens: 1024,
+        req,
+      });
+    } catch (e) {
+      sendSSE('error', { message: e.message }); res.end(); return;
+    }
     let brandConfig;
     try {
       brandConfig = JSON.parse(brandText);
@@ -2640,17 +2759,17 @@ app.post('/api/brands/full-setup', requireAuth, async (req, res) => {
         brandData.contentPillars?.length ? `Content pillars: ${brandData.contentPillars.join(', ')}` : '',
       ].filter(Boolean).join('\n');
 
-      const ideasResponse = await anthropic.messages.create({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 4096,
+      const ideasText = await generateText({
+        model: req.body?.textModel,
         system: brandContext,
         messages: [{
           role: 'user',
           content: buildContentIdeasPrompt({ brand: brandData, microLabel, websiteUrl, pageTitle, metaDesc, websiteText: textContent }),
         }],
+        maxTokens: 4096,
+        req,
       });
 
-      const ideasText = ideasResponse.content?.[0]?.text?.trim();
       if (ideasText) {
         const jsonMatch = ideasText.match(/\{[\s\S]*\}/);
         const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : ideasText);
@@ -2693,8 +2812,8 @@ app.post('/api/brands/full-setup', requireAuth, async (req, res) => {
     sendSSE('status', { step: 'carousel', message: 'Generating first carousel...' });
 
     const brand = { id: brandId, ...brandData };
-    const openai = getOpenAI(req);
-    if (contentIdeas.length > 0 && openai) {
+    const hasImageKey = getOpenAI(req) || getGemini(req);
+    if (contentIdeas.length > 0 && hasImageKey) {
       const firstIdea = contentIdeas[0];
       const slides = firstIdea.slides || [];
       for (let i = 0; i < Math.min(slides.length, 5); i++) {
@@ -2713,22 +2832,22 @@ app.post('/api/brands/full-setup', requireAuth, async (req, res) => {
             }, brand);
             const refinedPrompt = await refinePromptWithClaude(rawPrompt, 'photo', slide, brand, req);
             const prompt = refinedPrompt || rawPrompt;
-            const response = await openai.images.generate({
-              model: resolveImageModel(),
-              prompt,
-              size: '1024x1536',
-              quality: 'high',
-              output_format: 'png',
-            });
-            const b64 = response.data?.[0]?.b64_json;
-            if (b64) {
-              let buffer = Buffer.from(b64, 'base64');
+            try {
+              let buffer = await generateImage({
+                model: req.body?.imageModel,
+                prompt,
+                size: '1024x1536',
+                quality: 'high',
+                req,
+              });
               buffer = await addAppIconOverlay(buffer, 'bottom-right', brand);
               const slug = crypto.randomUUID().slice(0, 8);
               const filename = `carousel_${brandId}_setup_s${i + 1}_${slug}.png`;
               const slideUrl = await uploadToStorage(buffer, filename);
               saveImageRecord({ userId: req.user.uid, brandId, filename, type: 'carousel' });
               sendSSE('slide', { index: i, imageUrl: slideUrl, type: 'ai' });
+            } catch (imgErr) {
+              console.warn(`[Full Setup] Slide ${i + 1} image failed:`, imgErr.message);
             }
           } else {
             // Mockup slide
@@ -3036,21 +3155,17 @@ app.post('/api/brands/analyze-website', requireAuth, async (req, res) => {
       }
     }
 
-    // Send to Claude for brand analysis
-    const anthropic = getAnthropic(req);
-    if (!anthropic) return res.status(500).json({ error: 'Add your Anthropic API key in Settings.' });
-
-    const msg = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 1024,
+    // Send to AI for brand analysis
+    const text = await generateText({
+      model: req.body?.textModel,
       system: BRAND_STRATEGIST_SYSTEM,
       messages: [{
         role: 'user',
         content: buildBrandConfigPrompt({ url: finalUrl, pageTitle, metaDesc, ogSiteName, ogImage, themeColor, extractedColors, textContent }),
       }],
+      maxTokens: 1024,
+      req,
     });
-
-    const text = msg.content[0]?.text || '';
     let brand;
     try {
       brand = JSON.parse(text);
@@ -3134,8 +3249,6 @@ app.post('/api/upload-reference', requireAuth, upload.single('image'), async (re
 // Generate single slide
 app.post('/api/generate', requireAuth, generationLimiter, async (req, res) => {
   try {
-    const openai = getOpenAI(req);
-    const anthropic = getAnthropic(req);
     const data = req.body || {};
     const brandId = data.brand;
     if (!brandId) return res.status(400).json({ error: 'Missing brand' });
@@ -3152,29 +3265,24 @@ app.post('/api/generate', requireAuth, generationLimiter, async (req, res) => {
 
       // AI background: generate background image first, then composite mockup on top
       if (data.imageUsage === 'ai-background') {
-        if (!openai) return res.status(503).json({ error: 'Add your OpenAI API key in Settings to generate images.' });
-
         bgPrompt = buildMockupBackgroundPrompt(data, brand);
         refinedBgPrompt = await refinePromptWithClaude(bgPrompt, 'photo', data, brand, req);
         const prompt = refinedBgPrompt || bgPrompt;
 
         console.log(`[Generate] ${brand.name} | AI background for mockup | ${refinedBgPrompt ? 'refined' : 'raw'}`);
 
-        const response = await openai.images.generate({
-          model: resolveImageModel(data.imageModel),
+        const aiBgBuffer = await generateImage({
+          model: data.imageModel,
           prompt,
           size: '1024x1536',
           quality: data.quality || 'high',
-          output_format: 'png',
+          req,
         });
-
-        const b64 = response.data?.[0]?.b64_json;
-        if (!b64) throw new Error('No background image returned from API');
 
         // Save AI background to temp file so createBackgroundImage() can use it
         const tempName = `aibg_${crypto.randomUUID().slice(0, 8)}.png`;
         const tempPath = path.join(uploadsDir, tempName);
-        await fs.writeFile(tempPath, Buffer.from(b64, 'base64'));
+        await fs.writeFile(tempPath, aiBgBuffer);
 
         // Set as screenshot image for the mockup render pipeline
         data.screenshotImage = tempName;
@@ -3203,8 +3311,6 @@ app.post('/api/generate', requireAuth, generationLimiter, async (req, res) => {
 
     // Meme generation
     if (data.slideType === 'meme') {
-      if (!anthropic) return res.status(503).json({ error: 'Add your Anthropic API key in Settings to generate memes.' });
-      if (!openai) return res.status(503).json({ error: 'Add your OpenAI API key in Settings to generate images.' });
 
       // Auto-generate meme concept from brand website if no description provided
       if (!data.description || !data.description.trim()) {
@@ -3235,9 +3341,9 @@ app.post('/api/generate', requireAuth, generationLimiter, async (req, res) => {
           return res.status(400).json({ error: `Could not reach website: ${e.message}` });
         }
 
-        const conceptResponse = await anthropic.messages.create({
-          model: 'claude-haiku-4-5-20251001',
-          max_tokens: 300,
+        data.description = await generateText({
+          model: data.textModel,
+          maxTokens: 300,
           messages: [{
             role: 'user',
             content: `You are a meme creator. Based on this brand's website content, generate ONE specific meme concept.
@@ -3262,9 +3368,8 @@ Return ONLY the meme description (no explanation, no preamble). Vary the format 
 
 Pick a DIFFERENT format each time. Do NOT default to two-panel approval.`,
           }],
+          req,
         });
-
-        data.description = conceptResponse.content[0]?.text?.trim();
         if (!data.description) {
           return res.status(500).json({ error: 'Failed to generate meme concept from website' });
         }
@@ -3284,40 +3389,36 @@ Pick a DIFFERENT format each time. Do NOT default to two-panel approval.`,
 
       console.log(`[Meme] ${brand.name} | ${refinedPrompt ? 'refined' : 'raw'} | ${data.aspectRatio || '1:1'}`);
 
-      let response;
+      let buffer;
       try {
-        response = await openai.images.generate({
-          model: resolveImageModel(data.imageModel),
+        buffer = await generateImage({
+          model: data.imageModel,
           prompt,
           size: openaiSize,
           quality: data.quality || 'high',
-          output_format: 'png',
+          req,
         });
       } catch (genErr) {
         if (genErr.message?.includes('safety') || genErr.status === 400) {
           console.warn(`[Meme] Safety rejection, retrying with sanitized prompt`);
-          const sanitized = await anthropic?.messages.create({
-            model: 'claude-haiku-4-5-20251001',
-            max_tokens: 1024,
-            messages: [{ role: 'user', content: `This image prompt was rejected by OpenAI's safety system. Rewrite it to avoid depicting real people, celebrities, or copyrighted characters. Keep the same meme concept and humor but use generic/illustrated characters instead.\n\nOriginal prompt:\n${prompt}` }],
+          const safePrompt = await generateText({
+            model: data.textModel,
+            maxTokens: 1024,
+            messages: [{ role: 'user', content: `This image prompt was rejected by the safety system. Rewrite it to avoid depicting real people, celebrities, or copyrighted characters. Keep the same meme concept and humor but use generic/illustrated characters instead.\n\nOriginal prompt:\n${prompt}` }],
+            req,
           });
-          const safePrompt = sanitized?.content?.[0]?.text?.trim();
           if (!safePrompt) throw genErr;
-          response = await openai.images.generate({
-            model: resolveImageModel(data.imageModel),
+          buffer = await generateImage({
+            model: data.imageModel,
             prompt: safePrompt,
             size: openaiSize,
             quality: data.quality || 'high',
-            output_format: 'png',
+            req,
           });
         } else {
           throw genErr;
         }
       }
-
-      const b64 = response.data?.[0]?.b64_json;
-      if (!b64) throw new Error('No image returned from API');
-      let buffer = Buffer.from(b64, 'base64');
 
       if (data.includeOwl) {
         buffer = await addAppIconOverlay(buffer, data.owlPosition, brand);
@@ -3383,8 +3484,6 @@ Pick a DIFFERENT format each time. Do NOT default to two-panel approval.`,
       });
     }
 
-    if (!openai) return res.status(503).json({ error: 'Add your OpenAI API key in Settings to generate images.' });
-
     // --- Hybrid photo generation: AI image (optionally with person) + Sharp text overlay ---
     if (data.slideType === 'photo' && data.personId) {
       let personTempFiles = [];
@@ -3417,17 +3516,14 @@ Pick a DIFFERENT format each time. Do NOT default to two-panel approval.`,
           } else {
             // GPT fallback — single reference
             const refBuffer = await fs.readFile(personTempFiles[0]);
-            const response = await openai.images.generate({
-              model: resolveImageModel(data.imageModel),
+            buffer = await generateImage({
+              model: data.imageModel,
               prompt,
-              image: [{ image: refBuffer, detail: 'auto' }],
               size: '1024x1536',
               quality: data.quality || 'high',
-              output_format: 'png',
+              referenceImage: refBuffer,
+              req,
             });
-            const b64 = response.data?.[0]?.b64_json;
-            if (!b64) throw new Error('No image returned');
-            buffer = Buffer.from(b64, 'base64');
           }
         }
 
@@ -3484,50 +3580,32 @@ Pick a DIFFERENT format each time. Do NOT default to two-panel approval.`,
     );
     const prompt = refinedPrompt || (rawPrompt + referenceInstruction);
 
-    console.log(`[Generate] ${brand.name} | ${refinedPrompt ? 'Claude-refined' : 'raw'} prompt`);
+    console.log(`[Generate] ${brand.name} | ${refinedPrompt ? 'refined' : 'raw'} prompt`);
 
-    // Build generation params
-    const genParams = {
-      model: resolveImageModel(data.imageModel),
-      prompt,
-      size: '1024x1536',
-      quality: data.quality || 'high',
-      output_format: 'png',
-    };
-
-    // If reference image provided, use images.edit() instead of images.generate()
-    let response;
+    // Generate image (handles reference images, routes to correct provider)
+    let refBuffer = null;
     if (data.referenceImage) {
       const refPath = path.join(uploadsDir, path.basename(data.referenceImage));
       try {
         await fs.access(refPath);
-        const refBuffer = await fs.readFile(refPath);
-        const imageFile = new File([refBuffer], 'reference.png', { type: 'image/png' });
-        response = await openai.images.edit({
-          model: resolveImageModel(data.imageModel),
-          image: imageFile,
-          prompt,
-          size: '1024x1536',
-          quality: data.quality || 'high',
-        });
+        refBuffer = await fs.readFile(refPath);
       } catch (err) {
         if (err.code === 'ENOENT' || err.message?.includes('no such file')) {
-          console.warn('[Generate] Reference image not found, falling back to generate');
-          response = await openai.images.generate(genParams);
+          console.warn('[Generate] Reference image not found, generating without it');
         } else {
           throw err;
         }
       }
-    } else {
-      response = await openai.images.generate(genParams);
     }
 
-    const b64 = response.data?.[0]?.b64_json;
-    if (!b64) {
-      throw new Error('No image returned from API');
-    }
-
-    let buffer = Buffer.from(b64, 'base64');
+    let buffer = await generateImage({
+      model: data.imageModel,
+      prompt,
+      size: '1024x1536',
+      quality: data.quality || 'high',
+      referenceImage: refBuffer,
+      req,
+    });
 
     if (data.includeOwl) {
       buffer = await addAppIconOverlay(buffer, data.owlPosition, brand);
@@ -3560,10 +3638,8 @@ Pick a DIFFERENT format each time. Do NOT default to two-panel approval.`,
 // --- Edit existing slide image ---
 app.post('/api/edit-slide', requireAuth, async (req, res) => {
   try {
-    const openai = getOpenAI(req);
     const { imageUrl, instructions, quality, imageModel, brand: brandId } = req.body;
     if (!imageUrl || !instructions) return res.status(400).json({ error: 'Missing imageUrl or instructions' });
-    if (!openai) return res.status(503).json({ error: 'Add your OpenAI API key in Settings to generate images.' });
 
     const brand = await getBrandAsync(brandId, req.user?.uid);
 
@@ -3588,18 +3664,14 @@ app.post('/api/edit-slide', requireAuth, async (req, res) => {
       `Keep everything else the same. Do not add new text or logos.`,
     ].filter(Boolean).join(' ');
 
-    const response = await openai.images.edit({
-      model: resolveImageModel(imageModel),
-      image: new File([imgBuffer], 'slide.png', { type: 'image/png' }),
+    let buffer = await generateImage({
+      model: imageModel,
       prompt: editPrompt,
       size: '1024x1536',
       quality: quality || 'high',
+      referenceImage: imgBuffer,
+      req,
     });
-
-    const b64 = response.data?.[0]?.b64_json;
-    if (!b64) throw new Error('No image returned from edit API');
-
-    let buffer = Buffer.from(b64, 'base64');
     const slug = crypto.randomUUID().slice(0, 8);
     const filename = `edit_${brandId}_${Date.now()}_${slug}.png`;
     const url = await uploadToStorage(buffer, filename);
@@ -3616,7 +3688,6 @@ app.post('/api/edit-slide', requireAuth, async (req, res) => {
 const carouselJobs = new Map();
 
 app.post('/api/generate-carousel', requireAuth, generationLimiter, async (req, res) => {
-  const openai = getOpenAI(req);
   const { slides, includeOwl, owlPosition, quality, brand: brandId, imageModel, referenceImage, referenceUsage, referenceInstructions } = req.body || {};
   if (!slides || !Array.isArray(slides) || slides.length === 0) {
     return res.status(400).json({ error: 'Missing slides array' });
@@ -3626,7 +3697,6 @@ app.post('/api/generate-carousel', requireAuth, generationLimiter, async (req, r
   }
 
   if (!brandId) return res.status(400).json({ error: 'Missing brand' });
-  if (!openai) return res.status(400).json({ error: 'Add your OpenAI API key in Settings to generate images.' });
   const brand = await getBrandAsync(brandId, req.user?.uid);
 
   const jobId = crypto.randomUUID().slice(0, 12);
@@ -3656,18 +3726,16 @@ app.post('/api/generate-carousel', requireAuth, generationLimiter, async (req, r
             console.log(`[Carousel ${jobId}] ${brand.name} | Slide ${i + 1}/${slides.length} (mockup + AI bg)`);
             const bgPrompt = buildMockupBackgroundPrompt(slideData, brand);
             const refined = await refinePromptWithClaude(bgPrompt, 'photo', slideData, brand, req);
-            const response = await openai.images.generate({
-              model: resolveImageModel(slideData.imageModel),
+            const bgBuffer = await generateImage({
+              model: slideData.imageModel,
               prompt: refined || bgPrompt,
               size: '1024x1536',
               quality: slideData.quality || 'high',
-              output_format: 'png',
+              req,
             });
-            const b64 = response.data?.[0]?.b64_json;
-            if (!b64) throw new Error('No background image returned');
             const tempName = `aibg_${crypto.randomUUID().slice(0, 8)}.png`;
             const tempPath = path.join(uploadsDir, tempName);
-            await fs.writeFile(tempPath, Buffer.from(b64, 'base64'));
+            await fs.writeFile(tempPath, bgBuffer);
             slideData.screenshotImage = tempName;
             slideData.imageUsage = 'background';
             try {
@@ -3764,17 +3832,14 @@ app.post('/api/generate-carousel', requireAuth, generationLimiter, async (req, r
                   buffer = await generateWithFlux(personTempFiles, prompt, { falKey: req.headers['x-fal-key'] });
                 } else {
                   const refBuffer = await fs.readFile(personTempFiles[0]);
-                  const response = await openai.images.generate({
-                    model: resolveImageModel(imageModel),
+                  buffer = await generateImage({
+                    model: imageModel,
                     prompt,
-                    image: [{ image: refBuffer, detail: 'auto' }],
                     size: '1024x1536',
                     quality: slideData.quality || 'high',
-                    output_format: 'png',
+                    referenceImage: refBuffer,
+                    req,
                   });
-                  const b64 = response.data?.[0]?.b64_json;
-                  if (!b64) throw new Error('No image returned');
-                  buffer = Buffer.from(b64, 'base64');
                 }
               }
 
@@ -3826,48 +3891,29 @@ app.post('/api/generate-carousel', requireAuth, generationLimiter, async (req, r
 
         console.log(`[Carousel ${jobId}] ${brand.name} | Slide ${i + 1}/${slides.length}${slideRefImage ? ' (ref image)' : ''}`);
 
-        let response;
+        let refBuffer = null;
         if (slideRefImage) {
           const refPath = path.join(uploadsDir, path.basename(slideRefImage));
           try {
             await fs.access(refPath);
-            const refBuffer = await fs.readFile(refPath);
-            const imageFile = new File([refBuffer], 'reference.png', { type: 'image/png' });
-            response = await openai.images.edit({
-              model: resolveImageModel(imageModel),
-              image: imageFile,
-              prompt,
-              size: '1024x1536',
-              quality: slideData.quality || 'high',
-            });
+            refBuffer = await fs.readFile(refPath);
           } catch (refErr) {
             if (refErr.code === 'ENOENT' || refErr.message?.includes('no such file')) {
-              console.warn(`[Carousel ${jobId}] Reference image not found, falling back to generate`);
-              response = await openai.images.generate({
-                model: resolveImageModel(imageModel),
-                prompt,
-                size: '1024x1536',
-                quality: slideData.quality || 'high',
-                output_format: 'png',
-              });
+              console.warn(`[Carousel ${jobId}] Reference image not found, generating without it`);
             } else {
               throw refErr;
             }
           }
-        } else {
-          response = await openai.images.generate({
-            model: resolveImageModel(imageModel),
-            prompt,
-            size: '1024x1536',
-            quality: slideData.quality || 'high',
-            output_format: 'png',
-          });
         }
 
-        const b64 = response.data?.[0]?.b64_json;
-        if (!b64) throw new Error('No image returned');
-
-        let buffer = Buffer.from(b64, 'base64');
+        let buffer = await generateImage({
+          model: imageModel,
+          prompt,
+          size: '1024x1536',
+          quality: slideData.quality || 'high',
+          referenceImage: refBuffer,
+          req,
+        });
         if (slideData.includeOwl) {
           buffer = await addAppIconOverlay(buffer, slideData.owlPosition, brand);
         }
@@ -3920,16 +3966,12 @@ app.get('/api/carousel-status/:jobId', requireAuth, (req, res) => {
 // --- Freeform AI Content Generation ---
 app.post('/api/generate-freeform', requireAuth, generationLimiter, async (req, res) => {
   try {
-    const anthropic = getAnthropic(req);
     const { prompt: userPrompt, brand: brandId, slideCount } = req.body || {};
     if (!userPrompt) {
       return res.status(400).json({ error: 'Missing prompt' });
     }
     if (!brandId) {
       return res.status(400).json({ error: 'Missing brand' });
-    }
-    if (!anthropic) {
-      return res.status(500).json({ error: 'Add your Anthropic API key in Settings.' });
     }
 
     const brand = await getBrandAsync(brandId, req.user?.uid);
@@ -3982,18 +4024,18 @@ Rules:
     const historySection = buildHistoryPromptSection(brand.generationHistory);
     const systemWithHistory = historySection ? freeformSystemPrompt + '\n' + historySection : freeformSystemPrompt;
 
-    const response = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 2048,
+    const text = await generateText({
+      model: req.body?.textModel,
       system: systemWithHistory,
       messages: [
         { role: 'user', content: userPrompt },
       ],
+      maxTokens: 2048,
+      req,
     });
 
-    const text = response.content?.[0]?.text?.trim();
     if (!text) {
-      throw new Error('No response from Claude');
+      throw new Error('No response from AI');
     }
 
     // Parse JSON from response (handle potential markdown wrapping)
@@ -4002,7 +4044,7 @@ Rules:
       const jsonMatch = text.match(/\{[\s\S]*\}/);
       parsed = JSON.parse(jsonMatch ? jsonMatch[0] : text);
     } catch {
-      throw new Error('Failed to parse Claude response as JSON');
+      throw new Error('Failed to parse AI response as JSON');
     }
 
     // Record in generation history for cross-session dedup
@@ -4028,10 +4070,8 @@ Rules:
 // --- Auto-Generate Content Ideas from Website ---
 app.post('/api/generate-content-ideas', requireAuth, async (req, res) => {
   try {
-    const anthropic = getAnthropic(req);
     const { brand: brandId, existingTitles, numIdeas, startIndex, userTopic, slidesPerIdea } = req.body || {};
     if (!brandId) return res.status(400).json({ error: 'Missing brand' });
-    if (!anthropic) return res.status(500).json({ error: 'Add your Anthropic API key in Settings.' });
 
     const brand = await getBrandAsync(brandId, req.user?.uid);
     if (!brand.website) {
@@ -4114,25 +4154,25 @@ app.post('/api/generate-content-ideas', requireAuth, async (req, res) => {
       userPrompt += `\n\nUSER REQUEST: The user specifically wants this idea to be about: "${userTopic.trim()}". Generate content that directly addresses this topic using the brand's real information.`;
     }
 
-    const response = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 4096,
+    const text = await generateText({
+      model: req.body?.textModel,
       system: brandContext,
       messages: [{
         role: 'user',
         content: userPrompt,
       }],
+      maxTokens: 4096,
+      req,
     });
 
-    const text = response.content?.[0]?.text?.trim();
-    if (!text) throw new Error('No response from Claude');
+    if (!text) throw new Error('No response from AI');
 
     let parsed;
     try {
       const jsonMatch = text.match(/\{[\s\S]*\}/);
       parsed = JSON.parse(jsonMatch ? jsonMatch[0] : text);
     } catch {
-      throw new Error('Failed to parse Claude response as JSON');
+      throw new Error('Failed to parse AI response as JSON');
     }
 
     const ideas = parsed.ideas || [];
@@ -4180,7 +4220,6 @@ const personalizeScenarioCache = new Map();
 
 app.post('/api/personalize-scenarios', requireAuth, async (req, res) => {
   try {
-    const anthropic = getAnthropic(req);
     const brandId = req.body?.brand;
     if (!brandId) return res.status(400).json({ error: 'Missing brand' });
 
@@ -4192,10 +4231,6 @@ app.post('/api/personalize-scenarios', requireAuth, async (req, res) => {
       return res.json({ scenarios: cached.scenarios });
     }
 
-    if (!anthropic) {
-      return res.status(500).json({ error: 'Add your Anthropic API key in Settings.' });
-    }
-
     const brandContext = [
       `Brand: ${brand.name}`,
       brand.website ? `Website: ${brand.website}` : '',
@@ -4203,23 +4238,23 @@ app.post('/api/personalize-scenarios', requireAuth, async (req, res) => {
       brand.defaultBackground ? `Visual style: ${brand.defaultBackground}` : '',
     ].filter(Boolean).join('\n');
 
-    const response = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 1024,
+    const text = await generateText({
+      model: req.body?.textModel,
       system: BRAND_STRATEGIST_SYSTEM,
       messages: [{
         role: 'user',
         content: `Given this brand:\n${brandContext}\n\nGenerate exactly 8 photo scenarios for personalized images featuring a person (the user). Each scenario should be relevant to this brand's industry, niche, and identity.\n\nReturn a JSON array with exactly 8 objects, each having:\n- id: URL-safe slug (e.g. "morning-routine")\n- title: 2-3 word title\n- category: 1 word category\n- setting: scene/environment description (10-20 words)\n- action: what the person is doing (5-10 words)\n- mood: emotional tone (2-4 words)\n\nRespond with ONLY the JSON array, no other text.`
       }],
+      maxTokens: 1024,
+      req,
     });
 
-    const text = response.content[0]?.text || '';
     let scenarios;
     try {
       const jsonMatch = text.match(/\[[\s\S]*\]/);
       scenarios = JSON.parse(jsonMatch ? jsonMatch[0] : text);
     } catch {
-      throw new Error('Failed to parse Claude scenario response');
+      throw new Error('Failed to parse scenario response');
     }
 
     if (!Array.isArray(scenarios) || scenarios.length === 0) {
@@ -4243,7 +4278,6 @@ app.post('/api/personalize-scenarios', requireAuth, async (req, res) => {
 app.post('/api/generate-personalized', requireAuth, upload.array('faceImages', 5), async (req, res) => {
   let downloadedTempFiles = [];
   try {
-    const openai = getOpenAI(req);
     const data = req.body || {};
     const brandId = data.brand;
     if (!brandId) return res.status(400).json({ error: 'Missing brand' });
@@ -4292,17 +4326,14 @@ app.post('/api/generate-personalized', requireAuth, upload.array('faceImages', 5
       } else {
         // GPT fallback — use first image only (doesn't support multi-ref)
         const refBuffer = await fs.readFile(faceImagePaths[0]);
-        const response = await openai.images.generate({
-          model: resolveImageModel(data.imageModel),
+        buffer = await generateImage({
+          model: data.imageModel,
           prompt: finalPrompt,
-          image: [{ image: refBuffer, detail: 'auto' }],
           size: '1024x1536',
           quality: data.quality || 'high',
-          output_format: 'png',
+          referenceImage: refBuffer,
+          req,
         });
-        const b64 = response.data?.[0]?.b64_json;
-        if (!b64) throw new Error('No image returned');
-        buffer = Buffer.from(b64, 'base64');
       }
     }
 
@@ -4331,7 +4362,6 @@ app.post('/api/generate-personalized', requireAuth, upload.array('faceImages', 5
 });
 
 app.post('/api/generate-personalized-carousel', requireAuth, upload.array('faceImages', 5), async (req, res) => {
-  const openai = getOpenAI(req);
   let { slides, includeOwl, owlPosition, quality, brand: brandId, model } = req.body || {};
   if (typeof slides === 'string') {
     try { slides = JSON.parse(slides); } catch { return res.status(400).json({ error: 'Invalid slides JSON' }); }
@@ -4393,17 +4423,14 @@ app.post('/api/generate-personalized-carousel', requireAuth, upload.array('faceI
           buffer = await generateWithFlux(faceImagePaths, finalPrompt, { falKey: req.headers['x-fal-key'] });
         } else {
           const refBuffer = await fs.readFile(faceImagePaths[0]);
-          const response = await openai.images.generate({
-            model: resolveImageModel(model),
+          buffer = await generateImage({
+            model,
             prompt: finalPrompt,
-            image: [{ image: refBuffer, detail: 'auto' }],
             size: '1024x1536',
             quality: quality || 'high',
-            output_format: 'png',
+            referenceImage: refBuffer,
+            req,
           });
-          const b64 = response.data?.[0]?.b64_json;
-          if (!b64) throw new Error('No image returned');
-          buffer = Buffer.from(b64, 'base64');
         }
 
         // Resize to exact dimensions if needed
@@ -5376,10 +5403,8 @@ app.post('/api/download-selected', requireAuth, async (req, res) => {
 const backgroundJobs = new Map();
 
 app.post('/api/backgrounds/generate-topics', requireAuth, async (req, res) => {
-  const anthropic = getAnthropic(req);
   const { brandId } = req.body || {};
   if (!brandId) return res.status(400).json({ error: 'Missing brandId' });
-  if (!anthropic) return res.status(500).json({ error: 'Add your Anthropic API key in Settings.' });
 
   const brand = await getBrandAsync(brandId, req.user?.uid);
 
@@ -5413,9 +5438,9 @@ app.post('/api/backgrounds/generate-topics', requireAuth, async (req, res) => {
   }
 
   try {
-    const msg = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 1024,
+    const rawText = await generateText({
+      model: req.body?.textModel,
+      maxTokens: 1024,
       messages: [{
         role: 'user',
         content: `You are generating Pinterest search queries for finding carousel slide background images.
@@ -5435,10 +5460,11 @@ Guidelines:
 - Each query should be 4-7 words for best Pinterest results
 
 Return ONLY a JSON array of 12 strings, no other text.`
-      }]
+      }],
+      req,
     });
 
-    const text = msg.content[0].text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+    const text = rawText.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
     const topics = JSON.parse(text);
     res.json({ topics });
   } catch (err) {
