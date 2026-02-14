@@ -12,7 +12,6 @@ import multer from 'multer';
 import admin from 'firebase-admin';
 import { spawn, execSync } from 'child_process';
 import rateLimit from 'express-rate-limit';
-import jwt from 'jsonwebtoken';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -86,23 +85,8 @@ async function generateWithFlux(faceImagePaths, prompt, { aspectRatio = '9:16', 
   return Buffer.from(await imgRes.arrayBuffer());
 }
 
-// --- Kling 3.0 Video Generation ---
-const KLING_BASE = 'https://api.klingai.com/v1';
-let _klingToken = null, _klingTokenExp = 0;
-
-function getKlingToken() {
-  const ak = process.env.KLING_ACCESS_KEY;
-  const sk = process.env.KLING_SECRET_KEY;
-  if (!ak || !sk) return null;
-  const now = Math.floor(Date.now() / 1000);
-  if (_klingToken && _klingTokenExp > now + 300) return _klingToken;
-  _klingToken = jwt.sign(
-    { iss: ak, exp: now + 1800, nbf: now - 5 },
-    sk, { algorithm: 'HS256', header: { alg: 'HS256', typ: 'JWT' } }
-  );
-  _klingTokenExp = now + 1800;
-  return _klingToken;
-}
+// --- Video Generation (Kling 3.0 via fal.ai) ---
+const FAL_VIDEO_ENDPOINT = 'https://queue.fal.run/fal-ai/kling-video/v3/standard/text-to-video';
 
 function buildVideoPrompt(data, brand) {
   const c = brand.colors || {};
@@ -121,53 +105,58 @@ function buildVideoPrompt(data, brand) {
 }
 
 async function generateVideoSlide(prompt, options = {}) {
-  const token = getKlingToken();
-  if (!token) throw new Error('Kling API not configured. Set KLING_ACCESS_KEY and KLING_SECRET_KEY in .env');
+  const { falKey } = options;
+  if (!falKey) throw new Error('Fal.ai API key not configured. Add it in Settings.');
 
-  const createRes = await fetch(`${KLING_BASE}/videos/text2video`, {
+  // Submit to fal.ai queue
+  const submitRes = await fetch(FAL_VIDEO_ENDPOINT, {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${token}`,
+      'Authorization': `Key ${falKey}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model_name: 'kling-v3',
       prompt,
-      aspect_ratio: options.aspectRatio || '9:16',
       duration: String(options.duration || 5),
+      aspect_ratio: options.aspectRatio || '9:16',
       generate_audio: options.audio || false,
+      negative_prompt: 'blur, distort, low quality, text, watermark',
     }),
   });
 
-  if (!createRes.ok) {
-    const errText = await createRes.text();
-    throw new Error(`Kling API error (${createRes.status}): ${errText}`);
+  if (!submitRes.ok) {
+    const errText = await submitRes.text();
+    throw new Error(`fal.ai video submit error (${submitRes.status}): ${errText}`);
   }
 
-  const createData = await createRes.json();
-  const taskId = createData.data?.task_id;
-  if (!taskId) throw new Error('Kling API did not return a task ID');
+  const { request_id } = await submitRes.json();
+  if (!request_id) throw new Error('fal.ai did not return a request_id');
 
   // Poll for completion (timeout after 10 min)
   const deadline = Date.now() + 600_000;
   while (Date.now() < deadline) {
     await new Promise(r => setTimeout(r, 5000));
-    const statusRes = await fetch(`${KLING_BASE}/videos/text2video/${taskId}`, {
-      headers: { 'Authorization': `Bearer ${getKlingToken()}` },
+    const statusRes = await fetch(`${FAL_VIDEO_ENDPOINT}/requests/${request_id}/status`, {
+      headers: { 'Authorization': `Key ${falKey}` },
     });
     if (!statusRes.ok) continue;
     const status = await statusRes.json();
-    const taskStatus = status.data?.task_status;
-    if (taskStatus === 'succeed') {
-      const videoUrl = status.data?.task_result?.videos?.[0]?.url;
-      if (!videoUrl) throw new Error('Kling returned success but no video URL');
+    if (status.status === 'COMPLETED') {
+      // Fetch the result
+      const resultRes = await fetch(`${FAL_VIDEO_ENDPOINT}/requests/${request_id}`, {
+        headers: { 'Authorization': `Key ${falKey}` },
+      });
+      if (!resultRes.ok) throw new Error(`fal.ai result fetch failed (${resultRes.status})`);
+      const result = await resultRes.json();
+      const videoUrl = result.video?.url;
+      if (!videoUrl) throw new Error('fal.ai returned success but no video URL');
       return videoUrl;
     }
-    if (taskStatus === 'failed') {
-      throw new Error(`Kling generation failed: ${status.data?.task_status_msg || 'unknown error'}`);
+    if (status.status === 'FAILED') {
+      throw new Error(`Video generation failed: ${status.error || 'unknown error'}`);
     }
   }
-  throw new Error('Kling generation timed out after 10 minutes');
+  throw new Error('Video generation timed out after 10 minutes');
 }
 
 // --- Firebase Admin ---
@@ -2037,7 +2026,7 @@ Return ONLY valid JSON (no markdown, no code fences) with:
 // --- Shared content ideas prompt builder ---
 function buildContentIdeasPrompt({ brand, microLabel, websiteUrl, pageTitle, metaDesc, websiteText, numIdeas, slidesPerIdea }) {
   const count = numIdeas || 5;
-  const slideCount = (slidesPerIdea >= 2 && slidesPerIdea <= 12) ? `exactly ${slidesPerIdea}` : '6-7';
+  const slideCount = (slidesPerIdea >= 2 && slidesPerIdea <= 12) ? `exactly ${slidesPerIdea}` : '7 (5-6 if the topic is simple, 8-9 only if more depth is truly needed)';
   return `Based on this website content, generate ${count} carousel content ideas for ${brand.name}'s social media (TikTok/Instagram).
 
 Website: ${websiteUrl}
@@ -2062,10 +2051,18 @@ Return ONLY valid JSON (no markdown, no code fences) with this structure:
           "headline": "Main headline text",
           "body": "Supporting body text (1-2 sentences)",
           "highlight": "key phrase to highlight",
-          "sport": "only for photo type - subject/person shown",
-          "setting": "only for photo type - location/environment",
-          "action": "only for photo type - what the person is doing",
-          "mood": "only for photo type - emotional tone"
+          "sport": "for photo - subject shown",
+          "setting": "for photo - environment",
+          "action": "for photo - what they're doing",
+          "mood": "for photo - emotional tone",
+          "overlayStyle": "for photo - dark gradient, light gradient, or cinematic",
+          "overlayPlacement": "for photo - bottom third, top third, or center",
+          "backgroundStyle": "for text - visual description of background",
+          "mockupLayout": "for mockup - phone-right, phone-left, or text-statement",
+          "mockupTheme": "for mockup - dark or light",
+          "imageUsage": "for mockup - phone, ai-background, or none",
+          "aiBgSetting": "for mockup with ai-background - scene description",
+          "aiBgMood": "for mockup with ai-background - mood/tone"
         }
       ]
     }
@@ -2080,11 +2077,17 @@ Rules:
   * Add 3-5 relevant hashtags at the very end (not 8+, quality over quantity)
   * Keep total caption under 300 characters for TikTok readability
 - Each idea should cover a DISTINCTLY different angle — avoid repeating the same theme or structure across ideas.
-- First slide of each idea: strong hook (usually photo or text type) — each hook must be unique and attention-grabbing
-- Last slide: CTA with "${brand.name} — link in bio" or similar
-- Mix photo, text, and mockup types within each idea
-- For photo slides, ALWAYS include sport, setting, action, and mood fields
-- Use mockup with text-statement layout for bold statement slides
+- Default to 7 slides per idea. Only go to 5-6 if the topic is simple, or 8-9 if it genuinely needs more depth. Always bias toward 7.
+- Strategically choose slide types based on content purpose:
+  * HOOK slides (slide 1): Use "photo" for visual impact — choose a compelling subject, setting, and action
+  * INFORMATION slides: Use "text" for data/stats/lists, "photo" when emotion matters more than text
+  * APP SHOWCASE / CTA slides (usually last): Use "mockup" with imageUsage "phone" to show the app, or "ai-background" for a premium feel
+  * BOLD STATEMENT slides: Use "mockup" with layout "text-statement" and imageUsage "none"
+- For photo slides: ALWAYS include sport, setting, action, mood, overlayStyle, overlayPlacement
+- For text slides: ALWAYS include backgroundStyle (a vivid 1-line visual description matching the brand's mood)
+- For mockup slides: ALWAYS include mockupLayout, mockupTheme, imageUsage. If imageUsage is "ai-background", also include aiBgSetting and aiBgMood
+- NOT every slide needs an AI-generated image — text slides and mockup slides with imageUsage "none" or "phone" are fast and effective
+- Vary the mix: a typical 7-slide carousel might be photo → text → text → mockup → photo → text → mockup(CTA)
 - Headlines: punchy, under 15 words — avoid repeating similar phrasing across ideas
 - Body: 1-2 sentences max
 - Content should be based on REAL information from the website, not generic filler
@@ -3167,8 +3170,9 @@ Pick a DIFFERENT format each time. Do NOT default to two-panel approval.`,
       });
     }
 
-    // Video generation (Kling 3.0)
+    // Video generation (Kling 3.0 via fal.ai)
     if (data.slideType === 'video') {
+      if (!isFalEnabled(req)) return res.status(400).json({ error: 'Fal.ai API key required for video generation. Add it in Settings.' });
       console.log(`[Generate] ${brand.name} | Video clip | ${data.duration || 5}s`);
       const rawPrompt = buildVideoPrompt(data, brand);
       const refinedPrompt = await refinePromptWithClaude(rawPrompt, 'video', data, brand, req);
@@ -3178,10 +3182,11 @@ Pick a DIFFERENT format each time. Do NOT default to two-panel approval.`,
         duration: data.duration || 5,
         aspectRatio: '9:16',
         audio: data.audio || false,
+        falKey: req.headers['x-fal-key'],
       });
 
       const videoRes = await fetch(videoUrl);
-      if (!videoRes.ok) throw new Error('Failed to download video from Kling');
+      if (!videoRes.ok) throw new Error('Failed to download generated video');
       const videoBuffer = Buffer.from(await videoRes.arrayBuffer());
 
       const slug = crypto.randomUUID().slice(0, 8);
@@ -3497,8 +3502,9 @@ app.post('/api/generate-carousel', requireAuth, generationLimiter, async (req, r
           continue;
         }
 
-        // Video slides: Kling 3.0 text-to-video
+        // Video slides: Kling 3.0 via fal.ai
         if (slideData.slideType === 'video') {
+          if (!isFalEnabled(req)) throw new Error('Fal.ai API key required for video generation');
           console.log(`[Carousel ${jobId}] ${brand.name} | Slide ${i + 1}/${slides.length} (video)`);
           const rawPrompt = buildVideoPrompt(slideData, brand);
           const refined = await refinePromptWithClaude(rawPrompt, 'video', slideData, brand, req);
@@ -3508,11 +3514,12 @@ app.post('/api/generate-carousel', requireAuth, generationLimiter, async (req, r
             duration: slideData.duration || 5,
             aspectRatio: '9:16',
             audio: slideData.audio || false,
+            falKey: req.headers['x-fal-key'],
           });
 
           // Download video to local storage
           const videoRes = await fetch(videoUrl);
-          if (!videoRes.ok) throw new Error('Failed to download video from Kling');
+          if (!videoRes.ok) throw new Error('Failed to download generated video');
           const videoBuffer = Buffer.from(await videoRes.arrayBuffer());
 
           const slug = crypto.randomUUID().slice(0, 8);

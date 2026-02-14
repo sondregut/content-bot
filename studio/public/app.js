@@ -2149,6 +2149,13 @@ function loadSlideIntoForm(index) {
   form.elements.action.value = slide.action || '';
   form.elements.mood.value = slide.mood || '';
 
+  // Photo overlay fields
+  if (form.elements.overlayStyle) form.elements.overlayStyle.value = slide.overlayStyle || 'dark gradient';
+  if (form.elements.overlayPlacement) form.elements.overlayPlacement.value = slide.overlayPlacement || 'bottom third';
+
+  // Text background field
+  if (form.elements.backgroundStyle) form.elements.backgroundStyle.value = slide.backgroundStyle || '';
+
   // Mockup fields
   mockupLayoutSelect.value = slide.mockupLayout || 'phone-right';
   mockupThemeSelect.value = slide.mockupTheme || 'dark';
@@ -2272,6 +2279,10 @@ function saveCurrentSlideEdits() {
     slide.setting = form.elements.setting.value;
     slide.action = form.elements.action.value;
     slide.mood = form.elements.mood.value;
+    slide.overlayStyle = form.elements.overlayStyle?.value || 'dark gradient';
+    slide.overlayPlacement = form.elements.overlayPlacement?.value || 'bottom third';
+  } else if (slide.type === 'text') {
+    slide.backgroundStyle = form.elements.backgroundStyle?.value || '';
   } else if (slide.type === 'mockup') {
     slide.mockupLayout = mockupLayoutSelect.value;
     slide.mockupTheme = mockupThemeSelect.value;
