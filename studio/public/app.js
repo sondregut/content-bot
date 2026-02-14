@@ -767,6 +767,18 @@ function handleCreationEvent(event, data) {
         if (i < idx) el.className = 'creation-step done';
         else if (i === idx) el.className = 'creation-step active';
       }
+      // Show content ideas section with loading indicator when step starts
+      if (data.step === 'content-ideas') {
+        const section = document.getElementById('creation-section-ideas');
+        const list = document.getElementById('creation-ideas-list');
+        list.innerHTML = '<div class="creation-ideas-loading">Generating ideas...</div>';
+        section.style.display = 'block';
+      }
+      // Show carousel section with loading indicator when step starts
+      if (data.step === 'carousel') {
+        const section = document.getElementById('creation-section-carousel');
+        section.style.display = 'block';
+      }
       break;
     }
 
@@ -854,21 +866,25 @@ function handleCreationEvent(event, data) {
       break;
     }
 
-    case 'content-ideas': {
-      if (Array.isArray(data) && data.length > 0) {
-        const section = document.getElementById('creation-section-ideas');
-        const list = document.getElementById('creation-ideas-list');
-        list.innerHTML = '';
-        data.forEach((idea, i) => {
-          const item = document.createElement('div');
-          item.className = 'creation-idea-item';
-          item.innerHTML = `<span class="creation-idea-num">${i + 1}</span><span class="creation-idea-title">${idea.title}</span><span class="creation-idea-slides">${idea.slides?.length || 0} slides</span>`;
-          list.appendChild(item);
-        });
-        section.style.display = 'block';
+    case 'content-idea': {
+      // Individual idea arriving progressively
+      const section = document.getElementById('creation-section-ideas');
+      const list = document.getElementById('creation-ideas-list');
+      // Remove loading indicator if present
+      const loader = list.querySelector('.creation-ideas-loading');
+      if (loader) loader.remove();
+      section.style.display = 'block';
+      const count = list.children.length + 1;
+      const item = document.createElement('div');
+      item.className = 'creation-idea-item';
+      item.innerHTML = `<span class="creation-idea-num">${count}</span><span class="creation-idea-title">${data.title}</span><span class="creation-idea-slides">${data.slides?.length || 0} slides</span>`;
+      list.appendChild(item);
+      break;
+    }
 
-        // Store content ideas for the studio
-        const brandObj = { name: data[0]?.slides?.[0]?.microLabel || '' };
+    case 'content-ideas': {
+      // Full batch — store for studio use
+      if (Array.isArray(data) && data.length > 0) {
         contentData = {
           apps: [{
             appName: currentBrand,

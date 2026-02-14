@@ -3326,6 +3326,18 @@ input:focus, select:focus, textarea:focus {
   gap: 8px;
 }
 
+.creation-ideas-loading {
+  padding: 14px;
+  color: var(--muted);
+  font-size: 0.88rem;
+  animation: pulse-opacity 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-opacity {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
 .creation-idea-item {
   display: flex;
   align-items: center;

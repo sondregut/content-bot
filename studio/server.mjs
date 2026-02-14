@@ -2100,7 +2100,8 @@ Rules:
     }
 
     if (contentIdeas.length > 0) {
-      sendSSE('content-ideas', contentIdeas.map((idea, i) => ({
+      // Send ideas individually so they appear progressively in the UI
+      const formattedIdeas = contentIdeas.map((idea, i) => ({
         id: `AI-${i + 1}`,
         title: idea.title,
         caption: idea.caption || '',
@@ -2109,7 +2110,12 @@ Rules:
           number: s.number || si + 1,
           type: s.type || 'text',
         })),
-      })));
+      }));
+      for (const idea of formattedIdeas) {
+        sendSSE('content-idea', idea);
+      }
+      // Also send the full batch for contentData storage
+      sendSSE('content-ideas', formattedIdeas);
     }
 
     // Step 9: Generate first carousel slides (slide 1 = AI, rest = mockup)
