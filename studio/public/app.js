@@ -325,8 +325,6 @@ function resetAppState() {
 
   // Meme generator
   personalizedScenarios = [];
-  faceImageFiles = [];
-  storedFacePhotos = [];
   selectedScenario = null;
   personalizeResults = [];
   memeFilename = null;
@@ -732,7 +730,7 @@ function renderFaceStudioPersons() {
   const addCard = document.createElement('div');
   addCard.className = 'face-studio-person-card face-studio-add-card';
   addCard.innerHTML = '<span style="font-size:1.5rem">+</span><span style="font-size:0.75rem">Add Person</span>';
-  addCard.addEventListener('click', addFaceStudioPerson);
+  addCard.addEventListener('click', () => showAddPersonInline(container, addCard));
   container.appendChild(addCard);
 
   // Auto-resume polling for persons in training
@@ -743,37 +741,62 @@ function renderFaceStudioPersons() {
   }
 }
 
-async function addFaceStudioPerson() {
-  const name = prompt('Person name:');
-  if (!name?.trim()) return;
-  try {
-    const res = await authFetch('/api/persons', {
-      method: 'POST',
-      body: JSON.stringify({ name: name.trim() }),
-    });
-    const data = await res.json();
-    if (data.ok) {
-      userPersons.unshift(data.person);
-      selectedFaceStudioPerson = data.person.id;
+function showAddPersonInline(container, addCard) {
+  // Replace the add-card with an inline input card
+  const inputCard = document.createElement('div');
+  inputCard.className = 'face-studio-person-card face-studio-add-card';
+  inputCard.style.justifyContent = 'center';
+  inputCard.innerHTML = `
+    <input type="text" class="face-studio-add-input" placeholder="Name..." maxlength="50" />
+    <div class="face-studio-add-hint">Enter ↵</div>
+  `;
+  container.replaceChild(inputCard, addCard);
+
+  const input = inputCard.querySelector('input');
+  input.focus();
+
+  async function submitName() {
+    const name = input.value.trim();
+    if (!name) { renderFaceStudioPersons(); return; }
+    input.disabled = true;
+    try {
+      const res = await authFetch('/api/persons', {
+        method: 'POST',
+        body: JSON.stringify({ name }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        userPersons.unshift(data.person);
+        selectedFaceStudioPerson = data.person.id;
+        renderFaceStudioPersons();
+        renderFaceStudioPersonDetail();
+        populatePersonSelectors();
+      } else {
+        alert(data.error || 'Failed to create person');
+        renderFaceStudioPersons();
+      }
+    } catch (err) {
+      alert('Failed to create person: ' + err.message);
       renderFaceStudioPersons();
-      renderFaceStudioPersonDetail();
-      populatePersonSelectors();
-    } else {
-      alert(data.error || 'Failed to create person');
     }
-  } catch (err) {
-    alert('Failed to create person: ' + err.message);
   }
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); submitName(); }
+    if (e.key === 'Escape') { renderFaceStudioPersons(); }
+  });
+  input.addEventListener('blur', () => {
+    // Small delay so click events on the input card don't conflict
+    setTimeout(() => { if (input.value.trim()) submitName(); else renderFaceStudioPersons(); }, 150);
+  });
 }
 
 function renderFaceStudioPersonDetail() {
   const detailPanel = document.getElementById('face-studio-person-detail');
-  const quickUpload = document.getElementById('face-studio-quick-upload');
   if (!detailPanel) return;
 
   if (!selectedFaceStudioPerson) {
     detailPanel.style.display = 'none';
-    if (quickUpload) quickUpload.style.display = 'block';
     return;
   }
 
@@ -781,12 +804,10 @@ function renderFaceStudioPersonDetail() {
   if (!person) {
     selectedFaceStudioPerson = null;
     detailPanel.style.display = 'none';
-    if (quickUpload) quickUpload.style.display = 'block';
     return;
   }
 
   detailPanel.style.display = 'block';
-  if (quickUpload) quickUpload.style.display = 'none';
 
   // Name input
   const nameInput = document.getElementById('face-studio-person-name');
@@ -962,7 +983,11 @@ async function trainLoraForPerson(person) {
 }
 
 // "Add Person" button in Face Studio header
-document.getElementById('face-studio-add-person')?.addEventListener('click', addFaceStudioPerson);
+document.getElementById('face-studio-add-person')?.addEventListener('click', () => {
+  const container = document.getElementById('face-studio-people');
+  const addCard = container?.querySelector('.face-studio-add-card');
+  if (container && addCard) showAddPersonInline(container, addCard);
+});
 
 // --- LoRA Training Polling ---
 const loraPollingTimers = new Map();
@@ -4392,16 +4417,10 @@ const FALLBACK_SCENARIOS = [
 let personalizedScenarios = [];
 const scenarioCache = new Map(); // client-side cache by brandId
 
-let faceImageFiles = []; // array of File objects (max 5)
-let storedFacePhotos = []; // photos loaded from brand profile
 let selectedScenario = null;
 let personalizeResults = [];
 
 const personalizeView = document.getElementById('personalize-view');
-const faceImageInput = document.getElementById('face-image-input');
-const faceAddBtn = document.getElementById('face-add-btn');
-const facePhotosGrid = document.getElementById('face-photos-grid');
-const facePhotoCount = document.getElementById('face-photo-count');
 const scenarioGrid = document.getElementById('scenario-grid');
 const personalizeGenerateBtn = document.getElementById('personalize-generate-btn');
 const personalizeStatus = document.getElementById('personalize-status');
@@ -4421,21 +4440,6 @@ function openPersonalizeView() {
   if (currentBrand && personalizedScenarios.length === 0 && !scenarioCache.has(currentBrand)) {
     loadPersonalizeScenarios(currentBrand);
   }
-  // Auto-load stored face photos if user hasn't manually added any (for quick upload)
-  if (currentBrand && faceImageFiles.length === 0 && !selectedFaceStudioPerson) {
-    loadStoredFacePhotos(currentBrand);
-  }
-}
-
-async function loadStoredFacePhotos(brandId) {
-  try {
-    const res = await authFetch(`/api/brands/${brandId}/face-photos`);
-    const data = await res.json();
-    storedFacePhotos = (data.facePhotos || []).filter(p => p.url);
-    if (storedFacePhotos.length > 0 && faceImageFiles.length === 0) {
-      renderFacePhotos();
-    }
-  } catch (err) { console.warn('[Face Photos] Load failed:', err.message); storedFacePhotos = []; }
 }
 
 function closePersonalizeView() {
@@ -4596,100 +4600,11 @@ async function loadPersonalizeScenarios(brandId) {
 
 renderScenarioGrid();
 
-// Multi-photo upload
-function renderFacePhotos() {
-  // Remove existing thumbnails (keep the add button and hidden input)
-  facePhotosGrid.querySelectorAll('.face-photo-thumb').forEach(el => el.remove());
-
-  // Show stored photos if no local files uploaded
-  if (faceImageFiles.length === 0 && storedFacePhotos.length > 0) {
-    storedFacePhotos.forEach((photo, idx) => {
-      const thumb = document.createElement('div');
-      thumb.className = 'face-photo-thumb';
-      thumb.innerHTML = `
-        <img src="${photo.url}" alt="Saved ${idx + 1}" />
-        <span class="saved-badge">Saved</span>
-      `;
-      facePhotosGrid.insertBefore(thumb, faceAddBtn);
-    });
-    facePhotoCount.textContent = `${storedFacePhotos.length} saved`;
-    faceAddBtn.style.display = 'flex';
-    return;
-  }
-
-  faceImageFiles.forEach((file, idx) => {
-    const thumb = document.createElement('div');
-    thumb.className = 'face-photo-thumb';
-    thumb.innerHTML = `
-      <img src="${file._preview}" alt="Face ${idx + 1}" />
-      <button class="face-photo-remove" data-idx="${idx}" title="Remove">&times;</button>
-    `;
-    facePhotosGrid.insertBefore(thumb, faceAddBtn);
-  });
-
-  facePhotoCount.textContent = `${faceImageFiles.length} / 5`;
-  faceAddBtn.style.display = faceImageFiles.length >= 5 ? 'none' : 'flex';
-
-  // Attach remove handlers
-  facePhotosGrid.querySelectorAll('.face-photo-remove').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const idx = parseInt(btn.dataset.idx);
-      faceImageFiles.splice(idx, 1);
-      renderFacePhotos();
-    });
-  });
-}
-
-faceAddBtn.addEventListener('click', () => faceImageInput.click());
-
-function addFaceFiles(files) {
-  const imageFiles = files.filter(f => f.type.startsWith('image/'));
-  if (!imageFiles.length) return;
-  const remaining = 5 - faceImageFiles.length;
-  const toAdd = imageFiles.slice(0, remaining);
-  let loaded = 0;
-  toAdd.forEach(file => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      file._preview = e.target.result;
-      faceImageFiles.push(file);
-      loaded++;
-      if (loaded === toAdd.length) renderFacePhotos();
-    };
-    reader.readAsDataURL(file);
-  });
-}
-
-faceImageInput.addEventListener('change', () => {
-  addFaceFiles(Array.from(faceImageInput.files));
-  faceImageInput.value = '';
-});
-
-// Drag & drop for face photos grid
-facePhotosGrid.addEventListener('dragover', (e) => {
-  e.preventDefault();
-  facePhotosGrid.classList.add('drag-over');
-});
-facePhotosGrid.addEventListener('dragleave', (e) => {
-  if (!facePhotosGrid.contains(e.relatedTarget)) {
-    facePhotosGrid.classList.remove('drag-over');
-  }
-});
-facePhotosGrid.addEventListener('drop', (e) => {
-  e.preventDefault();
-  facePhotosGrid.classList.remove('drag-over');
-  addFaceFiles(Array.from(e.dataTransfer.files));
-});
-
 // Generate personalized image(s)
 personalizeGenerateBtn.addEventListener('click', async () => {
   const selectedPersonId = selectedFaceStudioPerson || '';
-  const hasLocal = faceImageFiles.length > 0;
-  const hasStored = storedFacePhotos.length > 0;
-  const hasPerson = Boolean(selectedPersonId);
-  if (!hasLocal && !hasStored && !hasPerson) {
-    personalizeStatus.textContent = 'Select a person or upload face photos first.';
+  if (!selectedPersonId) {
+    personalizeStatus.textContent = 'Select a person first.';
     return;
   }
   if (!currentBrand) {
@@ -4711,21 +4626,18 @@ personalizeGenerateBtn.addEventListener('click', async () => {
 
   personalizeGenerateBtn.disabled = true;
 
-  // Build FormData — attach local files if any, or use personId, otherwise send empty (server uses stored brand photos)
-  const photoCount = hasPerson ? (userPersons.find(p => p.id === selectedPersonId)?.photos?.length || 0) : hasLocal ? faceImageFiles.length : storedFacePhotos.length;
-  const photoLabel = hasPerson ? 'person' : hasLocal ? 'uploaded' : 'saved';
+  const photoCount = userPersons.find(p => p.id === selectedPersonId)?.photos?.length || 0;
   function buildFormData() {
     const fd = new FormData();
-    if (!hasPerson && hasLocal) faceImageFiles.forEach(file => fd.append('faceImages', file));
     fd.append('brand', currentBrand);
     fd.append('model', model);
-    if (hasPerson) fd.append('personId', selectedPersonId);
+    fd.append('personId', selectedPersonId);
     return fd;
   }
 
   if (count === 1) {
     // Single image
-    personalizeStatus.textContent = `Generating personalized image (${photoCount} ${photoLabel} photo${photoCount > 1 ? 's' : ''})...`;
+    personalizeStatus.textContent = `Generating personalized image (${photoCount} photo${photoCount !== 1 ? 's' : ''})...`;
 
     const fd = buildFormData();
 
@@ -4768,7 +4680,7 @@ personalizeGenerateBtn.addEventListener('click', async () => {
       }
     }
 
-    personalizeStatus.textContent = `Starting batch generation (${count} images, ${photoCount} ${photoLabel} photo${photoCount > 1 ? 's' : ''})...`;
+    personalizeStatus.textContent = `Starting batch generation (${count} images, ${photoCount} photo${photoCount !== 1 ? 's' : ''})...`;
 
     const fd = buildFormData();
     fd.append('slides', JSON.stringify(slides));
