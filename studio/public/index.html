@@ -62,8 +62,7 @@
             <option value="gpt-image-1">GPT Image 1</option>
             <option value="dall-e-3">DALL-E 3</option>
           </select>
-          <button class="header-btn" id="settings-btn" title="API Settings">&#9881;</button>
-          <button class="sign-out-btn" id="sign-out-btn" title="Sign Out">Sign Out</button>
+          <button class="header-btn" id="settings-btn" title="Settings">&#9881;</button>
         </div>
       </header>
 
@@ -767,10 +766,21 @@
     <div class="modal-overlay" id="settings-modal" style="display:none">
       <div class="modal">
         <div class="modal-header">
-          <h3>API Settings</h3>
+          <h3>Settings</h3>
           <button class="modal-close" id="settings-close">&times;</button>
         </div>
         <div class="modal-body">
+          <div class="settings-profile">
+            <div class="settings-profile-info">
+              <div class="settings-profile-avatar" id="settings-avatar"></div>
+              <div>
+                <div class="settings-profile-email" id="settings-email"></div>
+                <div class="settings-profile-uid" id="settings-uid"></div>
+              </div>
+            </div>
+            <button class="sign-out-btn" id="sign-out-btn">Sign Out</button>
+          </div>
+          <div class="settings-divider"></div>
           <div class="form-group full">
             <label class="label">OpenAI API Key (image generation)</label>
             <input type="password" id="settings-openai-key" placeholder="sk-..." />

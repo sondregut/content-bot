@@ -247,6 +247,13 @@ settingsBtn.addEventListener('click', () => {
   settingsModal.style.display = 'flex';
   settingsStatus.textContent = '';
   settingsStatus.className = 'settings-status';
+  const user = firebase.auth().currentUser;
+  if (user) {
+    const email = user.email || '';
+    document.getElementById('settings-email').textContent = email;
+    document.getElementById('settings-uid').textContent = user.uid;
+    document.getElementById('settings-avatar').textContent = email.charAt(0).toUpperCase();
+  }
 });
 
 settingsClose.addEventListener('click', () => {

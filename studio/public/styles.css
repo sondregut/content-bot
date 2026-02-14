@@ -173,22 +173,67 @@ body {
   min-height: 20px;
 }
 
-/* Sign Out Button */
+/* Settings Profile */
+
+.settings-profile {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settings-profile-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.settings-profile-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--cyan);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: var(--navy);
+  flex-shrink: 0;
+}
+
+.settings-profile-email {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.settings-profile-uid {
+  font-size: 0.7rem;
+  opacity: 0.5;
+  margin-top: 2px;
+}
+
+.settings-divider {
+  height: 1px;
+  background: rgba(255,255,255,0.1);
+  margin: 16px 0;
+}
 
 .sign-out-btn {
   padding: 6px 14px;
   border-radius: 8px;
-  border: 1px solid rgba(255,255,255,0.2);
-  background: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.15);
+  background: rgba(255,255,255,0.06);
   color: var(--white);
   font-family: inherit;
   font-size: 0.8rem;
   font-weight: 600;
   cursor: pointer;
   transition: background 0.15s;
+  white-space: nowrap;
 }
 
-.sign-out-btn:hover { background: rgba(255,255,255,0.2); }
+.sign-out-btn:hover { background: rgba(255,60,60,0.25); color: #ff6b6b; border-color: rgba(255,60,60,0.3); }
 
 .app {
   display: flex;
