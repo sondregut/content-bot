@@ -2573,3 +2573,105 @@ input:focus, select:focus, textarea:focus {
     border: 1px solid var(--border);
   }
 }
+
+/* Background Library Modal */
+.bg-library-modal-wide { width: 720px; max-width: 95vw; }
+.bg-library-modal-wide .modal-body { max-height: 75vh; overflow-y: auto; }
+
+.bg-category-tabs {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  flex: 1;
+  padding: 2px 0;
+}
+
+.bg-category-tab {
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--white);
+  font-size: 0.78rem;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  color: var(--slate);
+  transition: all 0.15s;
+}
+
+.bg-category-tab:hover { border-color: var(--cyan); color: var(--navy); }
+.bg-category-tab.active { background: var(--navy); color: var(--white); border-color: var(--navy); }
+
+.bg-thumbnail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 8px;
+}
+
+.bg-thumbnail {
+  position: relative;
+  aspect-ratio: 9 / 16;
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: border-color 0.15s;
+}
+
+.bg-thumbnail:hover { border-color: var(--cyan); }
+
+.bg-thumbnail img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.bg-thumbnail .bg-delete-btn {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(0,0,0,0.6);
+  color: white;
+  font-size: 0.75rem;
+  cursor: pointer;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.bg-thumbnail:hover .bg-delete-btn { display: flex; }
+
+.bg-topic-item {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.bg-topic-item input {
+  flex: 1;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-family: inherit;
+}
+
+.bg-topic-item .bg-topic-remove {
+  width: 26px;
+  height: 26px;
+  border: none;
+  background: none;
+  color: var(--danger);
+  font-size: 1rem;
+  cursor: pointer;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.bg-topic-item .bg-topic-remove:hover { background: rgba(220,38,38,0.1); }

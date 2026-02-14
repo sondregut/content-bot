@@ -362,6 +362,7 @@
                   <div class="ref-upload-row">
                     <input type="file" id="screenshot-image-input" accept="image/*" style="display:none" />
                     <button type="button" class="btn small" id="screenshot-upload-btn">Upload Image</button>
+                    <button type="button" class="btn small" id="bg-library-btn">Browse Library</button>
                     <span class="screenshot-filename" id="screenshot-filename">No image</span>
                     <button type="button" class="btn small danger" id="screenshot-clear-btn" style="display:none">Clear</button>
                   </div>
@@ -855,6 +856,55 @@
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19.59 6.69a4.83 4.83 0 01-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 01-2.88 2.5 2.89 2.89 0 01-2.89-2.89 2.89 2.89 0 012.89-2.89c.28 0 .54.04.79.1v-3.5a6.37 6.37 0 00-.79-.05A6.34 6.34 0 003.15 15.2a6.34 6.34 0 006.34 6.34 6.34 6.34 0 006.34-6.34V8.73a8.19 8.19 0 004.76 1.52v-3.4a4.85 4.85 0 01-1-.16z"/></svg>
             Post to TikTok
           </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Background Library Modal -->
+    <div class="modal-overlay" id="bg-library-overlay" style="display:none">
+      <div class="modal bg-library-modal-wide">
+        <div class="modal-header">
+          <h3>Background Library</h3>
+          <button class="modal-close" id="bg-library-close">&times;</button>
+        </div>
+        <div class="modal-body">
+          <!-- Empty state -->
+          <div id="bg-empty-state">
+            <p style="color:#6b7280; text-align:center; margin:24px 0;">No backgrounds yet for this brand.</p>
+            <div style="text-align:center">
+              <button class="btn primary" id="bg-start-download-btn">Download Backgrounds</button>
+            </div>
+          </div>
+
+          <!-- Download flow -->
+          <div id="bg-download-flow" style="display:none">
+            <label class="label">Search Topics</label>
+            <p style="font-size:0.82rem; color:#6b7280; margin:0 0 8px;">Edit, add, or remove Pinterest search queries before downloading.</p>
+            <div id="bg-topics-list"></div>
+            <div style="display:flex; gap:8px; margin:8px 0 16px;">
+              <button class="btn small" id="bg-add-topic-btn">+ Add Topic</button>
+              <button class="btn small" id="bg-regenerate-topics-btn">Regenerate</button>
+            </div>
+            <div id="bg-download-progress" style="display:none">
+              <div class="progress-bar" style="margin-bottom:6px">
+                <div class="progress-fill" id="bg-progress-fill" style="width:0%"></div>
+              </div>
+              <p style="font-size:0.82rem; color:#6b7280; margin:0" id="bg-progress-label">Starting download...</p>
+            </div>
+            <div style="text-align:right">
+              <button class="btn" id="bg-back-browse-btn" style="display:none">Back to Library</button>
+              <button class="btn primary" id="bg-download-all-btn">Download All</button>
+            </div>
+          </div>
+
+          <!-- Browse mode -->
+          <div id="bg-browse-mode" style="display:none">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+              <div class="bg-category-tabs" id="bg-category-tabs"></div>
+              <button class="btn small" id="bg-download-more-btn">Download More</button>
+            </div>
+            <div class="bg-thumbnail-grid" id="bg-thumbnail-grid"></div>
+          </div>
         </div>
       </div>
     </div>

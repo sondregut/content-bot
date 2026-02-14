@@ -2972,3 +2972,244 @@ document.getElementById('vault-backdrop')?.addEventListener('click', closeVault)
 
 // Initial vault count
 updateVaultCount();
+
+// --- Background Library ---
+
+let bgTopics = [];
+let bgPollTimer = null;
+
+const bgLibraryOverlay = document.getElementById('bg-library-overlay');
+const bgLibraryClose = document.getElementById('bg-library-close');
+const bgEmptyState = document.getElementById('bg-empty-state');
+const bgDownloadFlow = document.getElementById('bg-download-flow');
+const bgBrowseMode = document.getElementById('bg-browse-mode');
+const bgTopicsList = document.getElementById('bg-topics-list');
+const bgProgressFill = document.getElementById('bg-progress-fill');
+const bgProgressLabel = document.getElementById('bg-progress-label');
+const bgDownloadProgress = document.getElementById('bg-download-progress');
+const bgThumbnailGrid = document.getElementById('bg-thumbnail-grid');
+const bgCategoryTabs = document.getElementById('bg-category-tabs');
+
+function openBgLibrary() {
+  bgLibraryOverlay.style.display = 'flex';
+  loadBgLibrary();
+}
+
+function closeBgLibrary() {
+  bgLibraryOverlay.style.display = 'none';
+  if (bgPollTimer) { clearInterval(bgPollTimer); bgPollTimer = null; }
+}
+
+document.getElementById('bg-library-btn').addEventListener('click', openBgLibrary);
+bgLibraryClose.addEventListener('click', closeBgLibrary);
+bgLibraryOverlay.addEventListener('click', (e) => { if (e.target === bgLibraryOverlay) closeBgLibrary(); });
+
+async function loadBgLibrary() {
+  if (!currentBrand) return;
+  bgEmptyState.style.display = 'none';
+  bgDownloadFlow.style.display = 'none';
+  bgBrowseMode.style.display = 'none';
+
+  try {
+    const res = await authFetch(`/api/backgrounds?brand=${encodeURIComponent(currentBrand)}`);
+    const data = await res.json();
+
+    if (data.totalImages === 0) {
+      bgEmptyState.style.display = 'block';
+    } else {
+      bgBrowseMode.style.display = 'block';
+      renderBgCategories(data.categories);
+    }
+  } catch (err) {
+    bgEmptyState.style.display = 'block';
+  }
+}
+
+document.getElementById('bg-start-download-btn').addEventListener('click', () => startBgDownloadFlow());
+document.getElementById('bg-download-more-btn').addEventListener('click', () => startBgDownloadFlow());
+
+async function startBgDownloadFlow() {
+  bgEmptyState.style.display = 'none';
+  bgBrowseMode.style.display = 'none';
+  bgDownloadFlow.style.display = 'block';
+  bgDownloadProgress.style.display = 'none';
+  document.getElementById('bg-download-all-btn').disabled = false;
+  document.getElementById('bg-back-browse-btn').style.display = 'none';
+
+  bgTopicsList.innerHTML = '<p style="color:#6b7280; font-size:0.85rem;">Generating topics...</p>';
+
+  try {
+    const res = await authFetch('/api/backgrounds/generate-topics', {
+      method: 'POST',
+      body: JSON.stringify({ brandId: currentBrand }),
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    bgTopics = data.topics || [];
+    renderBgTopics(bgTopics);
+  } catch (err) {
+    bgTopicsList.innerHTML = `<p style="color:var(--danger); font-size:0.85rem;">Failed: ${err.message}</p>`;
+  }
+}
+
+function renderBgTopics(topics) {
+  bgTopicsList.innerHTML = '';
+  topics.forEach((topic, i) => {
+    const row = document.createElement('div');
+    row.className = 'bg-topic-item';
+    row.innerHTML = `<input type="text" value="${topic.replace(/"/g, '&quot;')}" data-index="${i}" />
+      <button class="bg-topic-remove" data-index="${i}">&times;</button>`;
+    bgTopicsList.appendChild(row);
+  });
+
+  bgTopicsList.querySelectorAll('input').forEach(input => {
+    input.addEventListener('change', () => {
+      bgTopics[parseInt(input.dataset.index)] = input.value;
+    });
+  });
+
+  bgTopicsList.querySelectorAll('.bg-topic-remove').forEach(btn => {
+    btn.addEventListener('click', () => {
+      bgTopics.splice(parseInt(btn.dataset.index), 1);
+      renderBgTopics(bgTopics);
+    });
+  });
+}
+
+document.getElementById('bg-add-topic-btn').addEventListener('click', () => {
+  bgTopics.push('');
+  renderBgTopics(bgTopics);
+  const inputs = bgTopicsList.querySelectorAll('input');
+  if (inputs.length) inputs[inputs.length - 1].focus();
+});
+
+document.getElementById('bg-regenerate-topics-btn').addEventListener('click', () => startBgDownloadFlow());
+
+document.getElementById('bg-download-all-btn').addEventListener('click', async () => {
+  const filtered = bgTopics.filter(t => t.trim());
+  if (filtered.length === 0) return;
+
+  document.getElementById('bg-download-all-btn').disabled = true;
+  bgDownloadProgress.style.display = 'block';
+  bgProgressFill.style.width = '0%';
+  bgProgressLabel.textContent = 'Starting download...';
+
+  try {
+    const res = await authFetch('/api/backgrounds/download', {
+      method: 'POST',
+      body: JSON.stringify({ brandId: currentBrand, topics: filtered }),
+    });
+    const data = await res.json();
+
+    if (data.error) {
+      bgProgressLabel.textContent = `Error: ${data.error}`;
+      document.getElementById('bg-download-all-btn').disabled = false;
+      return;
+    }
+
+    bgPollTimer = setInterval(async () => {
+      try {
+        const statusRes = await authFetch(`/api/backgrounds/download-status/${data.jobId}`);
+        const status = await statusRes.json();
+        const pct = Math.round((status.completed / status.total) * 100);
+        bgProgressFill.style.width = pct + '%';
+        bgProgressLabel.textContent = status.currentTopic
+          ? `Downloading: ${status.currentTopic} (${status.completed}/${status.total})`
+          : `${status.completed}/${status.total} topics done`;
+
+        if (status.status === 'done') {
+          clearInterval(bgPollTimer);
+          bgPollTimer = null;
+          bgProgressLabel.textContent = 'Download complete!';
+          document.getElementById('bg-back-browse-btn').style.display = 'inline-block';
+        }
+      } catch {}
+    }, 2000);
+  } catch (err) {
+    bgProgressLabel.textContent = `Error: ${err.message}`;
+    document.getElementById('bg-download-all-btn').disabled = false;
+  }
+});
+
+document.getElementById('bg-back-browse-btn').addEventListener('click', () => loadBgLibrary());
+
+function renderBgCategories(categories) {
+  const keys = Object.keys(categories).sort();
+  bgCategoryTabs.innerHTML = '';
+
+  // "All" tab
+  const allBtn = document.createElement('button');
+  allBtn.className = 'bg-category-tab active';
+  allBtn.textContent = 'All';
+  allBtn.addEventListener('click', () => {
+    bgCategoryTabs.querySelectorAll('.bg-category-tab').forEach(b => b.classList.remove('active'));
+    allBtn.classList.add('active');
+    const allImages = keys.flatMap(k => categories[k].images);
+    renderBgThumbnails(allImages);
+  });
+  bgCategoryTabs.appendChild(allBtn);
+
+  keys.forEach(key => {
+    const btn = document.createElement('button');
+    btn.className = 'bg-category-tab';
+    btn.textContent = key.replace(/-/g, ' ');
+    btn.addEventListener('click', () => {
+      bgCategoryTabs.querySelectorAll('.bg-category-tab').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      renderBgThumbnails(categories[key].images);
+    });
+    bgCategoryTabs.appendChild(btn);
+  });
+
+  // Show all by default
+  const allImages = keys.flatMap(k => categories[k].images);
+  renderBgThumbnails(allImages);
+}
+
+function renderBgThumbnails(images) {
+  bgThumbnailGrid.innerHTML = '';
+  images.forEach(imgUrl => {
+    const div = document.createElement('div');
+    div.className = 'bg-thumbnail';
+    div.innerHTML = `<img src="${imgUrl}" loading="lazy" alt="" />
+      <button class="bg-delete-btn" title="Delete">&times;</button>`;
+
+    div.querySelector('img').addEventListener('click', () => selectBackground(imgUrl));
+
+    div.querySelector('.bg-delete-btn').addEventListener('click', async (e) => {
+      e.stopPropagation();
+      // Parse path: /backgrounds/{brandId}/{category}/{filename}
+      const parts = imgUrl.replace(/^\/backgrounds\//, '').split('/');
+      if (parts.length < 3) return;
+      try {
+        const res = await authFetch(`/api/backgrounds/${parts[0]}/${parts[1]}/${parts[2]}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (data.ok) div.remove();
+      } catch {}
+    });
+
+    bgThumbnailGrid.appendChild(div);
+  });
+}
+
+async function selectBackground(imgUrl) {
+  try {
+    const res = await authFetch('/api/backgrounds/select', {
+      method: 'POST',
+      body: JSON.stringify({ backgroundPath: imgUrl }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      screenshotImageFilename = data.filename;
+      screenshotFilename.textContent = data.filename;
+      screenshotPreview.src = data.url;
+      screenshotPreview.style.display = 'block';
+      screenshotClearBtn.style.display = 'inline-block';
+      closeBgLibrary();
+      toggleMockupPhoneOptions();
+      updatePreviewMockup();
+    }
+  } catch (err) {
+    console.error('Failed to select background:', err);
+  }
+}
