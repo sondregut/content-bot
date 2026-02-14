@@ -1700,6 +1700,7 @@ document.getElementById('mockupTextColor').addEventListener('input', updatePrevi
 document.getElementById('mockupAccentColor').addEventListener('input', updatePreviewMockup);
 document.getElementById('mockupTextColorEnabled').addEventListener('change', updatePreviewMockup);
 document.getElementById('mockupAccentColorEnabled').addEventListener('change', updatePreviewMockup);
+form.elements.includeOwl.addEventListener('change', updatePreviewMockup);
 
 // Font size sliders
 document.getElementById('headlineFontSize').addEventListener('input', () => {
@@ -1826,13 +1827,21 @@ function updatePreviewMockup() {
     mockupMicro.style.fontFamily = fontFamily + ', sans-serif';
   }
 
-  // Icon position
+  // Icon position & visibility
   const mockupIcon = document.getElementById('mockup-icon');
+  const showWatermark = form.elements.includeOwl.checked;
+  mockupIcon.style.display = showWatermark ? '' : 'none';
   const pos = owlPositionInput.value;
   mockupIcon.style.top = pos.includes('top') ? '8px' : '';
   mockupIcon.style.bottom = pos.includes('bottom') ? '8px' : '';
   mockupIcon.style.left = pos.includes('left') ? '8px' : '';
   mockupIcon.style.right = pos.includes('right') ? '8px' : '';
+
+  // Watermark text
+  const mockupIconText = document.getElementById('mockup-icon-text');
+  if (mockupIconText) {
+    mockupIconText.textContent = brand?.iconOverlayText || '';
+  }
 
   // Re-apply text offset transform
   applyTextOffset();
@@ -2288,7 +2297,8 @@ async function updateIconPreview() {
   iconPreviewImg.src = iconUrl;
   mockupIconImg.src = iconUrl;
   iconPreviewImg.style.display = 'block';
-  mockupIconImg.style.display = 'block';
+  const showWatermark = form.elements.includeOwl?.checked ?? true;
+  mockupIconImg.style.display = showWatermark ? 'block' : 'none';
 }
 
 iconUploadBtn.addEventListener('click', () => iconFileInput.click());
