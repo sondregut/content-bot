@@ -199,11 +199,11 @@
               <div class="freeform-status" id="freeform-status"></div>
             </div>
 
-            <!-- Face Personalization CTA -->
+            <!-- Face Studio CTA -->
             <div class="personalize-cta" id="personalize-cta">
               <div class="personalize-cta-icon">&#128247;</div>
-              <h3>Personalize with Your Face</h3>
-              <p>Upload face photos, pick a scenario, and generate AI images of yourself in branded scenarios.</p>
+              <h3>Manage Face Models</h3>
+              <p>Upload face photos and train LoRA models. Then select a person on any photo slide to generate their face in the scene.</p>
               <button type="button" class="btn primary" id="open-personalize-btn">Open Face Studio</button>
             </div>
 
@@ -255,47 +255,6 @@
             </div>
 
 
-            <div class="personalize-layout">
-              <!-- Left column: Scenario + Generate -->
-              <div class="personalize-controls-col">
-                <label class="label">Choose a Scenario</label>
-                <div class="scenario-grid" id="scenario-grid"></div>
-
-                <div class="form-row" style="margin-top:12px">
-                  <div class="form-group">
-                    <label class="label">Sport</label>
-                    <input type="text" id="personalize-sport" placeholder="e.g. fitness, cooking, tech..." />
-                  </div>
-                  <div class="form-group">
-                    <label class="label">Or write custom scenario</label>
-                    <input type="text" id="personalize-custom" placeholder="e.g. presenting at a conference..." />
-                  </div>
-                </div>
-
-                <div class="form-row" style="margin-top:8px">
-                  <div class="form-group">
-                    <label class="label">Model</label>
-                    <select id="personalize-model">
-                      <option value="flux">Flux Kontext Pro (best faces)</option>
-                      <option value="gpt">GPT Image 1.5 (fallback)</option>
-                    </select>
-                  </div>
-                  <div class="form-group" style="max-width:100px">
-                    <label class="label">Count</label>
-                    <input type="number" id="personalize-count" min="1" max="10" value="1" />
-                  </div>
-                </div>
-
-                <button type="button" class="btn primary" id="personalize-generate-btn">Generate Personalized Image</button>
-                <div class="freeform-status" id="personalize-status"></div>
-              </div>
-
-              <!-- Right column: Results -->
-              <div class="personalize-results-col" id="personalize-results">
-                <label class="label">Generated Results</label>
-                <div class="personalize-results-grid" id="personalize-results-grid"></div>
-              </div>
-            </div>
           </div>
 
           <!-- Meme Studio View -->
@@ -468,6 +427,15 @@
 
               <div class="form-section" id="photo-fields" style="display:none">
                 <div class="form-row">
+                  <div class="form-group full">
+                    <label class="label" for="person-select">Person (use your face)</label>
+                    <select id="person-select" name="personId" class="person-select-dropdown">
+                      <option value="">None (AI generates everything)</option>
+                    </select>
+                    <span class="field-hint" id="person-select-hint">Select a trained person to generate their face in the photo with text overlay</span>
+                  </div>
+                </div>
+                <div class="form-row">
                   <div class="form-group">
                     <label class="label" for="field-setting">Setting</label>
                     <input name="setting" id="field-setting" type="text" placeholder="office, outdoors..." />
@@ -479,15 +447,6 @@
                 </div>
                 <button type="button" class="advanced-toggle">Advanced &#9656;</button>
                 <div class="advanced-fields" style="display:none">
-                  <div class="form-row">
-                    <div class="form-group full">
-                      <label class="label" for="person-select">Person (face reference)</label>
-                      <select id="person-select" name="personId">
-                        <option value="">None (AI generates everything)</option>
-                      </select>
-                      <span class="field-hint">Select a person for hybrid rendering: AI photo + Sharp text overlay</span>
-                    </div>
-                  </div>
                   <div class="form-row">
                     <div class="form-group">
                       <label class="label" for="field-sport">Sport</label>

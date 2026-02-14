@@ -325,9 +325,6 @@ function resetAppState() {
   selectedElement = 'headline';
 
   // Meme generator
-  personalizedScenarios = [];
-  selectedScenario = null;
-  personalizeResults = [];
   memeFilename = null;
 
   // TikTok
@@ -1182,7 +1179,6 @@ brandSelector.addEventListener('change', async () => {
   renderBrandSelector(); // update edit button visibility
   await loadContentIdeas();
   updateIconPreview();
-  loadPersonalizeScenarios(currentBrand);
 });
 
 // --- Brand Creation / Edit Modal ---
@@ -4635,219 +4631,31 @@ downloadMemeBtn.addEventListener('click', () => {
   document.body.removeChild(a);
 });
 
-// Render scenario grid
-function renderScenarioGrid() {
-  const scenarios = personalizedScenarios.length > 0 ? personalizedScenarios : FALLBACK_SCENARIOS;
-  scenarioGrid.innerHTML = scenarios.map((s) =>
-    `<div class="scenario-card ${selectedScenario === s.id ? 'active' : ''}" data-id="${escapeHtml(s.id)}">
-      <div class="scenario-title">${escapeHtml(s.title)}</div>
-      <div class="scenario-category">${escapeHtml(s.category)}</div>
-    </div>`
-  ).join('');
-
-  scenarioGrid.querySelectorAll('.scenario-card').forEach((card) => {
-    card.addEventListener('click', () => {
-      selectedScenario = selectedScenario === card.dataset.id ? null : card.dataset.id;
-      renderScenarioGrid();
-    });
-  });
-}
-
-async function loadPersonalizeScenarios(brandId) {
-  if (!brandId) {
-    personalizedScenarios = [];
-    renderScenarioGrid();
+// Person-select change listener (in slide editor photo fields)
+document.getElementById('person-select').addEventListener('change', function() {
+  const hint = document.getElementById('person-select-hint');
+  const personId = this.value;
+  if (!personId) {
+    this.classList.remove('has-person');
+    hint.textContent = 'Select a trained person to generate their face in the photo with text overlay';
     return;
   }
-
-  // Check client-side cache
-  const cached = scenarioCache.get(brandId);
-  if (cached) {
-    personalizedScenarios = cached;
-    selectedScenario = null;
-    renderScenarioGrid();
+  const person = userPersons.find(p => p.id === personId);
+  if (!person) {
+    this.classList.remove('has-person');
     return;
   }
-
-  // Show loading state
-  selectedScenario = null;
-  scenarioGrid.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:var(--text-secondary);padding:24px;">Generating brand scenarios...</div>';
-
-  try {
-    const res = await authFetch('/api/personalize-scenarios', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ brand: brandId }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Failed to load scenarios');
-
-    personalizedScenarios = data.scenarios;
-    scenarioCache.set(brandId, data.scenarios);
-  } catch (err) {
-    console.warn('[Scenarios] Falling back to defaults:', err.message);
-    personalizedScenarios = [];
-  }
-  renderScenarioGrid();
-}
-
-renderScenarioGrid();
-
-// Generate personalized image(s)
-personalizeGenerateBtn.addEventListener('click', async () => {
-  const selectedPersonId = selectedFaceStudioPerson || '';
-  if (!selectedPersonId) {
-    personalizeStatus.textContent = 'Select a person first.';
-    return;
-  }
-  if (!currentBrand) {
-    personalizeStatus.textContent = 'Create a brand first.';
-    return;
-  }
-
-  const count = parseInt(document.getElementById('personalize-count').value) || 1;
-  const model = document.getElementById('personalize-model').value;
-  const sport = document.getElementById('personalize-sport').value.trim();
-  const custom = document.getElementById('personalize-custom').value.trim();
-  const scenarios = personalizedScenarios.length > 0 ? personalizedScenarios : FALLBACK_SCENARIOS;
-  const scenario = selectedScenario ? scenarios.find((s) => s.id === selectedScenario) : null;
-
-  if (!scenario && !custom) {
-    personalizeStatus.textContent = 'Select a scenario or write a custom one.';
-    return;
-  }
-
-  personalizeGenerateBtn.disabled = true;
-
-  const photoCount = userPersons.find(p => p.id === selectedPersonId)?.photos?.length || 0;
-  function buildFormData() {
-    const fd = new FormData();
-    fd.append('brand', currentBrand);
-    fd.append('model', model);
-    fd.append('personId', selectedPersonId);
-    return fd;
-  }
-
-  if (count === 1) {
-    // Single image
-    personalizeStatus.textContent = `Generating personalized image (${photoCount} photo${photoCount !== 1 ? 's' : ''})...`;
-
-    const fd = buildFormData();
-
-    if (custom) {
-      fd.append('prompt', custom);
-    } else if (scenario) {
-      if (sport) fd.append('sport', sport);
-      fd.append('setting', scenario.setting);
-      fd.append('action', scenario.action);
-      fd.append('mood', scenario.mood);
-    }
-
-    try {
-      const res = await authFetch('/api/generate-personalized', { method: 'POST', body: fd });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Generation failed');
-
-      personalizeResults.push(data);
-      renderPersonalizeResults();
-      personalizeStatus.textContent = `Done! Generated with ${data.model === 'flux' ? 'Flux Kontext Pro' : 'GPT Image 1.5'}.`;
-    } catch (err) {
-      personalizeStatus.textContent = `Error: ${err.message}`;
-    } finally {
-      personalizeGenerateBtn.disabled = false;
-    }
+  this.classList.add('has-person');
+  const photoCount = person.photos?.length || 0;
+  const hasLora = person.loraStatus === 'completed';
+  if (hasLora) {
+    hint.textContent = `LoRA trained — will use Flux for face-consistent generation (${photoCount} photos)`;
+  } else if (photoCount > 0) {
+    hint.textContent = `${photoCount} reference photo${photoCount !== 1 ? 's' : ''} — train a LoRA in Face Studio for best results`;
   } else {
-    // Batch — build slides array for multiple scenarios
-    const slides = [];
-    for (let i = 0; i < count; i++) {
-      if (custom) {
-        slides.push({ prompt: custom });
-      } else if (scenario) {
-        const slideData = {
-          setting: scenario.setting,
-          action: scenario.action,
-          mood: scenario.mood,
-        };
-        if (sport) slideData.sport = sport;
-        slides.push(slideData);
-      }
-    }
-
-    personalizeStatus.textContent = `Starting batch generation (${count} images, ${photoCount} photo${photoCount !== 1 ? 's' : ''})...`;
-
-    const fd = buildFormData();
-    fd.append('slides', JSON.stringify(slides));
-
-    try {
-      const res = await authFetch('/api/generate-personalized-carousel', { method: 'POST', body: fd });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Batch start failed');
-
-      const pJobId = data.jobId;
-
-      // Poll for results
-      const pollInterval = setInterval(async () => {
-        try {
-          const sRes = await authFetch(`/api/carousel-status/${pJobId}`);
-          const job = await sRes.json();
-
-          // Replace batch results in our array
-          const batchResults = job.slides.filter((s) => s.ok).map((s) => ({ url: s.url, filename: s.filename }));
-          // Keep any previous single results, add batch
-          personalizeResults = [...personalizeResults.filter(r => !r._batch), ...batchResults.map(r => ({ ...r, _batch: true }))];
-          renderPersonalizeResults();
-          personalizeStatus.textContent = `Generating image ${job.current} of ${job.total}... (${job.completed} done)`;
-
-          if (job.status === 'done') {
-            clearInterval(pollInterval);
-            const succeeded = job.slides.filter((s) => s.ok).length;
-            personalizeStatus.textContent = `Done! ${succeeded}/${job.total} images generated.`;
-            personalizeGenerateBtn.disabled = false;
-          }
-        } catch {
-          // polling error, keep trying
-        }
-      }, 2000);
-    } catch (err) {
-      personalizeStatus.textContent = `Error: ${err.message}`;
-      personalizeGenerateBtn.disabled = false;
-    }
+    hint.textContent = 'No photos uploaded yet — add photos in Face Studio first';
   }
 });
-
-function renderPersonalizeResults() {
-  if (personalizeResults.length === 0) {
-    personalizeResultsGrid.innerHTML = '<div class="personalize-empty-results">Generated images will appear here</div>';
-    return;
-  }
-  personalizeResultsGrid.innerHTML = personalizeResults.map((r) =>
-    `<div class="personalize-result-thumb">
-      <img src="${r.url}" alt="Personalized" />
-      <button class="result-download" data-url="${r.url}" data-filename="${r.filename}" title="Download">&#8681;</button>
-    </div>`
-  ).join('');
-
-  personalizeResultsGrid.querySelectorAll('.result-download').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const a = document.createElement('a');
-      a.href = btn.dataset.url;
-      a.download = btn.dataset.filename || 'personalized.png';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-    });
-  });
-
-  // Click on thumbnail to open full size
-  personalizeResultsGrid.querySelectorAll('.personalize-result-thumb').forEach((thumb) => {
-    thumb.addEventListener('click', (e) => {
-      if (e.target.classList.contains('result-download')) return;
-      const img = thumb.querySelector('img');
-      if (img) window.open(img.src, '_blank');
-    });
-  });
-}
 
 // --- TikTok Integration ---
 // =============================================
