@@ -719,7 +719,13 @@ document.getElementById('brand-creation-continue').addEventListener('click', asy
     brands = data.brands || [];
     renderBrandSelector();
     if (currentBrand) {
-      await loadContentIdeas();
+      // If content ideas were already generated during brand creation, use them directly
+      const hasIdeas = contentData?.apps?.[0]?.categories?.some(c => c.ideas?.length > 0);
+      if (hasIdeas) {
+        renderSidebar();
+      } else {
+        await loadContentIdeas();
+      }
       updateIconPreview();
     }
   } catch (err) {
