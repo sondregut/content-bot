@@ -2000,6 +2000,7 @@ function loadFreeformContent(data) {
   selectedIdea = {
     id: 'AI',
     title: data.title || 'Freeform Carousel',
+    caption: data.caption || '',
     slides: data.slides,
   };
 
@@ -2019,6 +2020,12 @@ function loadFreeformContent(data) {
 
   ideaBadge.textContent = 'AI';
   ideaTitle.textContent = data.title || 'Freeform Carousel';
+
+  // Populate caption editor
+  const captionEditor = document.getElementById('caption-editor');
+  const captionTextarea = document.getElementById('caption-textarea');
+  captionTextarea.value = data.caption || '';
+  captionEditor.style.display = 'block';
 
   renderSlideTabs();
   loadSlideIntoForm(0);
