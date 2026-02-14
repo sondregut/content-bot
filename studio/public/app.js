@@ -2270,13 +2270,14 @@ async function generateMoreIdeas() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Generation failed');
     if (!data.ideas || data.ideas.length === 0) throw new Error('No new ideas generated.');
+    console.log(`[generateMoreIdeas] RAW SERVER RESPONSE: format=${format}, ideas[0].slides.length=${data.ideas[0]?.slides?.length}, ideas[0].slides[0].type=${data.ideas[0]?.slides?.[0]?.type}`);
     const newIdeas = data.ideas.map((idea, i) => ({
       id: `AI-${startIndex + i + 1}`,
       title: idea.title,
       caption: idea.caption || '',
       slides: (idea.slides || []).map((s, si) => ({ ...s, number: s.number || si + 1, type: s.type || 'text' })),
     }));
-    console.log(`[generateMoreIdeas] format=${format} newIdea: id=${newIdeas[0]?.id} slides=${newIdeas[0]?.slides.length} type=${newIdeas[0]?.slides[0]?.type}`);
+    console.log(`[generateMoreIdeas] MAPPED: id=${newIdeas[0]?.id} slides=${newIdeas[0]?.slides.length} type=${newIdeas[0]?.slides[0]?.type}`);
     let aiCat = app.categories.find(c => c.name === 'AI-Generated Ideas');
     if (aiCat) {
       aiCat.ideas.push(...newIdeas);
