@@ -1125,6 +1125,48 @@ function buildPhotoPrompt(data, brand) {
     .join('\n');
 }
 
+function buildMemePrompt(data, brand) {
+  const { description, aspectRatio } = data;
+
+  const dimensions = {
+    '1:1': { w: 1080, h: 1080, label: 'square' },
+    '9:16': { w: 1080, h: 1920, label: 'vertical (Stories/TikTok)' },
+    '16:9': { w: 1920, h: 1080, label: 'landscape (Twitter/YouTube)' },
+  }[aspectRatio] || { w: 1080, h: 1080, label: 'square' };
+
+  const c = brand.colors || {};
+
+  return [
+    `Create a meme image (${dimensions.w}x${dimensions.h}, ${dimensions.label}).`,
+    '',
+    `CONCEPT: ${description}`,
+    '',
+    'FORMAT & STYLE:',
+    '- This is an internet MEME — not a polished ad, not a carousel slide, not a brand graphic.',
+    '- If the concept references a known meme template (Drake, distracted boyfriend, expanding brain, "nobody:", POV, comparison, etc.), follow that template\'s exact visual structure and panel layout.',
+    '- The aesthetic must feel native to social media — raw, authentic, shareable. Not over-produced.',
+    '- Fill the entire canvas. No safe zones, no padding, no decorative borders.',
+    '',
+    'TEXT RENDERING (CRITICAL):',
+    '- All text must be rendered EXACTLY as written — no extra words, no modifications.',
+    '- Use bold, high-contrast typography: Impact font style, white fill with thick black outline/stroke.',
+    '- Place text in clear, readable positions — typically top and/or bottom of image.',
+    '- Text must be large enough to read at thumbnail size on mobile.',
+    '- Spell every word correctly.',
+    '',
+    `BRAND CONTEXT (subtle — do NOT let this override the meme format):`,
+    `Brand: ${brand.name}`,
+    `Voice: ${brand.systemPrompt || 'Friendly and relatable'}`,
+    c.accent ? `Brand accent color (use sparingly, NOT as dominant color): ${c.accent}` : '',
+    '',
+    'CONSTRAINTS:',
+    '- No watermarks, no logos (brand icon is added separately after generation)',
+    '- No AI artifacts — this should look like a real meme someone would share',
+    '- Avoid these AI-tell words in the visual style: "perfect", "flawless", "ultra-detailed", "8K", "hyper-realistic", "masterpiece"',
+    '- Keep composition simple and punchy — memes are quick to read and understand',
+  ].filter(Boolean).join('\n');
+}
+
 function buildPersonalizedPrompt(data, brand) {
   const sport = data.sport;
   const setting = data.setting || 'professional environment';
@@ -1248,6 +1290,27 @@ async function addAppIconOverlay(baseBuffer, configKey = 'bottom-right', brand =
 
 // --- Claude Prompt Refinement ---
 
+const MEME_REFINEMENT_INSTRUCTIONS = `Your job: Refine this meme image prompt for gpt-image-1.5.
+
+TEXT RENDERING (your #1 priority):
+- Put all rendered text in QUOTES and ALL CAPS in the prompt
+- Add explicit font/size/placement constraints: "Impact font, white fill, thick black outline, centered"
+- For tricky words or brand names, spell them letter-by-letter as a hint
+- Demand verbatim rendering: "no extra characters, exactly as written"
+
+MEME FORMAT:
+- Preserve the meme template structure — if it's a Drake meme, keep the two-panel layout
+- Do NOT turn it into a polished brand ad or carousel slide
+- Keep the raw, authentic, internet-native aesthetic
+- Fill the entire canvas — no safe zones, no padding
+
+STYLE:
+- Keep composition simple and punchy
+- Avoid AI-tell words: "perfect", "flawless", "ultra-smooth", "ultra-detailed", "8K", "hyper-realistic", "masterpiece"
+- The result should look like a real meme someone would share, not an AI-generated image
+
+Return ONLY the refined prompt text. No preamble, no explanation, no markdown.`;
+
 const BASE_REFINEMENT_INSTRUCTIONS = `Your job: Take a raw image-generation prompt and refine it for gpt-image-1.5. Your refinements should:
 - Strengthen text legibility instructions (exact spelling, letter spacing for tricky words, font weight)
 - Ensure safe zones are respected (top 180px, bottom 320px, sides 90px for TikTok 9:16)
@@ -1267,10 +1330,16 @@ async function refinePromptWithClaude(rawPrompt, slideType, formData, brand) {
   if (!anthropic) return null;
 
   try {
-    const systemPrompt = `${brand.systemPrompt}\n\n${BASE_REFINEMENT_INSTRUCTIONS}`;
-    let context = slideType === 'photo'
-      ? `This is a photo-led slide for ${brand.name} featuring a ${formData.sport || 'athlete'} scene with text overlay.`
-      : `This is a text-only minimalist slide for ${brand.name} with a ${formData.backgroundStyle || 'dark premium'} background.`;
+    const refinementInstructions = slideType === 'meme' ? MEME_REFINEMENT_INSTRUCTIONS : BASE_REFINEMENT_INSTRUCTIONS;
+    const systemPrompt = `${brand.systemPrompt}\n\n${refinementInstructions}`;
+    let context;
+    if (slideType === 'meme') {
+      context = `This is a MEME for ${brand.name}. It must look like a genuine internet meme — informal, humorous, culturally aware. Do NOT apply carousel rules (no safe zones, no TikTok composition, no professional typography). Preserve the meme format and humor. Only refine for text legibility and spelling accuracy. Keep the raw, authentic meme aesthetic.`;
+    } else if (slideType === 'photo') {
+      context = `This is a photo-led slide for ${brand.name} featuring a ${formData.sport || 'athlete'} scene with text overlay.`;
+    } else {
+      context = `This is a text-only minimalist slide for ${brand.name} with a ${formData.backgroundStyle || 'dark premium'} background.`;
+    }
 
     // If reference image is being used, tell Claude the model can see it directly
     if (rawPrompt.includes('Reference image provided:')) {
@@ -2511,6 +2580,49 @@ app.post('/api/generate', requireAuth, generationLimiter, async (req, res) => {
       const filename = `slide_${brandId}_mockup_${Date.now()}_${slug}.png`;
       const url = await uploadToStorage(buffer, filename);
       return res.json({ ok: true, filename, url, prompt: null, refinedPrompt: null, usedRefined: false });
+    }
+
+    // Meme generation
+    if (data.slideType === 'meme') {
+      const sizeMap = {
+        '1:1': '1024x1024',
+        '9:16': '1024x1536',
+        '16:9': '1536x1024',
+      };
+      const openaiSize = sizeMap[data.aspectRatio] || '1024x1024';
+
+      const rawPrompt = buildMemePrompt(data, brand);
+      const refinedPrompt = await refinePromptWithClaude(rawPrompt, 'meme', data, brand);
+      const prompt = refinedPrompt || rawPrompt;
+
+      console.log(`[Meme] ${brand.name} | ${refinedPrompt ? 'refined' : 'raw'} | ${data.aspectRatio || '1:1'}`);
+
+      const response = await openai.images.generate({
+        model: resolveImageModel(data.imageModel),
+        prompt,
+        size: openaiSize,
+        quality: data.quality || 'high',
+        output_format: 'png',
+      });
+
+      const b64 = response.data?.[0]?.b64_json;
+      if (!b64) throw new Error('No image returned from API');
+      let buffer = Buffer.from(b64, 'base64');
+
+      if (data.includeOwl) {
+        buffer = await addAppIconOverlay(buffer, data.owlPosition, brand);
+      }
+
+      const slug = crypto.randomUUID().slice(0, 8);
+      const filename = `meme_${brandId}_${Date.now()}_${slug}.png`;
+      const url = await uploadToStorage(buffer, filename);
+
+      return res.json({
+        ok: true, filename, url,
+        prompt: rawPrompt,
+        refinedPrompt: refinedPrompt || null,
+        usedRefined: Boolean(refinedPrompt),
+      });
     }
 
     const rawPrompt =

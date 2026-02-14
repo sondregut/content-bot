@@ -3190,3 +3190,57 @@ input:focus, select:focus, textarea:focus {
   padding: 14px 40px;
   font-size: 1.05rem;
 }
+
+/* --- Meme Studio --- */
+
+.meme-view {
+  padding: 0;
+}
+
+.meme-layout {
+  display: grid;
+  grid-template-columns: 1fr 400px;
+  gap: 24px;
+  min-height: 0;
+}
+
+.meme-controls {
+  display: flex;
+  flex-direction: column;
+}
+
+.meme-preview {
+  display: flex;
+  flex-direction: column;
+}
+
+.meme-preview-container {
+  background: var(--bg-secondary, #f3f4f6);
+  border-radius: 12px;
+  border: 2px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 300px;
+  overflow: hidden;
+}
+
+.meme-preview-container img {
+  width: 100%;
+  height: auto;
+  display: block;
+  border-radius: 10px;
+}
+
+.meme-placeholder {
+  color: var(--text-secondary, #9ca3af);
+  font-size: 0.9rem;
+  padding: 40px;
+  text-align: center;
+}
+
+@media (max-width: 800px) {
+  .meme-layout {
+    grid-template-columns: 1fr;
+  }
+}

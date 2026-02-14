@@ -510,6 +510,7 @@ brandSelector.addEventListener('change', async () => {
   slideEdits = [];
   editorArea.style.display = 'none';
   personalizeView.style.display = 'none';
+  if (document.getElementById('meme-view')) document.getElementById('meme-view').style.display = 'none';
   emptyState.style.display = 'flex';
   renderBrandSelector(); // update edit button visibility
   await loadContentIdeas();
@@ -1385,6 +1386,7 @@ function selectIdea(ideaId) {
 
   emptyState.style.display = 'none';
   personalizeView.style.display = 'none';
+  if (document.getElementById('meme-view')) document.getElementById('meme-view').style.display = 'none';
   document.getElementById('content-plan-view').style.display = 'none';
   editorArea.style.display = 'block';
 
@@ -1421,6 +1423,7 @@ function loadFreeformContent(data) {
 
   emptyState.style.display = 'none';
   personalizeView.style.display = 'none';
+  if (document.getElementById('meme-view')) document.getElementById('meme-view').style.display = 'none';
   editorArea.style.display = 'block';
 
   ideaBadge.textContent = 'AI';
@@ -3008,6 +3011,7 @@ autoGenerateBtn.addEventListener('click', async () => {
     emptyState.style.display = 'none';
     editorArea.style.display = 'none';
     personalizeView.style.display = 'none';
+    if (document.getElementById('meme-view')) document.getElementById('meme-view').style.display = 'none';
     const contentPlanView = document.getElementById('content-plan-view');
     contentPlanView.style.display = 'block';
     document.getElementById('content-plan-subtitle').textContent =
@@ -3060,6 +3064,7 @@ const personalizeResultsGrid = document.getElementById('personalize-results-grid
 function openPersonalizeView() {
   emptyState.style.display = 'none';
   editorArea.style.display = 'none';
+  if (document.getElementById('meme-view')) document.getElementById('meme-view').style.display = 'none';
   personalizeView.style.display = 'block';
   // Load brand-specific scenarios if not already loaded
   if (currentBrand && personalizedScenarios.length === 0 && !scenarioCache.has(currentBrand)) {
@@ -3079,6 +3084,95 @@ function closePersonalizeView() {
 document.getElementById('open-personalize-btn').addEventListener('click', openPersonalizeView);
 document.getElementById('sidebar-face-btn').addEventListener('click', openPersonalizeView);
 document.getElementById('personalize-back-btn').addEventListener('click', closePersonalizeView);
+
+// ===================== MEME STUDIO =====================
+
+const memeView = document.getElementById('meme-view');
+const memeDescription = document.getElementById('meme-description');
+const memeAspectRatio = document.getElementById('meme-aspect-ratio');
+const memeStatus = document.getElementById('meme-status');
+const memePreviewImg = document.getElementById('meme-preview-img');
+const memePlaceholder = document.querySelector('.meme-placeholder');
+const downloadMemeBtn = document.getElementById('download-meme-btn');
+let memeFilename = null;
+
+function openMemeView() {
+  emptyState.style.display = 'none';
+  editorArea.style.display = 'none';
+  personalizeView.style.display = 'none';
+  document.getElementById('content-plan-view').style.display = 'none';
+  memeView.style.display = 'block';
+}
+
+function closeMemeView() {
+  memeView.style.display = 'none';
+  if (selectedIdea) {
+    editorArea.style.display = 'block';
+  } else {
+    emptyState.style.display = 'flex';
+  }
+}
+
+document.getElementById('open-meme-btn').addEventListener('click', openMemeView);
+document.getElementById('sidebar-meme-btn').addEventListener('click', openMemeView);
+document.getElementById('meme-back-btn').addEventListener('click', closeMemeView);
+
+document.getElementById('generate-meme-btn').addEventListener('click', async () => {
+  const description = memeDescription.value.trim();
+  if (!description) {
+    memeStatus.textContent = 'Please describe your meme concept.';
+    return;
+  }
+  if (!currentBrand) {
+    memeStatus.textContent = 'Please select a brand first.';
+    return;
+  }
+
+  const generateBtn = document.getElementById('generate-meme-btn');
+  generateBtn.disabled = true;
+  memeStatus.textContent = 'Generating meme...';
+  downloadMemeBtn.style.display = 'none';
+
+  try {
+    const res = await authFetch('/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        slideType: 'meme',
+        description,
+        aspectRatio: memeAspectRatio.value,
+        brand: currentBrand,
+        imageModel: 'gpt',
+        includeOwl: true,
+        owlPosition: 'bottom-right',
+      }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Generation failed');
+
+    memePreviewImg.src = data.url;
+    memePreviewImg.style.display = 'block';
+    if (memePlaceholder) memePlaceholder.style.display = 'none';
+    memeFilename = data.filename;
+    downloadMemeBtn.style.display = 'inline-block';
+    memeStatus.textContent = '';
+  } catch (err) {
+    memeStatus.textContent = err.message || 'Generation failed';
+  } finally {
+    generateBtn.disabled = false;
+  }
+});
+
+downloadMemeBtn.addEventListener('click', () => {
+  if (!memeFilename) return;
+  const a = document.createElement('a');
+  a.href = `/api/download/${memeFilename}`;
+  a.download = memeFilename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+});
 
 // Render scenario grid
 function renderScenarioGrid() {
@@ -3663,6 +3757,7 @@ function restoreSession() {
         };
         emptyState.style.display = 'none';
         personalizeView.style.display = 'none';
+        if (document.getElementById('meme-view')) document.getElementById('meme-view').style.display = 'none';
         editorArea.style.display = 'block';
         ideaBadge.textContent = session.selectedIdeaId;
         ideaTitle.textContent = session.selectedIdeaTitle || 'Restored Session';
