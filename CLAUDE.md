@@ -73,6 +73,10 @@ Vercel auto-deploys from `main` branch. Config in root `vercel.json`.
 | POST | `/api/upload-icon` | Yes | Upload brand app icon |
 | GET/POST | `/api/download*` | Yes | Download individual or ZIP |
 
+## Protected Accounts
+
+- **Sondre (owner):** `sondre@athletemindset.app` / `sondreg600@gmail.com` — NEVER delete this account or its data.
+
 ## Critical Patterns
 
 - **Brand isolation:** Users only see brands where `createdBy === uid`. All fallbacks use `GENERIC_BRAND`.

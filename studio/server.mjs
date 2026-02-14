@@ -273,6 +273,18 @@ async function writeLocalBrands(data) {
   await fs.writeFile(localBrandsPath, JSON.stringify(data, null, 2));
 }
 
+async function updateBrandFields(brandId, fields) {
+  if (db) {
+    await db.collection('carousel_brands').doc(brandId).update(fields);
+  } else {
+    const all = await readLocalBrands();
+    if (all[brandId]) {
+      Object.assign(all[brandId], fields);
+      await writeLocalBrands(all);
+    }
+  }
+}
+
 async function getBrandAsync(brandId, userId) {
   if (!brandId) return GENERIC_BRAND;
   if (db) {
@@ -2125,10 +2137,8 @@ Rules:
       // Also send the full batch for contentData storage
       sendSSE('content-ideas', formattedIdeas);
 
-      // Persist to Firestore so ideas survive refresh/brand-switch
-      if (db) {
-        await db.collection('carousel_brands').doc(brandId).update({ contentIdeas: formattedIdeas });
-      }
+      // Persist so ideas survive refresh/brand-switch (Firestore in prod, local JSON in dev)
+      await updateBrandFields(brandId, { contentIdeas: formattedIdeas });
     }
 
     // Step 9: Generate first carousel slides (slide 1 = AI, rest = mockup)
@@ -2563,13 +2573,10 @@ app.get('/api/content-ideas', requireAuth, async (req, res) => {
       const appData = parseContentIdeas(markdown, brandId || 'generic', brand.name);
       return res.json({ apps: [appData] });
     } catch {
-      // No content-ideas.md — check Firestore for AI-generated ideas
-      if (db && brandId) {
-        const doc = await db.collection('carousel_brands').doc(brandId).get();
-        const stored = doc.data()?.contentIdeas;
-        if (stored && stored.length > 0) {
-          return res.json({ apps: [{ appName: brand.name, brandId, categories: [{ name: 'AI-Generated Ideas', ideas: stored }] }] });
-        }
+      // No content-ideas.md — use contentIdeas from brand data (works for both Firestore and local storage)
+      const stored = brand.contentIdeas;
+      if (stored && stored.length > 0) {
+        return res.json({ apps: [{ appName: brand.name, brandId, categories: [{ name: 'AI-Generated Ideas', ideas: stored }] }] });
       }
       return res.json({ apps: [{ appName: brand.name, brandId: brandId || 'generic', categories: [] }] });
     }
@@ -3349,15 +3356,15 @@ Rules:
     const ideas = parsed.ideas || [];
     console.log(`[Content Ideas] ${brand.name} | Generated ${ideas.length} ideas`);
 
-    // Persist to Firestore so ideas survive refresh/brand-switch
-    if (db && brandId) {
+    // Persist so ideas survive refresh/brand-switch (Firestore in prod, local JSON in dev)
+    if (brandId) {
       const formatted = ideas.map((idea, i) => ({
         id: `AI-${i + 1}`,
         title: idea.title,
         caption: idea.caption || '',
         slides: (idea.slides || []).map((s, si) => ({ ...s, number: s.number || si + 1, type: s.type || 'text' })),
       }));
-      await db.collection('carousel_brands').doc(brandId).update({ contentIdeas: formatted });
+      await updateBrandFields(brandId, { contentIdeas: formatted });
     }
 
     res.json({ ok: true, ideas });
