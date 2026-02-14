@@ -127,9 +127,21 @@ document.getElementById('google-login-btn').addEventListener('click', async () =
 
 document.getElementById('sign-out-btn').addEventListener('click', async () => {
   clearSession();
-  if (firebase.apps.length) await firebase.auth().signOut();
-  document.getElementById('login-overlay').classList.add('visible');
-  document.getElementById('app-shell').style.display = 'none';
+  // Close settings modal
+  document.getElementById('settings-modal').style.display = 'none';
+  // Reset app state
+  brands = [];
+  currentBrand = null;
+  selectedIdea = null;
+  slideEdits = [];
+  generatedImages = {};
+  if (firebase.apps.length) {
+    await firebase.auth().signOut();
+  } else {
+    // No Firebase — manually show login overlay
+    document.getElementById('login-overlay').classList.add('visible');
+    document.getElementById('app-shell').style.display = 'none';
+  }
 });
 
 document.getElementById('delete-account-btn').addEventListener('click', async () => {
