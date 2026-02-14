@@ -105,6 +105,8 @@ async function authFetch(url, opts = {}) {
   if (user) {
     overlay.classList.remove('visible');
     appShell.style.display = 'flex';
+    // Save session before reset clears localStorage
+    const savedSessionRaw = localStorage.getItem('carousel-studio-session');
     // Reset state from any previous user session
     resetAppState();
     // Migrate legacy un-scoped API keys to this user (one-time)
@@ -132,7 +134,7 @@ async function authFetch(url, opts = {}) {
     }
     if (currentBrand) {
       await loadContentIdeas();
-      restoreSession();
+      restoreSession(savedSessionRaw);
     } else {
       renderEmptySidebar();
     }
@@ -690,6 +692,38 @@ function renderPersonsList() {
     const card = document.createElement('div');
     card.className = 'person-card';
     const photoCount = person.photos?.length || 0;
+    const ls = person.loraStatus;
+
+    let loraHtml = '';
+    if (ls === 'ready') {
+      const modelLabel = person.loraModel === 'flux-2' ? 'Flux 2' : person.loraModel === 'portrait' ? 'Portrait' : 'Fast';
+      loraHtml = `<div class="person-lora-status lora-ready">
+        <span class="lora-badge ready">LoRA Trained (${modelLabel})</span>
+        <button class="btn small person-retrain-btn" data-person-id="${person.id}">Retrain</button>
+      </div>`;
+    } else if (ls === 'queued' || ls === 'training') {
+      loraHtml = `<div class="person-lora-status lora-training">
+        <span class="lora-badge training">${ls === 'training' ? 'Training...' : 'Queued...'}</span>
+        <span class="lora-spinner"></span>
+      </div>`;
+    } else if (ls === 'failed') {
+      loraHtml = `<div class="person-lora-status lora-failed">
+        <span class="lora-badge failed">Training Failed</span>
+        <button class="btn small person-train-btn" data-person-id="${person.id}">Retry</button>
+      </div>`;
+    } else {
+      const canTrain = photoCount >= 4;
+      loraHtml = `<div class="person-lora-status">
+        <select class="person-train-model" data-person-id="${person.id}">
+          <option value="flux-2">Flux 2 (~$8)</option>
+          <option value="portrait">Portrait (~$6)</option>
+          <option value="fast">Fast ($2)</option>
+        </select>
+        <button class="btn small primary person-train-btn" data-person-id="${person.id}" ${canTrain ? '' : 'disabled'}>Train LoRA</button>
+        ${canTrain ? '' : '<span class="field-hint">Need 4+ photos</span>'}
+      </div>`;
+    }
+
     card.innerHTML = `
       <div class="person-card-header">
         <input type="text" value="${escapeHtml(person.name)}" data-person-id="${person.id}" class="person-name-input" />
@@ -699,9 +733,10 @@ function renderPersonsList() {
         ${(person.photos || []).map((p, idx) =>
           p.url ? `<div class="face-photo-thumb"><img src="${p.url}" alt="Photo" /><button class="face-photo-remove" data-person-id="${person.id}" data-idx="${idx}" title="Remove">&times;</button></div>` : ''
         ).join('')}
-        ${photoCount < 5 ? `<button type="button" class="face-add-btn person-photo-add" data-person-id="${person.id}" title="Add photo">+</button>` : ''}
+        ${photoCount < 20 ? `<button type="button" class="face-add-btn person-photo-add" data-person-id="${person.id}" title="Add photo">+</button>` : ''}
       </div>
-      <div class="person-photo-count">${photoCount} / 5 photos</div>
+      <div class="person-photo-count">${photoCount} / 20 photos</div>
+      ${loraHtml}
     `;
     personsList.appendChild(card);
   }
@@ -791,6 +826,101 @@ function renderPersonsList() {
       input.click();
     });
   });
+
+  // LoRA train button handlers
+  personsList.querySelectorAll('.person-train-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const personId = btn.dataset.personId;
+      const select = personsList.querySelector(`.person-train-model[data-person-id="${personId}"]`);
+      const model = select ? select.value : 'flux-2';
+      btn.disabled = true;
+      btn.textContent = 'Starting...';
+      try {
+        const res = await authFetch(`/api/persons/${personId}/train-lora`, {
+          method: 'POST',
+          body: JSON.stringify({ model }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          const person = userPersons.find(p => p.id === personId);
+          if (person) {
+            person.loraStatus = 'queued';
+            person.loraModel = model;
+          }
+          renderPersonsList();
+          startLoraPolling(personId);
+        } else {
+          alert(data.error || 'Training failed to start');
+          btn.disabled = false;
+          btn.textContent = 'Train LoRA';
+        }
+      } catch (err) {
+        alert('Training failed: ' + err.message);
+        btn.disabled = false;
+        btn.textContent = 'Train LoRA';
+      }
+    });
+  });
+
+  // LoRA retrain button handlers
+  personsList.querySelectorAll('.person-retrain-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const personId = btn.dataset.personId;
+      const person = userPersons.find(p => p.id === personId);
+      if (person) {
+        person.loraStatus = null;
+        renderPersonsList();
+      }
+    });
+  });
+
+  // Auto-resume polling for persons in training
+  for (const person of userPersons) {
+    if (person.loraStatus === 'queued' || person.loraStatus === 'training') {
+      startLoraPolling(person.id);
+    }
+  }
+}
+
+// --- LoRA Training Polling ---
+const loraPollingTimers = new Map();
+
+function startLoraPolling(personId) {
+  if (loraPollingTimers.has(personId)) return;
+  const timer = setInterval(() => pollLoraStatus(personId), 5000);
+  loraPollingTimers.set(personId, timer);
+}
+
+function stopLoraPolling(personId) {
+  const timer = loraPollingTimers.get(personId);
+  if (timer) {
+    clearInterval(timer);
+    loraPollingTimers.delete(personId);
+  }
+}
+
+async function pollLoraStatus(personId) {
+  try {
+    const res = await authFetch(`/api/persons/${personId}/lora-status`);
+    const data = await res.json();
+    const person = userPersons.find(p => p.id === personId);
+    if (!person) { stopLoraPolling(personId); return; }
+
+    person.loraStatus = data.status;
+    if (data.loraUrl) person.loraUrl = data.loraUrl;
+    if (data.loraModel) person.loraModel = data.loraModel;
+    if (data.loraError) person.loraError = data.loraError;
+    if (data.loraTrainedAt) person.loraTrainedAt = data.loraTrainedAt;
+
+    if (data.status === 'ready' || data.status === 'failed' || !data.status) {
+      stopLoraPolling(personId);
+    }
+
+    renderPersonsList();
+    populatePersonSelectors();
+  } catch (err) {
+    console.error('LoRA poll failed:', err);
+  }
 }
 
 function populatePersonSelectors() {
@@ -808,8 +938,9 @@ function populatePersonSelectors() {
       const photoCount = person.photos?.length || 0;
       const opt = document.createElement('option');
       opt.value = person.id;
-      opt.textContent = `${person.name} (${photoCount} photo${photoCount !== 1 ? 's' : ''})`;
-      if (photoCount === 0) opt.disabled = true;
+      const loraBadge = person.loraStatus === 'ready' ? ' [LoRA]' : '';
+      opt.textContent = `${person.name} (${photoCount} photo${photoCount !== 1 ? 's' : ''})${loraBadge}`;
+      if (photoCount === 0 && person.loraStatus !== 'ready') opt.disabled = true;
       select.appendChild(opt);
     }
     if (currentVal && userPersons.some(p => p.id === currentVal)) {
@@ -4944,9 +5075,9 @@ function saveSession() {
   } catch { /* quota exceeded — ignore */ }
 }
 
-function restoreSession() {
+function restoreSession(rawSession) {
   try {
-    const raw = localStorage.getItem(SESSION_KEY);
+    const raw = rawSession || localStorage.getItem(SESSION_KEY);
     if (!raw) return;
     const session = JSON.parse(raw);
     if (session.currentBrand !== currentBrand) return; // brand changed
