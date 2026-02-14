@@ -10,6 +10,7 @@ import { fileURLToPath } from 'url';
 import archiver from 'archiver';
 import multer from 'multer';
 import admin from 'firebase-admin';
+import { spawn, execSync } from 'child_process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -122,12 +123,20 @@ const PORT = process.env.PORT || 4545;
 const isVercel = process.env.VERCEL === '1';
 const outputDir = isVercel ? '/tmp/output' : path.join(__dirname, 'output');
 const uploadsDir = isVercel ? '/tmp/uploads' : path.join(__dirname, 'uploads');
+const backgroundsDir = isVercel ? '/tmp/backgrounds' : path.join(__dirname, 'backgrounds');
 
 try {
   await fs.mkdir(outputDir, { recursive: true });
   await fs.mkdir(uploadsDir, { recursive: true });
+  await fs.mkdir(backgroundsDir, { recursive: true });
 } catch (err) {
   console.warn('Could not create dirs:', err.message);
+}
+
+let galleryDlAvailable = false;
+if (!isVercel) {
+  try { execSync('which gallery-dl', { stdio: 'ignore' }); galleryDlAvailable = true; }
+  catch { console.warn('gallery-dl not found. Background download disabled. Install: brew install gallery-dl'); }
 }
 const upload = multer({
   dest: uploadsDir,
@@ -170,6 +179,7 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/output', express.static(outputDir));
 app.use('/uploads', express.static(uploadsDir));
+app.use('/backgrounds', express.static(backgroundsDir));
 
 // --- Brand Configurations ---
 
@@ -2454,6 +2464,210 @@ app.post('/api/download-selected', requireAuth, async (req, res) => {
   }
 
   await archive.finalize();
+});
+
+// --- Background Image Library ---
+
+const backgroundJobs = new Map();
+
+app.post('/api/backgrounds/generate-topics', requireAuth, async (req, res) => {
+  const { brandId } = req.body || {};
+  if (!brandId) return res.status(400).json({ error: 'Missing brandId' });
+  if (!anthropic) return res.status(500).json({ error: 'Claude not configured' });
+
+  const brand = await getBrandAsync(brandId, req.user?.uid);
+
+  try {
+    const msg = await anthropic.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 1024,
+      messages: [{
+        role: 'user',
+        content: `You are generating Pinterest search queries for finding slide background images.
+
+Brand: ${brand.name}
+Website: ${brand.website || 'N/A'}
+Colors: ${JSON.stringify(brand.colors)}
+Brand brief: ${brand.systemPrompt || 'General brand'}
+
+Generate 12 Pinterest search queries that would find great background images for this brand's TikTok/Instagram carousel slides. Think about:
+- The brand's aesthetic and color palette
+- Textures, gradients, abstract patterns
+- Lifestyle/mood imagery that fits the brand
+- Dark/moody vs light/clean depending on brand colors
+
+Return ONLY a JSON array of strings, no other text. Example: ["dark marble texture", "neon gradient abstract"]`
+      }]
+    });
+
+    const text = msg.content[0].text.trim();
+    const topics = JSON.parse(text);
+    res.json({ topics });
+  } catch (err) {
+    console.error('[Generate Topics]', err);
+    res.status(500).json({ error: err.message || 'Failed to generate topics' });
+  }
+});
+
+app.post('/api/backgrounds/download', requireAuth, async (req, res) => {
+  const { brandId, topics } = req.body || {};
+  if (!brandId) return res.status(400).json({ error: 'Missing brandId' });
+  if (!topics || !Array.isArray(topics) || topics.length === 0) return res.status(400).json({ error: 'Missing topics array' });
+
+  if (!galleryDlAvailable) return res.status(501).json({ error: 'gallery-dl not available. Install: brew install gallery-dl' });
+  if (isVercel) return res.status(501).json({ error: 'Background download not available in production' });
+
+  const brand = await getBrandAsync(brandId, req.user?.uid);
+  const jobId = crypto.randomUUID().slice(0, 12);
+  const job = {
+    id: jobId,
+    brandId: brand.id,
+    total: topics.length,
+    completed: 0,
+    currentTopic: null,
+    status: 'running',
+    results: {},
+  };
+  backgroundJobs.set(jobId, job);
+
+  res.json({ jobId, total: topics.length });
+
+  (async () => {
+    const brandDir = path.join(backgroundsDir, brand.id);
+    await fs.mkdir(brandDir, { recursive: true });
+
+    for (let i = 0; i < topics.length; i++) {
+      const topic = topics[i];
+      const topicSlug = slugify(topic);
+      job.currentTopic = topic;
+
+      const topicDir = path.join(brandDir, topicSlug);
+      await fs.mkdir(topicDir, { recursive: true });
+
+      const searchUrl = `https://www.pinterest.com/search/pins/?q=${encodeURIComponent(topic)}`;
+
+      try {
+        await new Promise((resolve, reject) => {
+          const proc = spawn('gallery-dl', [
+            '--range', '1-25',
+            '--directory', topicDir,
+            '--filename', '{num:>03}.{extension}',
+            searchUrl,
+          ]);
+
+          let stderr = '';
+          proc.stderr.on('data', d => stderr += d.toString());
+          proc.on('close', code => {
+            if (code === 0) resolve();
+            else reject(new Error(`gallery-dl exited ${code}: ${stderr.slice(0, 200)}`));
+          });
+          proc.on('error', reject);
+        });
+
+        // Count downloaded files
+        const files = await fs.readdir(topicDir).catch(() => []);
+        job.results[topicSlug] = files.length;
+      } catch (err) {
+        console.error(`[BG Download] Topic "${topic}" failed:`, err.message);
+        job.results[topicSlug] = 0;
+      }
+
+      job.completed = i + 1;
+    }
+
+    job.status = 'done';
+    job.currentTopic = null;
+    setTimeout(() => backgroundJobs.delete(jobId), 30 * 60 * 1000);
+  })();
+});
+
+app.get('/api/backgrounds/download-status/:jobId', requireAuth, (req, res) => {
+  const job = backgroundJobs.get(req.params.jobId);
+  if (!job) return res.status(404).json({ error: 'Job not found' });
+  res.json({
+    jobId: job.id,
+    status: job.status,
+    total: job.total,
+    completed: job.completed,
+    currentTopic: job.currentTopic,
+    results: job.results,
+  });
+});
+
+app.get('/api/backgrounds', requireAuth, async (req, res) => {
+  const brandId = req.query.brand;
+  if (!brandId) return res.status(400).json({ error: 'Missing brand query param' });
+
+  const brand = await getBrandAsync(brandId, req.user?.uid);
+  const brandDir = path.join(backgroundsDir, brand.id);
+
+  try {
+    const subdirs = await fs.readdir(brandDir, { withFileTypes: true });
+    const categories = {};
+    let totalImages = 0;
+
+    for (const entry of subdirs) {
+      if (!entry.isDirectory()) continue;
+      const catDir = path.join(brandDir, entry.name);
+      const files = await fs.readdir(catDir);
+      const images = files
+        .filter(f => /\.(jpe?g|png|webp|gif)$/i.test(f))
+        .map(f => `/backgrounds/${brand.id}/${entry.name}/${f}`);
+
+      if (images.length > 0) {
+        categories[entry.name] = { images, count: images.length };
+        totalImages += images.length;
+      }
+    }
+
+    res.json({ categories, totalImages });
+  } catch (err) {
+    if (err.code === 'ENOENT') return res.json({ categories: {}, totalImages: 0 });
+    console.error('[List Backgrounds]', err);
+    res.status(500).json({ error: 'Failed to list backgrounds' });
+  }
+});
+
+app.post('/api/backgrounds/select', requireAuth, async (req, res) => {
+  const { backgroundPath } = req.body || {};
+  if (!backgroundPath) return res.status(400).json({ error: 'Missing backgroundPath' });
+
+  // Resolve the actual file on disk from the URL path
+  const relativePath = backgroundPath.replace(/^\/backgrounds\//, '');
+  const sourcePath = path.join(backgroundsDir, relativePath);
+
+  try {
+    await fs.access(sourcePath);
+  } catch {
+    return res.status(404).json({ error: 'Background image not found' });
+  }
+
+  const ext = path.extname(sourcePath);
+  const filename = `ref_${crypto.randomUUID().slice(0, 8)}${ext}`;
+  const destPath = path.join(uploadsDir, filename);
+
+  await fs.copyFile(sourcePath, destPath);
+  res.json({ ok: true, filename, url: `/uploads/${filename}` });
+});
+
+app.delete('/api/backgrounds/:brandId/:category/:filename', requireAuth, async (req, res) => {
+  const { brandId, category, filename } = req.params;
+  const brand = await getBrandAsync(brandId, req.user?.uid);
+  if (brand.id === 'generic') return res.status(403).json({ error: 'Cannot delete generic brand backgrounds' });
+
+  // Sanitize path components to prevent traversal
+  const safeCat = path.basename(category);
+  const safeFile = path.basename(filename);
+  const filePath = path.join(backgroundsDir, brand.id, safeCat, safeFile);
+
+  try {
+    await fs.unlink(filePath);
+    res.json({ ok: true });
+  } catch (err) {
+    if (err.code === 'ENOENT') return res.status(404).json({ error: 'File not found' });
+    console.error('[Delete Background]', err);
+    res.status(500).json({ error: 'Failed to delete' });
+  }
 });
 
 // --- TikTok Integration ---

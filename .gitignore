@@ -3,6 +3,7 @@ node_modules/
 studio/.env
 studio/output/
 studio/uploads/
+studio/backgrounds/
 output/
 *.log
 .DS_Store
