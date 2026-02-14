@@ -3965,15 +3965,18 @@ function clearSession() {
 // --- Photo Vault (localStorage) ---
 // =============================================
 
-const VAULT_KEY = 'carousel-studio-vault';
+function vaultKey() {
+  const uid = firebase.auth?.()?.currentUser?.uid;
+  return uid ? `carousel-studio-vault-${uid}` : 'carousel-studio-vault';
+}
 
 function loadVault() {
-  try { return JSON.parse(localStorage.getItem(VAULT_KEY) || '[]'); }
+  try { return JSON.parse(localStorage.getItem(vaultKey()) || '[]'); }
   catch { return []; }
 }
 
 function saveVault(vault) {
-  try { localStorage.setItem(VAULT_KEY, JSON.stringify(vault)); }
+  try { localStorage.setItem(vaultKey(), JSON.stringify(vault)); }
   catch { /* quota exceeded */ }
 }
 
