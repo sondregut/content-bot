@@ -846,6 +846,61 @@ body {
   object-fit: cover;
 }
 
+/* Phone Frame Preview */
+
+.mockup-phone-frame {
+  position: absolute;
+  z-index: 2;
+  background: #000;
+  border-radius: 10px;
+  border: 2px solid #222;
+  overflow: hidden;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.35);
+  transition: width 0.2s, height 0.2s, transform 0.2s;
+}
+
+.mockup-phone-frame.phone-small { width: 55px; height: 110px; }
+.mockup-phone-frame.phone-medium { width: 75px; height: 150px; }
+.mockup-phone-frame.phone-large { width: 95px; height: 190px; }
+
+.mockup-phone-frame.pos-right { right: 12px; top: 50%; margin-top: -75px; }
+.mockup-phone-frame.pos-right.phone-small { margin-top: -55px; }
+.mockup-phone-frame.pos-right.phone-large { margin-top: -95px; }
+
+.mockup-phone-frame.pos-left { left: 12px; top: 50%; margin-top: -75px; }
+.mockup-phone-frame.pos-left.phone-small { margin-top: -55px; }
+.mockup-phone-frame.pos-left.phone-large { margin-top: -95px; }
+
+.mockup-phone-frame.pos-corner { right: 10px; bottom: 40px; }
+
+.mockup-phone-notch {
+  width: 24px;
+  height: 5px;
+  background: #111;
+  border-radius: 3px;
+  margin: 3px auto 2px;
+}
+
+.mockup-phone-frame img {
+  width: 100%;
+  height: calc(100% - 10px);
+  object-fit: cover;
+  border-radius: 0 0 8px 8px;
+}
+
+/* Figure Image Preview */
+
+.mockup-figure-img {
+  position: absolute;
+  z-index: 2;
+  object-fit: cover;
+  transition: width 0.2s, height 0.2s, border-radius 0.2s;
+}
+
+.mockup-figure-img.fig-small { width: 50px; height: 50px; }
+.mockup-figure-img.fig-medium { width: 70px; height: 70px; }
+.mockup-figure-img.fig-large { width: 95px; height: 95px; }
+
 /* Mockup Text Group (drag to move) */
 
 .mockup-text-group {

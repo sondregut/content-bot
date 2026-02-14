@@ -2046,6 +2046,11 @@ imageUsageSelect.addEventListener('change', () => {
 });
 
 document.getElementById('bgOverlayOpacity').addEventListener('change', updatePreviewMockup);
+document.getElementById('phoneAngle').addEventListener('change', updatePreviewMockup);
+document.getElementById('phoneSize').addEventListener('change', updatePreviewMockup);
+document.getElementById('figurePosition').addEventListener('change', updatePreviewMockup);
+document.getElementById('figureSize').addEventListener('change', updatePreviewMockup);
+document.getElementById('figureBorderRadius').addEventListener('change', updatePreviewMockup);
 
 // New mockup controls
 document.getElementById('aspectRatio').addEventListener('change', () => {
@@ -2148,6 +2153,65 @@ function updatePreviewMockup() {
     previewMockup.classList.remove('photo-type');
     previewMockup.style.background = primaryColor;
     mockupPhotoPlaceholder.style.display = 'none';
+  }
+
+  // Phone frame / figure preview
+  const phoneFrame = document.getElementById('mockup-phone-frame');
+  const phoneImg = document.getElementById('mockup-phone-img');
+  const figureImg = document.getElementById('mockup-figure-img');
+  const mockupTextGroupEl = document.getElementById('mockup-text-group');
+
+  if (phoneFrame) phoneFrame.style.display = 'none';
+  if (figureImg) figureImg.style.display = 'none';
+  if (mockupTextGroupEl) { mockupTextGroupEl.style.maxWidth = ''; mockupTextGroupEl.style.textAlign = ''; }
+
+  if (isMockup && screenshotImageFilename) {
+    const usage = imageUsageSelect.value;
+    const layout = mockupLayoutSelect.value;
+
+    if (usage === 'phone') {
+      const size = form.elements.phoneSize?.value || 'medium';
+      const angle = form.elements.phoneAngle?.value || '-8';
+
+      phoneFrame.style.display = 'block';
+      phoneImg.src = `/uploads/${screenshotImageFilename}`;
+      phoneFrame.className = 'mockup-phone-frame phone-' + size;
+
+      if (layout === 'phone-right') {
+        phoneFrame.classList.add('pos-right');
+        if (mockupTextGroupEl) { mockupTextGroupEl.style.maxWidth = '55%'; }
+      } else if (layout === 'phone-left') {
+        phoneFrame.classList.add('pos-left');
+        if (mockupTextGroupEl) { mockupTextGroupEl.style.maxWidth = '55%'; mockupTextGroupEl.style.textAlign = 'right'; }
+      } else {
+        phoneFrame.classList.add('pos-corner');
+      }
+
+      phoneFrame.style.transform = `rotate(${angle}deg)`;
+    } else if (usage === 'figure') {
+      const figSize = form.elements.figureSize?.value || 'medium';
+      const figPos = form.elements.figurePosition?.value || 'center-right';
+      const figRadius = form.elements.figureBorderRadius?.value || '24';
+
+      figureImg.style.display = 'block';
+      figureImg.src = `/uploads/${screenshotImageFilename}`;
+      figureImg.className = 'mockup-figure-img fig-' + figSize;
+      figureImg.style.borderRadius = figRadius + 'px';
+
+      // Position
+      figureImg.style.top = ''; figureImg.style.bottom = ''; figureImg.style.left = ''; figureImg.style.right = '';
+      figureImg.style.margin = '';
+      if (figPos.includes('top')) figureImg.style.top = '16px';
+      else if (figPos.includes('bottom')) figureImg.style.bottom = '40px';
+      else { figureImg.style.top = '50%'; figureImg.style.margin = '-35px 0 0'; }
+      if (figPos.includes('right')) figureImg.style.right = '12px';
+      else if (figPos.includes('left')) figureImg.style.left = '12px';
+      else if (figPos === 'center') { figureImg.style.left = '50%'; figureImg.style.margin += ' 0 0 -35px'; }
+
+      if (figPos.includes('right') || figPos.includes('left')) {
+        if (mockupTextGroupEl) mockupTextGroupEl.style.maxWidth = '55%';
+      }
+    }
   }
 
   // Text color override
