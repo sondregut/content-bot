@@ -92,12 +92,13 @@ async function generateWithFlux(faceImagePaths, prompt, { aspectRatio = '9:16' }
 let bucket = null;
 let db = null;
 try {
-  // Strip literal newlines/carriage returns and fix escaped quotes from env var storage
-  const rawSA = process.env.FIREBASE_SERVICE_ACCOUNT || '';
-  const cleanedSA = (rawSA || '{}').replace(/[\n\r]/g, '').replace(/\\"/g, '"');
+  // Parse Firebase service account JSON, handling various env var encoding formats
+  const rawSA = (process.env.FIREBASE_SERVICE_ACCOUNT || '').trim();
+  // Fix escaped quotes (\"->"), then convert real newlines to \\n so JSON.parse doesn't break
+  const cleanedSA = (rawSA || '{}').replace(/\\"/g, '"').replace(/\n/g, '\\n').replace(/\r/g, '');
   const serviceAccount = JSON.parse(cleanedSA);
   if (serviceAccount.project_id) {
-    // Ensure private key has actual newlines
+    // Ensure private key has actual newlines (\\n -> real newline)
     if (serviceAccount.private_key) {
       serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
     }
