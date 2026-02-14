@@ -2701,8 +2701,14 @@ Requirements:
 - Keep it funny, relatable, and shareable — not corporate or salesy
 - The meme should make sense even to people who don't know the brand
 
-Return ONLY the meme description (no explanation, no preamble). Example format:
-"Two-panel approval meme — top (disapproval): doing repetitive tasks manually, bottom (approval): letting [brand] handle it automatically"`,
+Return ONLY the meme description (no explanation, no preamble). Vary the format — here are examples:
+- "Expanding brain meme — Level 1: Using spreadsheets to track inventory, Level 2: Using basic software, Level 3: Using [brand]'s AI-powered system, Level 4: [brand] auto-managing everything while you sleep"
+- "Nobody: ... [brand] users: (description of enthusiastic/relatable behavior)"
+- "POV: You just discovered [brand] — (description of the reaction/scenario)"
+- "Two-panel approval meme — top (disapproval): old way of doing X, bottom (approval): using [brand] to do X better"
+- "Side-by-side comparison — Left: struggling without [brand], Right: thriving with [brand]"
+
+Pick a DIFFERENT format each time. Do NOT default to two-panel approval.`,
           }],
         });
 
