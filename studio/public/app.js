@@ -296,6 +296,7 @@ function resetAppState() {
   vaultHasMore = false;
   vaultNextCursor = null;
   vaultLoading = false;
+  vaultLastFetched = 0;
   const vaultCountEl = document.getElementById('vault-count');
   if (vaultCountEl) vaultCountEl.textContent = '0';
 
@@ -5130,6 +5131,8 @@ let vaultImages = [];
 let vaultHasMore = false;
 let vaultNextCursor = null;
 let vaultLoading = false;
+let vaultLastFetched = 0; // timestamp of last successful fetch
+const VAULT_CACHE_TTL = 60 * 60 * 1000; // 1 hour (signed URLs last 2h)
 
 async function fetchVaultImages(reset = false) {
   if (vaultLoading) return;
@@ -5152,6 +5155,7 @@ async function fetchVaultImages(reset = false) {
     }
     vaultHasMore = data.hasMore;
     vaultNextCursor = data.nextCursor;
+    vaultLastFetched = Date.now();
   } catch (err) {
     console.error('Failed to fetch vault images:', err);
   } finally {
@@ -5171,6 +5175,7 @@ async function fetchVaultCount() {
 
 // Images are auto-saved server-side now; just refresh the count
 function addToVault(_url, _filename) {
+  vaultLastFetched = 0; // invalidate cache so next open fetches fresh
   fetchVaultCount();
 }
 
@@ -5336,7 +5341,12 @@ async function openVault() {
   document.getElementById('vault-backdrop').classList.add('open');
   // Run one-time migration
   await migrateLocalVault();
-  // Fetch fresh data (with fresh signed URLs) every time
+  // Use cached images if fetched recently (signed URLs valid for 2h, cache for 1h)
+  const cacheValid = vaultImages.length > 0 && (Date.now() - vaultLastFetched) < VAULT_CACHE_TTL;
+  if (cacheValid) {
+    renderVault();
+    return;
+  }
   renderVault(); // show loading state
   await fetchVaultImages(true);
   renderVault();
