@@ -747,7 +747,12 @@ brandSaveBtn.addEventListener('click', async () => {
     renderBrandSelector();
     await loadContentIdeas();
     updateIconPreview();
+    const wasNewBrand = !editingBrandId;
     closeBrandModal();
+    // Auto-generate content ideas for new brands with a website
+    if (wasNewBrand && payload.website) {
+      autoGenerateBtn.click();
+    }
   } catch (err) {
     brandModalStatus.textContent = err.message;
     brandModalStatus.className = 'brand-modal-status error';
@@ -1099,6 +1104,12 @@ function toggleTypeFields() {
   textFields.style.display = type === 'text' ? 'block' : 'none';
   mockupFields.style.display = type === 'mockup' ? 'block' : 'none';
   if (type === 'mockup') toggleMockupPhoneOptions();
+  const hints = {
+    photo: 'AI-generated background image with text overlay',
+    text: 'Text and colors only — no background image',
+    mockup: 'App screenshot in a phone frame with text overlay',
+  };
+  document.getElementById('slideTypeHint').textContent = hints[type] || '';
 }
 
 function toggleMockupPhoneOptions() {
