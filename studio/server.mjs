@@ -328,7 +328,7 @@ const GENERIC_BRAND = {
   defaultMicroLabel: 'MY BRAND',
   defaultBackground: 'dark premium background with subtle grain',
   iconOverlayText: '',
-  systemPrompt: 'You are an expert visual designer and prompt engineer for social media carousel content.',
+  systemPrompt: 'Generate social media carousel content. Focus on punchy headlines, clear messaging, and visual variety.',
   imageStyle: 'Minimalist and clean. Candid photography with natural lighting, shot on iPhone. 35mm film grain aesthetic. Simple uncluttered backgrounds.',
 };
 
@@ -1734,6 +1734,104 @@ app.delete('/api/account', requireAuth, async (req, res) => {
   }
 });
 
+// --- Shared brand config prompt builder ---
+function buildBrandConfigPrompt({ url, pageTitle, metaDesc, ogSiteName, ogImage, themeColor, extractedColors, textContent, name, description }) {
+  const contextLines = [];
+  if (url) contextLines.push(`Page URL: ${url}`);
+  if (pageTitle) contextLines.push(`Page title: ${pageTitle}`);
+  if (metaDesc) contextLines.push(`Meta description: ${metaDesc}`);
+  if (ogSiteName) contextLines.push(`OG site name: ${ogSiteName}`);
+  contextLines.push(`OG image: ${ogImage || 'none'}`);
+  contextLines.push(`Theme color: ${themeColor || 'none'}`);
+  if (name) contextLines.push(`Brand name: ${name}`);
+  if (description) contextLines.push(`Brand description: ${description}`);
+  if (extractedColors?.length) {
+    contextLines.push(`CSS colors extracted from the website (sorted by frequency, most used first): ${extractedColors.join(', ')}`);
+  }
+  if (textContent) contextLines.push(`Page text (first 3000 chars): ${textContent}`);
+
+  return `Analyze this brand/website and generate a brand configuration for a social media carousel creation tool.
+
+${contextLines.join('\n')}
+
+COLOR RULES — STRICTLY FOLLOW THESE:
+1. ${extractedColors?.length ? 'You MUST pick colors ONLY from the "CSS colors extracted" list above. Copy the exact hex values.' : 'Choose colors that match the brand description and any theme color provided.'}
+2. Do NOT invent random hex codes. ${extractedColors?.length ? 'Every color in your response must appear in the extracted list.' : 'Use reasonable defaults matching the brand.'}
+3. Map the colors to roles:
+   - primary: the dominant dark/background color
+   - accent: the most prominent brand/highlight color
+   - white: the main text color (often #ffffff or a light color — you MAY use #ffffff)
+   - secondary: an alternate background color
+   - cta: the button/action color
+4. If fewer than 5 colors exist, you may reuse colors across roles or use #ffffff for white.
+${extractedColors?.length ? '5. If the CSS colors list is empty, use the theme-color and make reasonable guesses from the page content.' : ''}
+
+Return ONLY valid JSON (no markdown, no code fences) with:
+- name: brand name (short, clean)
+- description: 1-2 sentence brand description
+- colors: { primary, accent, white, secondary, cta } — hex codes
+- systemPrompt: 150-200 word brand brief for AI content generation describing tone, audience, content pillars, visual style
+- defaultBackground: one-line visual description for slide backgrounds matching the brand aesthetic
+- imageStyle: 2-4 sentence visual/photography direction for AI image generation (lighting, composition, mood, camera feel — NOT colors)
+- tone: 2-3 word tone description (e.g. "bold, energetic")
+- microLabel: short uppercase label for slides (e.g. "MYBRAND")
+- watermarkText: website domain for watermark (e.g. "mybrand.com")
+- contentPillars: array of 4-5 content theme strings suited to this brand`;
+}
+
+// --- Shared content ideas prompt builder ---
+function buildContentIdeasPrompt({ brand, microLabel, websiteUrl, pageTitle, metaDesc, websiteText, numIdeas }) {
+  const count = numIdeas || 5;
+  return `Based on this website content, generate ${count} carousel content ideas for ${brand.name}'s social media (TikTok/Instagram).
+
+Website: ${websiteUrl}
+Page title: ${pageTitle}
+Description: ${metaDesc}
+Website text: ${websiteText}
+
+Generate exactly ${count} carousel concepts. Each should have 6-7 slides and be based on real content/features/value props from the website.
+
+Return ONLY valid JSON (no markdown, no code fences) with this structure:
+{
+  "ideas": [
+    {
+      "title": "Short carousel title",
+      "caption": "Instagram/TikTok caption with hashtags",
+      "slides": [
+        {
+          "number": 1,
+          "label": "Hook",
+          "type": "photo, text, or mockup",
+          "microLabel": "${microLabel}",
+          "headline": "Main headline text",
+          "body": "Supporting body text (1-2 sentences)",
+          "highlight": "key phrase to highlight",
+          "sport": "only for photo type - subject/person shown",
+          "setting": "only for photo type - location/environment",
+          "action": "only for photo type - what the person is doing",
+          "mood": "only for photo type - emotional tone"
+        }
+      ]
+    }
+  ]
+}
+
+Rules:
+- Each idea MUST include a "caption" field: a ready-to-post Instagram/TikTok caption (2-3 engaging sentences + 5-8 relevant hashtags). Write in the brand's voice.
+- Each idea should cover a DISTINCTLY different angle — avoid repeating the same theme or structure across ideas.
+- First slide of each idea: strong hook (usually photo or text type) — each hook must be unique and attention-grabbing
+- Last slide: CTA with "${brand.name} — link in bio" or similar
+- Mix photo, text, and mockup types within each idea
+- For photo slides, ALWAYS include sport, setting, action, and mood fields
+- Use mockup with text-statement layout for bold statement slides
+- Headlines: punchy, under 15 words — avoid repeating similar phrasing across ideas
+- Body: 1-2 sentences max
+- Content should be based on REAL information from the website, not generic filler
+- Make each idea feel like a completely different post — vary the tone, angle, and structure`;
+}
+
+const BRAND_STRATEGIST_SYSTEM = 'You are a brand strategist for social media carousel content. Return only valid JSON.';
+
 // AI brand setup — generate colors, system prompt, etc. from description
 app.post('/api/brands/ai-setup', requireAuth, async (req, res) => {
   try {
@@ -1767,21 +1865,10 @@ app.post('/api/brands/ai-setup', requireAuth, async (req, res) => {
     const msg = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 1024,
+      system: BRAND_STRATEGIST_SYSTEM,
       messages: [{
         role: 'user',
-        content: `Given this brand info, generate a complete brand configuration for a social media carousel creation tool.
-
-Brand: ${name}
-Description: ${description}
-${websiteContent ? `Website content (extracted): ${websiteContent}` : ''}
-
-Return ONLY valid JSON (no markdown, no code fences) with:
-- colors: { primary (dark bg), accent (highlight), white (text), secondary (alt bg), cta (button) } — all hex codes
-- systemPrompt: 150-200 word brand brief for AI content generation, describing tone, audience, content pillars
-- defaultBackground: one-line visual description for AI image backgrounds
-- imageStyle: 2-4 sentence visual/photography direction for AI image generation (describe lighting, composition style, mood, camera feel — NOT colors, those are separate)
-- contentPillars: array of 4-5 content themes as short strings
-- tone: short tone/voice description (2-3 words)`
+        content: buildBrandConfigPrompt({ name, description, textContent: websiteContent }),
       }],
     });
 
@@ -2049,41 +2136,10 @@ app.post('/api/brands/full-setup', requireAuth, async (req, res) => {
     const msg = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 1024,
+      system: BRAND_STRATEGIST_SYSTEM,
       messages: [{
         role: 'user',
-        content: `Analyze this website and generate a brand configuration for a social media carousel creation tool.
-
-Page URL: ${finalUrl}
-Page title: ${pageTitle}
-Meta description: ${metaDesc}
-OG site name: ${ogSiteName}
-OG image: ${ogImage || 'none'}
-Theme color: ${themeColor || 'none'}
-CSS colors extracted from the website (sorted by frequency, most used first): ${extractedColors.join(', ') || 'none'}
-Page text (first 3000 chars): ${textContent}
-
-COLOR RULES — STRICTLY FOLLOW THESE:
-1. You MUST pick colors ONLY from the "CSS colors extracted" list above. Copy the exact hex values.
-2. Do NOT invent, guess, or generate new hex color codes. Every color in your response must appear in the extracted list.
-3. Map the extracted colors to roles:
-   - primary: the dominant dark/background color from the site
-   - accent: the most prominent brand/highlight color
-   - white: the main text color (often #ffffff or a light color — you MAY use #ffffff even though it's filtered from the list)
-   - secondary: an alternate background color
-   - cta: the button/action color
-4. If fewer than 5 extracted colors exist, you may reuse colors across roles or use #ffffff for white.
-
-Return ONLY valid JSON (no markdown, no code fences) with:
-- name: brand name (short, clean)
-- description: 1-2 sentence brand description
-- colors: { primary, accent, white, secondary, cta } — exact hex codes from the extracted list
-- systemPrompt: 150-200 word brand brief for AI content generation describing tone, audience, content pillars, visual style
-- defaultBackground: one-line visual description for slide backgrounds matching the brand aesthetic
-- imageStyle: 2-4 sentence visual/photography direction for AI image generation (lighting, composition, mood, camera feel — NOT colors)
-- tone: 2-3 word tone description
-- microLabel: short uppercase label for slides
-- watermarkText: website domain for watermark
-- contentPillars: array of 4-5 content theme strings`
+        content: buildBrandConfigPrompt({ url: finalUrl, pageTitle, metaDesc, ogSiteName, ogImage, themeColor, extractedColors, textContent }),
       }],
     });
 
@@ -2167,44 +2223,7 @@ Return ONLY valid JSON (no markdown, no code fences) with:
         system: brandContext,
         messages: [{
           role: 'user',
-          content: `Based on this website content, generate 5 carousel content ideas for ${brandData.name}'s social media (TikTok/Instagram).
-
-Website: ${websiteUrl}
-Page title: ${pageTitle}
-Description: ${metaDesc}
-Website text: ${textContent}
-
-Generate exactly 5 carousel concepts. Each should have 6-7 slides and be based on real content/features/value props from the website.
-
-Return ONLY valid JSON (no markdown, no code fences) with this structure:
-{
-  "ideas": [
-    {
-      "title": "Short carousel title",
-      "caption": "Instagram/TikTok caption with hashtags",
-      "slides": [
-        {
-          "number": 1,
-          "label": "Hook",
-          "type": "photo, text, or mockup",
-          "microLabel": "${microLabel}",
-          "headline": "Main headline text",
-          "body": "Supporting body text (1-2 sentences)",
-          "highlight": "key phrase to highlight"
-        }
-      ]
-    }
-  ]
-}
-
-Rules:
-- Each idea MUST include a "caption" field: a ready-to-post caption (2-3 sentences + 5-8 hashtags)
-- Each idea should cover a DISTINCTLY different angle
-- First slide: strong hook (photo or text type)
-- Last slide: CTA with "${brandData.name} — link in bio"
-- Mix photo, text, and mockup types
-- Headlines: punchy, under 15 words
-- Content based on REAL information from the website`
+          content: buildContentIdeasPrompt({ brand: brandData, microLabel, websiteUrl, pageTitle, metaDesc, websiteText: textContent }),
         }],
       });
 
@@ -2594,42 +2613,10 @@ app.post('/api/brands/analyze-website', requireAuth, async (req, res) => {
     const msg = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 1024,
+      system: BRAND_STRATEGIST_SYSTEM,
       messages: [{
         role: 'user',
-        content: `Analyze this website and generate a brand configuration for a social media carousel creation tool.
-
-Page URL: ${finalUrl}
-Page title: ${pageTitle}
-Meta description: ${metaDesc}
-OG site name: ${ogSiteName}
-OG image: ${ogImage || 'none'}
-Theme color: ${themeColor || 'none'}
-CSS colors found on site (by frequency): ${extractedColors.join(', ') || 'none'}
-Page text (first 3000 chars): ${textContent}
-
-COLOR RULES — STRICTLY FOLLOW THESE:
-1. You MUST pick colors ONLY from the "CSS colors found on site" list above. Copy the exact hex values.
-2. Do NOT invent, guess, or generate new hex color codes. Every color in your response must appear in the extracted list.
-3. Map the extracted colors to roles:
-   - primary: the dominant dark/background color from the site
-   - accent: the most prominent brand/highlight color
-   - white: the main text color (often #ffffff or a light color — you MAY use #ffffff even though it's filtered from the list)
-   - secondary: an alternate background color
-   - cta: the button/action color
-4. If fewer than 5 extracted colors exist, you may reuse colors across roles or use #ffffff for white.
-5. If the CSS colors list is empty, use the theme-color and make reasonable guesses from the page content.
-
-Return ONLY valid JSON (no markdown, no code fences) with:
-- name: brand name (short, clean)
-- description: 1-2 sentence brand description
-- colors: { primary, accent, white, secondary, cta } — exact hex codes from the extracted list
-- systemPrompt: 150-200 word brand brief for AI content generation describing tone, audience, content pillars, visual style
-- defaultBackground: one-line visual description for slide backgrounds matching the brand aesthetic
-- imageStyle: 2-4 sentence visual/photography direction for AI image generation (describe lighting, composition style, mood, camera feel — NOT colors, those are separate)
-- tone: 2-3 word tone description (e.g. "bold, energetic")
-- microLabel: short uppercase label for slides (e.g. "MYBRAND")
-- watermarkText: website domain for watermark (e.g. "mybrand.com")
-- contentPillars: array of 4-5 content theme strings suited to this brand (e.g. ["Product Features", "User Success Stories", "Industry Tips", "Behind the Scenes"])`
+        content: buildBrandConfigPrompt({ url: finalUrl, pageTitle, metaDesc, ogSiteName, ogImage, themeColor, extractedColors, textContent }),
       }],
     });
 
@@ -3035,10 +3022,20 @@ app.post('/api/edit-slide', requireAuth, async (req, res) => {
       imgBuffer = Buffer.from(await imgRes.arrayBuffer());
     }
 
+    const c = brand.colors;
+    const editPrompt = [
+      `Edit this carousel slide for ${brand.name}.`,
+      `Change: ${instructions}.`,
+      `Brand colors: primary ${c.primary}, accent ${c.accent}, text ${c.white}, CTA ${c.cta}.`,
+      brand.imageStyle ? `Visual style: ${brand.imageStyle}` : '',
+      `Safe zones: top 120px, bottom 200px, sides 90px. Keep text within these bounds.`,
+      `Keep everything else the same. Do not add new text or logos.`,
+    ].filter(Boolean).join(' ');
+
     const response = await openai.images.edit({
       model: resolveImageModel(imageModel),
       image: new File([imgBuffer], 'slide.png', { type: 'image/png' }),
-      prompt: `Edit this carousel slide for ${brand.name}. Change: ${instructions}. Keep everything else the same.`,
+      prompt: editPrompt,
       size: '1024x1536',
       quality: quality || 'high',
     });
@@ -3300,7 +3297,7 @@ Return ONLY valid JSON with this exact structure (no markdown, no explanation):
 
 Rules:
 - First slide should be a strong hook (usually photo type)
-- Last slide should be a CTA with "Download ${brand.name} — link in bio"
+- Last slide should be a CTA with "${brand.name} — link in bio"
 - Mix photo, text, and mockup types for visual variety
 - Use mockup type with text-statement layout for bold statement slides (no screenshot needed)
 - Use mockup type with phone-right or phone-left for app screenshot slides (user provides screenshot after)
@@ -3411,47 +3408,7 @@ app.post('/api/generate-content-ideas', requireAuth, async (req, res) => {
         .replace(/\{\{website_text\}\}/g, websiteText)
         .replace(/\{\{micro_label\}\}/g, microLabel);
     } else {
-      userPrompt = `Based on this website content, generate 5 carousel content ideas for ${brand.name}'s social media (TikTok/Instagram).
-
-Website: ${websiteUrl}
-Page title: ${pageTitle}
-Description: ${metaDesc}
-Website text: ${websiteText}
-
-Generate exactly 5 carousel concepts. Each should have 6-7 slides and be based on real content/features/value props from the website.
-
-Return ONLY valid JSON (no markdown, no code fences) with this structure:
-{
-  "ideas": [
-    {
-      "title": "Short carousel title",
-      "caption": "Instagram/TikTok caption with hashtags",
-      "slides": [
-        {
-          "number": 1,
-          "label": "Hook",
-          "type": "photo, text, or mockup",
-          "microLabel": "${microLabel}",
-          "headline": "Main headline text",
-          "body": "Supporting body text (1-2 sentences)",
-          "highlight": "key phrase to highlight"
-        }
-      ]
-    }
-  ]
-}
-
-Rules:
-- Each idea MUST include a "caption" field: a ready-to-post Instagram/TikTok caption (2-3 engaging sentences + 5-8 relevant hashtags). Write in the brand's voice.
-- Each idea should cover a DISTINCTLY different angle — avoid repeating the same theme or structure across ideas. Use varied approaches: features, benefits, how-to, comparison, social proof, behind-the-scenes, myth-busting, user stories, etc.
-- First slide of each idea: strong hook (usually photo or text type) — each hook must be unique and attention-grabbing in a different way
-- Last slide: CTA with "${brand.name} — link in bio" or similar
-- Mix photo, text, and mockup types within each idea
-- Use mockup with text-statement layout for bold statement slides
-- Headlines: punchy, under 15 words — avoid repeating similar phrasing across ideas
-- Body: 1-2 sentences max
-- Content should be based on REAL information from the website, not generic filler
-- Make each idea feel like a completely different post — vary the tone, angle, and structure`;
+      userPrompt = buildContentIdeasPrompt({ brand, microLabel, websiteUrl, pageTitle, metaDesc, websiteText });
     }
 
     const response = await anthropic.messages.create({
@@ -3528,6 +3485,7 @@ app.post('/api/personalize-scenarios', requireAuth, async (req, res) => {
     const response = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 1024,
+      system: BRAND_STRATEGIST_SYSTEM,
       messages: [{
         role: 'user',
         content: `Given this brand:\n${brandContext}\n\nGenerate exactly 8 photo scenarios for personalized images featuring a person (the user). Each scenario should be relevant to this brand's industry, niche, and identity.\n\nReturn a JSON array with exactly 8 objects, each having:\n- id: URL-safe slug (e.g. "morning-routine")\n- title: 2-3 word title\n- category: 1 word category\n- setting: scene/environment description (10-20 words)\n- action: what the person is doing (5-10 words)\n- mood: emotional tone (2-4 words)\n\nRespond with ONLY the JSON array, no other text.`
