@@ -598,6 +598,195 @@ settingsSaveBtn.addEventListener('click', async () => {
   checkTikTokStatus();
 });
 
+// --- Persons Management ---
+const personsSettingsToggle = document.getElementById('persons-settings-toggle');
+const personsSettingsSection = document.getElementById('persons-settings-section');
+const personsList = document.getElementById('persons-list');
+const addPersonBtn = document.getElementById('add-person-btn');
+
+if (personsSettingsToggle) {
+  personsSettingsToggle.addEventListener('click', () => {
+    const isOpen = personsSettingsSection.style.display !== 'none';
+    personsSettingsSection.style.display = isOpen ? 'none' : 'block';
+    personsSettingsToggle.classList.toggle('open', !isOpen);
+  });
+}
+
+async function loadUserPersons() {
+  try {
+    const res = await authFetch('/api/persons');
+    const data = await res.json();
+    userPersons = data.persons || [];
+    renderPersonsList();
+    populatePersonSelectors();
+  } catch (err) {
+    console.error('Failed to load persons:', err);
+    userPersons = [];
+  }
+}
+
+function renderPersonsList() {
+  if (!personsList) return;
+  personsList.innerHTML = '';
+  if (userPersons.length === 0) {
+    personsList.innerHTML = '<p class="field-hint">No people added yet.</p>';
+    return;
+  }
+  for (const person of userPersons) {
+    const card = document.createElement('div');
+    card.className = 'person-card';
+    const photoCount = person.photos?.length || 0;
+    card.innerHTML = `
+      <div class="person-card-header">
+        <input type="text" value="${escapeHtml(person.name)}" data-person-id="${person.id}" class="person-name-input" />
+        <button type="button" class="person-delete-btn" data-person-id="${person.id}">Delete</button>
+      </div>
+      <div class="person-photos-grid" data-person-id="${person.id}">
+        ${(person.photos || []).map((p, idx) =>
+          p.url ? `<div class="face-photo-thumb"><img src="${p.url}" alt="Photo" /><button class="face-photo-remove" data-person-id="${person.id}" data-idx="${idx}" title="Remove">&times;</button></div>` : ''
+        ).join('')}
+        ${photoCount < 5 ? `<button type="button" class="face-add-btn person-photo-add" data-person-id="${person.id}" title="Add photo">+</button>` : ''}
+      </div>
+      <div class="person-photo-count">${photoCount} / 5 photos</div>
+    `;
+    personsList.appendChild(card);
+  }
+
+  // Name edit handlers (blur = save)
+  personsList.querySelectorAll('.person-name-input').forEach(input => {
+    input.addEventListener('blur', async () => {
+      const personId = input.dataset.personId;
+      const newName = input.value.trim();
+      if (!newName) return;
+      try {
+        await authFetch(`/api/persons/${personId}`, {
+          method: 'PUT',
+          body: JSON.stringify({ name: newName }),
+        });
+        const person = userPersons.find(p => p.id === personId);
+        if (person) person.name = newName;
+        populatePersonSelectors();
+      } catch { /* ignore */ }
+    });
+  });
+
+  // Delete person handlers
+  personsList.querySelectorAll('.person-delete-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const personId = btn.dataset.personId;
+      if (!confirm('Delete this person and all their photos?')) return;
+      try {
+        await authFetch(`/api/persons/${personId}`, { method: 'DELETE' });
+        userPersons = userPersons.filter(p => p.id !== personId);
+        renderPersonsList();
+        populatePersonSelectors();
+      } catch (err) {
+        console.error('Failed to delete person:', err);
+      }
+    });
+  });
+
+  // Delete individual photo handlers
+  personsList.querySelectorAll('.face-photo-remove').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const personId = btn.dataset.personId;
+      const idx = btn.dataset.idx;
+      try {
+        const res = await authFetch(`/api/persons/${personId}/photos/${idx}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (data.ok) {
+          const person = userPersons.find(p => p.id === personId);
+          if (person) person.photos = data.photos;
+          renderPersonsList();
+        }
+      } catch (err) {
+        console.error('Failed to delete photo:', err);
+      }
+    });
+  });
+
+  // Add photo handlers
+  personsList.querySelectorAll('.person-photo-add').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const personId = btn.dataset.personId;
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'image/*';
+      input.multiple = true;
+      input.addEventListener('change', async () => {
+        if (!input.files?.length) return;
+        const fd = new FormData();
+        for (const f of input.files) fd.append('photos', f);
+        btn.textContent = '...';
+        btn.disabled = true;
+        try {
+          const res = await authFetch(`/api/persons/${personId}/photos`, { method: 'POST', body: fd });
+          const data = await res.json();
+          if (data.ok) {
+            const person = userPersons.find(p => p.id === personId);
+            if (person) person.photos = data.photos;
+            renderPersonsList();
+          } else {
+            alert(data.error || 'Upload failed');
+          }
+        } catch (err) {
+          alert('Upload failed: ' + err.message);
+        }
+      });
+      input.click();
+    });
+  });
+}
+
+function populatePersonSelectors() {
+  const selectors = [
+    document.getElementById('person-select'),
+    document.getElementById('personalize-person-select'),
+  ].filter(Boolean);
+
+  for (const select of selectors) {
+    const currentVal = select.value;
+    const firstOption = select.querySelector('option');
+    const defaultText = firstOption?.textContent || 'None';
+    select.innerHTML = `<option value="">${escapeHtml(defaultText)}</option>`;
+    for (const person of userPersons) {
+      const photoCount = person.photos?.length || 0;
+      const opt = document.createElement('option');
+      opt.value = person.id;
+      opt.textContent = `${person.name} (${photoCount} photo${photoCount !== 1 ? 's' : ''})`;
+      if (photoCount === 0) opt.disabled = true;
+      select.appendChild(opt);
+    }
+    if (currentVal && userPersons.some(p => p.id === currentVal)) {
+      select.value = currentVal;
+    }
+  }
+}
+
+if (addPersonBtn) {
+  addPersonBtn.addEventListener('click', async () => {
+    const name = prompt('Person name:');
+    if (!name?.trim()) return;
+    try {
+      const res = await authFetch('/api/persons', {
+        method: 'POST',
+        body: JSON.stringify({ name: name.trim() }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        userPersons.unshift(data.person);
+        renderPersonsList();
+        populatePersonSelectors();
+      } else {
+        alert(data.error || 'Failed to create person');
+      }
+    } catch (err) {
+      alert('Failed to create person: ' + err.message);
+    }
+  });
+}
+
 // --- AI Prompt Settings ---
 if (promptSettingsToggle) {
   promptSettingsToggle.addEventListener('click', () => {
@@ -3105,6 +3294,8 @@ function buildSlidePayload(slide, slideIndex) {
   };
 
   if (payload.slideType === 'photo') {
+    const personSelect = document.getElementById('person-select');
+    if (personSelect?.value) payload.personId = personSelect.value;
     payload.sport = slide.sport || '';
     payload.setting = slide.setting || '';
     payload.action = slide.action || '';
@@ -4008,10 +4199,13 @@ facePhotosGrid.addEventListener('drop', (e) => {
 
 // Generate personalized image(s)
 personalizeGenerateBtn.addEventListener('click', async () => {
+  const personSelect = document.getElementById('personalize-person-select');
+  const selectedPersonId = personSelect?.value || '';
   const hasLocal = faceImageFiles.length > 0;
   const hasStored = storedFacePhotos.length > 0;
-  if (!hasLocal && !hasStored) {
-    personalizeStatus.textContent = 'Upload face photos first (in brand settings or here).';
+  const hasPerson = Boolean(selectedPersonId);
+  if (!hasLocal && !hasStored && !hasPerson) {
+    personalizeStatus.textContent = 'Select a person or upload face photos first.';
     return;
   }
   if (!currentBrand) {
@@ -4033,14 +4227,15 @@ personalizeGenerateBtn.addEventListener('click', async () => {
 
   personalizeGenerateBtn.disabled = true;
 
-  // Build FormData — attach local files if any (override stored), otherwise send empty (server uses stored)
-  const photoCount = hasLocal ? faceImageFiles.length : storedFacePhotos.length;
-  const photoLabel = hasLocal ? 'uploaded' : 'saved';
+  // Build FormData — attach local files if any, or use personId, otherwise send empty (server uses stored brand photos)
+  const photoCount = hasPerson ? (userPersons.find(p => p.id === selectedPersonId)?.photos?.length || 0) : hasLocal ? faceImageFiles.length : storedFacePhotos.length;
+  const photoLabel = hasPerson ? 'person' : hasLocal ? 'uploaded' : 'saved';
   function buildFormData() {
     const fd = new FormData();
-    if (hasLocal) faceImageFiles.forEach(file => fd.append('faceImages', file));
+    if (!hasPerson && hasLocal) faceImageFiles.forEach(file => fd.append('faceImages', file));
     fd.append('brand', currentBrand);
     fd.append('model', model);
+    if (hasPerson) fd.append('personId', selectedPersonId);
     return fd;
   }
 

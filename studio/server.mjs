@@ -273,6 +273,35 @@ async function cleanupTempFiles(paths) {
   }
 }
 
+// --- Person Helpers ---
+async function getPersonById(personId, userId) {
+  if (!db) return null;
+  const doc = await db.collection('carousel_persons').doc(personId).get();
+  if (!doc.exists) return null;
+  const data = doc.data();
+  if (data.userId !== userId) return null;
+  return { id: personId, ...data };
+}
+
+async function downloadPersonPhotosToTemp(person) {
+  const photos = person.photos;
+  if (!photos || photos.length === 0) return [];
+  const tmpPaths = [];
+  for (const photo of photos) {
+    const tmpPath = path.join(uploadsDir, `face_${crypto.randomUUID().slice(0, 8)}.png`);
+    if (bucket) {
+      const file = bucket.file(photo.storagePath);
+      const [buffer] = await file.download();
+      await fs.writeFile(tmpPath, buffer);
+    } else {
+      const src = path.join(outputDir, path.basename(photo.storagePath));
+      await fs.copyFile(src, tmpPath);
+    }
+    tmpPaths.push(tmpPath);
+  }
+  return tmpPaths;
+}
+
 // --- Save image record to Firestore for vault ---
 async function saveImageRecord({ userId, brandId, filename, type }) {
   if (!db) return null;
@@ -1064,6 +1093,90 @@ async function renderTextStatement(data, brand, theme) {
   return sharp(Buffer.from(svg)).png().toBuffer();
 }
 
+// Composite text overlay onto an existing image buffer (for hybrid photo slides)
+async function compositeTextOverlay(imageBuffer, data, brand) {
+  const theme = MOCKUP_THEMES.dark(brand);
+  const { width, height } = { width: 1080, height: 1920 };
+  const safe = getSafeZone(height);
+  const fontFamily = resolveFontFamily(data.fontFamily);
+
+  const micro = data.microLabel || brand.defaultMicroLabel;
+  const headline = data.headline || '';
+  const body = data.body || '';
+  const highlight = data.highlightPhrase || '';
+  const highlightOpacity = 0.3;
+
+  if (!headline && !micro) return imageBuffer;
+
+  const textMaxWidth = width - safe.left - safe.right;
+  const headlineFontSize = parseInt(data.headlineFontSize) || 82;
+  const bodyFontSize = parseInt(data.bodyFontSize) || 34;
+  const microFontSize = 24;
+
+  const headlineLines = headline ? wrapText(headline, headlineFontSize, textMaxWidth, true) : [];
+  const bodyLines = body ? wrapText(body, bodyFontSize, textMaxWidth) : [];
+
+  const headlineBlockH = headlineLines.length * headlineFontSize * 1.25;
+  const bodyBlockH = bodyLines.length ? bodyLines.length * bodyFontSize * 1.5 + 30 : 0;
+  const microBlockH = micro ? microFontSize + headlineFontSize + 16 : 0;
+  const totalH = microBlockH + headlineBlockH + bodyBlockH;
+
+  // Position text in lower portion of image for photo slides
+  const overlayPlacement = data.overlayPlacement || 'bottom third';
+  let baseY;
+  if (overlayPlacement === 'bottom third') {
+    baseY = Math.max(height - totalH - safe.bottom - 40, Math.round(height * 0.55));
+  } else {
+    baseY = Math.round((height - totalH) / 2);
+  }
+  const baseX = safe.left;
+
+  // Build text SVG elements
+  const textFill = '#FFFFFF';
+  const subtextFill = 'rgba(255,255,255,0.75)';
+  const microColor = brand.colors.accent;
+  const highlightColor = brand.colors.accent;
+
+  const microSvg = micro ? svgTextLines([micro], { x: baseX, startY: baseY, fontSize: microFontSize, fontWeight: '700', fill: microColor, letterSpacing: '5', fontFamily }) : '';
+
+  const headlineY = baseY + microBlockH;
+  const highlightSvg = highlight ? svgHighlightBars(headlineLines, highlight, { x: baseX, startY: headlineY, fontSize: headlineFontSize, lineHeight: 1.25, color: highlightColor, opacity: highlightOpacity }) : '';
+  const headlineSvg = headlineLines.length ? svgTextLines(headlineLines, { x: baseX, startY: headlineY, fontSize: headlineFontSize, fontWeight: 'bold', fill: textFill, lineHeight: 1.25, fontFamily }) : '';
+
+  const bodyY = headlineY + headlineBlockH + 30;
+  const bodySvg = bodyLines.length ? svgTextLines(bodyLines, { x: baseX, startY: bodyY, fontSize: bodyFontSize, fill: subtextFill, lineHeight: 1.5, fontFamily }) : '';
+
+  // Add gradient overlay for text readability
+  const gradientSvg = `<defs>
+    <linearGradient id="textGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#000" stop-opacity="0"/>
+      <stop offset="40%" stop-color="#000" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#000" stop-opacity="0.7"/>
+    </linearGradient>
+  </defs>
+  <rect width="${width}" height="${height}" fill="url(#textGrad)"/>`;
+
+  const overlaySvg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+    ${gradientSvg}
+    ${microSvg}
+    ${highlightSvg}
+    ${headlineSvg}
+    ${bodySvg}
+  </svg>`;
+
+  // Resize base image to canvas dimensions if needed
+  let baseBuffer = imageBuffer;
+  const meta = await sharp(imageBuffer).metadata();
+  if (meta.width !== width || meta.height !== height) {
+    baseBuffer = await sharp(imageBuffer).resize(width, height, { fit: 'cover' }).png().toBuffer();
+  }
+
+  return sharp(baseBuffer)
+    .composite([{ input: Buffer.from(overlaySvg) }])
+    .png()
+    .toBuffer();
+}
+
 async function generateMockupSlide(data, brand) {
   const themeFn = MOCKUP_THEMES[data.mockupTheme] || MOCKUP_THEMES.dark;
   const theme = themeFn(brand);
@@ -1226,6 +1339,28 @@ function buildPhotoPrompt(data, brand) {
     `Brand palette accents only (accent ${c.accent}, CTA color ${c.cta} for CTA only).`,
     trickyLine || null,
     'Hard constraints: no extra text beyond quoted. no watermarks. no random logos. no distorted faces/hands. no nonsense text. no perfect/flawless skin. no ultra-smooth rendering. no heavy retouching look.',
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+// Text-free version for hybrid rendering (AI image + Sharp text overlay)
+function buildPhotoImagePrompt(data, brand) {
+  const safeSport = data.sport || 'person';
+  const safeSetting = data.setting || 'professional setting';
+  const safeAction = data.action || 'looking confident and engaged';
+  const safeMood = data.mood || 'confident, professional';
+  const overlayPlacement = data.overlayPlacement || 'bottom third';
+
+  return [
+    `Create a photo for a TikTok carousel slide (1080x1920, 9:16) for ${brand.name}.`,
+    `Visual style: ${brand.imageStyle || 'Clean and professional photography with natural lighting.'}`,
+    `Scene: ${safeSport} in ${safeSetting}, ${safeAction}.`,
+    `Mood: ${safeMood}.`,
+    `Composition: simple, clean background. Leave clear negative space in the ${overlayPlacement} for text overlay — keep this area relatively clean/dark so overlaid text is readable.`,
+    data.personId ? 'Feature the person from the reference photo(s), preserve their face and identity accurately.' : null,
+    'Do NOT include any text, labels, typography, watermarks, or logos in the image. The image should be purely photographic with no text elements whatsoever.',
+    'Hard constraints: no text. no watermarks. no logos. no distorted faces/hands. no perfect/flawless skin. no ultra-smooth rendering. no heavy retouching look.',
   ]
     .filter(Boolean)
     .join('\n');
@@ -1722,6 +1857,22 @@ app.delete('/api/account', requireAuth, async (req, res) => {
       await writeLocalBrands(allBrands);
     }
 
+    // Delete all user's persons + their photos
+    if (db) {
+      const persons = await db.collection('carousel_persons').where('userId', '==', uid).get();
+      if (bucket) {
+        for (const doc of persons.docs) {
+          const photos = doc.data().photos || [];
+          for (const photo of photos) {
+            try { await bucket.file(photo.storagePath).delete(); } catch (e) { /* ignore */ }
+          }
+        }
+      }
+      const personBatch = db.batch();
+      persons.forEach(doc => personBatch.delete(doc.ref));
+      await personBatch.commit();
+    }
+
     // Delete the Firebase Auth user (only when Firebase admin is available)
     if (admin.apps.length) {
       await admin.auth().deleteUser(uid);
@@ -1817,7 +1968,12 @@ Return ONLY valid JSON (no markdown, no code fences) with this structure:
 }
 
 Rules:
-- Each idea MUST include a "caption" field: a ready-to-post Instagram/TikTok caption (2-3 engaging sentences + 5-8 relevant hashtags). Write in the brand's voice.
+- Each idea MUST include a "caption" field: a ready-to-post Instagram/TikTok caption in the brand's voice. Caption rules:
+  * First line is the HOOK — most compelling line, front-loaded with keywords (only ~125 chars show before "...more" on Instagram)
+  * 2-3 engaging sentences total, using natural keywords relevant to the content (algorithms prioritize keywords over hashtags)
+  * End with a CTA — ask a question, prompt a save/share, or direct to link in bio
+  * Add 3-5 relevant hashtags at the very end (not 8+, quality over quantity)
+  * Keep total caption under 300 characters for TikTok readability
 - Each idea should cover a DISTINCTLY different angle — avoid repeating the same theme or structure across ideas.
 - First slide of each idea: strong hook (usually photo or text type) — each hook must be unique and attention-grabbing
 - Last slide: CTA with "${brand.name} — link in bio" or similar
@@ -2908,6 +3064,75 @@ Pick a DIFFERENT format each time. Do NOT default to two-panel approval.`,
 
     if (!openai) return res.status(503).json({ error: 'Add your OpenAI API key in Settings to generate images.' });
 
+    // --- Hybrid photo generation: AI image (optionally with person) + Sharp text overlay ---
+    if (data.slideType === 'photo' && data.personId) {
+      let personTempFiles = [];
+      try {
+        const person = await getPersonById(data.personId, req.user?.uid);
+        if (!person || !person.photos?.length) {
+          return res.status(400).json({ error: 'Person not found or has no photos' });
+        }
+
+        personTempFiles = await downloadPersonPhotosToTemp(person);
+        const rawPrompt = buildPhotoImagePrompt(data, brand);
+        const refinedPrompt = await refinePromptWithClaude(rawPrompt, 'photo', data, brand, req);
+        const prompt = refinedPrompt || rawPrompt;
+
+        console.log(`[Generate] ${brand.name} | Hybrid photo with person "${person.name}" | ${refinedPrompt ? 'Claude-refined' : 'raw'}`);
+
+        let buffer;
+        if (isFalEnabled(req) && personTempFiles.length > 0) {
+          // Flux multi-ref for person consistency
+          buffer = await generateWithFlux(personTempFiles, prompt, { falKey: req.headers['x-fal-key'] });
+        } else {
+          // GPT fallback — single reference
+          const refBuffer = await fs.readFile(personTempFiles[0]);
+          const response = await openai.images.generate({
+            model: resolveImageModel(data.imageModel),
+            prompt,
+            image: [{ image: refBuffer, detail: 'auto' }],
+            size: '1024x1536',
+            quality: data.quality || 'high',
+            output_format: 'png',
+          });
+          const b64 = response.data?.[0]?.b64_json;
+          if (!b64) throw new Error('No image returned');
+          buffer = Buffer.from(b64, 'base64');
+        }
+
+        // Resize to exact canvas dimensions
+        const meta = await sharp(buffer).metadata();
+        if (meta.width !== 1080 || meta.height !== 1920) {
+          buffer = await sharp(buffer).resize(1080, 1920, { fit: 'cover' }).png().toBuffer();
+        }
+
+        // Composite text overlay with Sharp
+        buffer = await compositeTextOverlay(buffer, data, brand);
+
+        if (data.includeOwl) {
+          buffer = await addAppIconOverlay(buffer, data.owlPosition, brand);
+        }
+
+        await cleanupTempFiles(personTempFiles);
+
+        const slug = crypto.randomUUID().slice(0, 8);
+        const filename = `slide_${brandId}_photo_${Date.now()}_${slug}.png`;
+        const url = await uploadToStorage(buffer, filename);
+        saveImageRecord({ userId: req.user?.uid, brandId, filename, type: 'slide' });
+
+        return res.json({
+          ok: true, filename, url,
+          prompt: rawPrompt,
+          refinedPrompt: refinedPrompt || null,
+          usedRefined: Boolean(refinedPrompt),
+          hybrid: true,
+        });
+      } catch (error) {
+        await cleanupTempFiles(personTempFiles);
+        throw error;
+      }
+    }
+
     const rawPrompt =
       data.slideType === 'photo'
         ? buildPhotoPrompt(data, brand)
@@ -3137,6 +3362,64 @@ app.post('/api/generate-carousel', requireAuth, generationLimiter, async (req, r
           continue;
         }
 
+        // Hybrid photo generation: AI image with person + Sharp text overlay
+        if (slideData.slideType === 'photo' && slideData.personId) {
+          let personTempFiles = [];
+          try {
+            const person = await getPersonById(slideData.personId, req.user?.uid);
+            if (person && person.photos?.length > 0) {
+              personTempFiles = await downloadPersonPhotosToTemp(person);
+              const rawPrompt = buildPhotoImagePrompt(slideData, brand);
+              const refined = await refinePromptWithClaude(rawPrompt, 'photo', slideData, brand, req);
+              const prompt = refined || rawPrompt;
+
+              console.log(`[Carousel ${jobId}] ${brand.name} | Slide ${i + 1}/${slides.length} (hybrid + person "${person.name}")`);
+
+              let buffer;
+              if (isFalEnabled(req) && personTempFiles.length > 0) {
+                buffer = await generateWithFlux(personTempFiles, prompt, { falKey: req.headers['x-fal-key'] });
+              } else {
+                const refBuffer = await fs.readFile(personTempFiles[0]);
+                const response = await openai.images.generate({
+                  model: resolveImageModel(imageModel),
+                  prompt,
+                  image: [{ image: refBuffer, detail: 'auto' }],
+                  size: '1024x1536',
+                  quality: slideData.quality || 'high',
+                  output_format: 'png',
+                });
+                const b64 = response.data?.[0]?.b64_json;
+                if (!b64) throw new Error('No image returned');
+                buffer = Buffer.from(b64, 'base64');
+              }
+
+              const meta = await sharp(buffer).metadata();
+              if (meta.width !== 1080 || meta.height !== 1920) {
+                buffer = await sharp(buffer).resize(1080, 1920, { fit: 'cover' }).png().toBuffer();
+              }
+
+              buffer = await compositeTextOverlay(buffer, slideData, brand);
+
+              if (slideData.includeOwl) {
+                buffer = await addAppIconOverlay(buffer, slideData.owlPosition, brand);
+              }
+
+              await cleanupTempFiles(personTempFiles);
+
+              const slug = crypto.randomUUID().slice(0, 8);
+              const filename = `carousel_${brand.id}_${jobId}_s${i + 1}_${slug}.png`;
+              const slideUrl = await uploadToStorage(buffer, filename);
+              saveImageRecord({ userId: req.user?.uid, brandId: brand.id, filename, type: 'carousel' });
+              job.slides.push({ slideNumber: i + 1, url: slideUrl, filename, ok: true });
+              job.completed = i + 1;
+              continue;
+            }
+          } catch (personErr) {
+            await cleanupTempFiles(personTempFiles);
+            throw personErr;
+          }
+        }
+
         const rawPrompt =
           slideData.slideType === 'photo'
             ? buildPhotoPrompt(slideData, brand)
@@ -3276,6 +3559,7 @@ Given a freeform prompt from the user, generate exactly ${numSlides} slides for 
 Return ONLY valid JSON with this exact structure (no markdown, no explanation):
 {
   "title": "Short carousel title",
+  "caption": "Ready-to-post Instagram/TikTok caption",
   "slides": [
     {
       "number": 1,
@@ -3296,6 +3580,7 @@ Return ONLY valid JSON with this exact structure (no markdown, no explanation):
 }
 
 Rules:
+- Include a "caption" field: first line is the HOOK (front-load keywords, only ~125 chars show before truncation). 2-3 sentences using natural keywords. End with a CTA (question or prompt). Add 3-5 hashtags at the end. Keep under 300 chars for TikTok.
 - First slide should be a strong hook (usually photo type)
 - Last slide should be a CTA with "${brand.name} — link in bio"
 - Mix photo, text, and mockup types for visual variety
@@ -3531,11 +3816,20 @@ app.post('/api/generate-personalized', requireAuth, upload.array('faceImages', 5
     let faceImagePaths;
     if (req.files && req.files.length > 0) {
       faceImagePaths = req.files.map(f => f.path);
+    } else if (data.personId) {
+      // Use person-level photos
+      const person = await getPersonById(data.personId, req.user?.uid);
+      if (person && person.photos?.length > 0) {
+        downloadedTempFiles = await downloadPersonPhotosToTemp(person);
+        faceImagePaths = downloadedTempFiles;
+      } else {
+        return res.status(400).json({ error: 'Person not found or has no photos.' });
+      }
     } else if (brand.facePhotos && brand.facePhotos.length > 0) {
       downloadedTempFiles = await downloadFacePhotosToTemp(brand);
       faceImagePaths = downloadedTempFiles;
     } else {
-      return res.status(400).json({ error: 'No face photos. Upload in brand settings or attach to request.' });
+      return res.status(400).json({ error: 'No face photos. Select a person or upload photos.' });
     }
     const model = data.model || 'flux';
 
@@ -3598,15 +3892,24 @@ app.post('/api/generate-personalized-carousel', requireAuth, upload.array('faceI
   if (!brandId) return res.status(400).json({ error: 'Missing brand' });
 
   const brand = await getBrandAsync(brandId, req.user?.uid);
+  const personId = req.body?.personId;
   let faceImagePaths;
   let downloadedTempFiles = [];
   if (req.files && req.files.length > 0) {
     faceImagePaths = req.files.map(f => f.path);
+  } else if (personId) {
+    const person = await getPersonById(personId, req.user?.uid);
+    if (person && person.photos?.length > 0) {
+      downloadedTempFiles = await downloadPersonPhotosToTemp(person);
+      faceImagePaths = downloadedTempFiles;
+    } else {
+      return res.status(400).json({ error: 'Person not found or has no photos.' });
+    }
   } else if (brand.facePhotos && brand.facePhotos.length > 0) {
     downloadedTempFiles = await downloadFacePhotosToTemp(brand);
     faceImagePaths = downloadedTempFiles;
   } else {
-    return res.status(400).json({ error: 'No face photos. Upload in brand settings or attach to request.' });
+    return res.status(400).json({ error: 'No face photos. Select a person or upload photos.' });
   }
   const useFlux = (model || 'flux') === 'flux' && isFalEnabled(req);
 
@@ -3865,6 +4168,191 @@ app.delete('/api/brands/:id/face-photos/:photoIndex', requireAuth, async (req, r
 
 // API keys are now BYOK — stored in browser localStorage, sent via headers per request.
 // No server-side key storage needed.
+
+// --- Persons CRUD (user-level face photos) ---
+
+// List user's persons
+app.get('/api/persons', requireAuth, async (req, res) => {
+  try {
+    if (!db) return res.json({ persons: [] });
+    const snap = await db.collection('carousel_persons').where('userId', '==', req.user.uid).orderBy('createdAt', 'desc').get();
+    const persons = [];
+    for (const doc of snap.docs) {
+      const data = doc.data();
+      const photos = await getFacePhotoUrls(data.photos || []);
+      persons.push({ id: doc.id, name: data.name, photos, createdAt: data.createdAt, updatedAt: data.updatedAt });
+    }
+    res.json({ persons });
+  } catch (error) {
+    console.error('[Persons List]', error);
+    res.status(500).json({ error: safeErrorMessage(error) });
+  }
+});
+
+// Create person
+app.post('/api/persons', requireAuth, async (req, res) => {
+  try {
+    if (!db) return res.status(503).json({ error: 'Database not available' });
+    const { name } = req.body;
+    if (!name || !name.trim()) return res.status(400).json({ error: 'Name is required' });
+
+    // Max 10 persons per user
+    const existing = await db.collection('carousel_persons').where('userId', '==', req.user.uid).get();
+    if (existing.size >= 10) return res.status(400).json({ error: 'Maximum 10 persons allowed' });
+
+    const doc = db.collection('carousel_persons').doc();
+    const person = {
+      name: name.trim(),
+      userId: req.user.uid,
+      photos: [],
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+    await doc.set(person);
+    res.json({ ok: true, person: { id: doc.id, name: person.name, photos: [] } });
+  } catch (error) {
+    console.error('[Persons Create]', error);
+    res.status(500).json({ error: safeErrorMessage(error) });
+  }
+});
+
+// Rename person
+app.put('/api/persons/:id', requireAuth, async (req, res) => {
+  try {
+    if (!db) return res.status(503).json({ error: 'Database not available' });
+    const person = await getPersonById(req.params.id, req.user.uid);
+    if (!person) return res.status(404).json({ error: 'Person not found' });
+
+    const { name } = req.body;
+    if (!name || !name.trim()) return res.status(400).json({ error: 'Name is required' });
+
+    await db.collection('carousel_persons').doc(req.params.id).update({
+      name: name.trim(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('[Persons Update]', error);
+    res.status(500).json({ error: safeErrorMessage(error) });
+  }
+});
+
+// Delete person + photos
+app.delete('/api/persons/:id', requireAuth, async (req, res) => {
+  try {
+    if (!db) return res.status(503).json({ error: 'Database not available' });
+    const person = await getPersonById(req.params.id, req.user.uid);
+    if (!person) return res.status(404).json({ error: 'Person not found' });
+
+    // Delete photos from storage
+    if (bucket && person.photos?.length > 0) {
+      for (const photo of person.photos) {
+        try { await bucket.file(photo.storagePath).delete(); } catch (e) { /* ignore */ }
+      }
+    }
+
+    await db.collection('carousel_persons').doc(req.params.id).delete();
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('[Persons Delete]', error);
+    res.status(500).json({ error: safeErrorMessage(error) });
+  }
+});
+
+// Upload photos to person
+app.post('/api/persons/:id/photos', requireAuth, upload.array('photos', 5), async (req, res) => {
+  try {
+    if (!db) return res.status(503).json({ error: 'Database not available' });
+    const person = await getPersonById(req.params.id, req.user.uid);
+    if (!person) return res.status(404).json({ error: 'Person not found' });
+
+    if (!req.files || req.files.length === 0) return res.status(400).json({ error: 'No photos uploaded' });
+
+    const existing = person.photos || [];
+    if (existing.length + req.files.length > 5) {
+      for (const f of req.files) await fs.unlink(f.path).catch(() => {});
+      return res.status(400).json({ error: `Too many photos. You have ${existing.length}, max is 5.` });
+    }
+
+    const newPhotos = [];
+    for (const file of req.files) {
+      try {
+        await validateImageFile(file);
+      } catch {
+        await fs.unlink(file.path).catch(() => {});
+        continue;
+      }
+
+      const uuid = crypto.randomUUID().slice(0, 12);
+      const storagePath = `users/${req.user.uid}/persons/${req.params.id}/photos/${uuid}.png`;
+
+      const processed = await sharp(file.path)
+        .resize(1024, 1024, { fit: 'cover' })
+        .png()
+        .toBuffer();
+
+      if (bucket) {
+        const storageFile = bucket.file(storagePath);
+        await storageFile.save(processed, { metadata: { contentType: 'image/png' } });
+      } else {
+        await fs.writeFile(path.join(outputDir, `${uuid}.png`), processed);
+      }
+
+      newPhotos.push({
+        storagePath,
+        filename: file.originalname,
+        uploadedAt: new Date().toISOString(),
+      });
+
+      await fs.unlink(file.path).catch(() => {});
+    }
+
+    const allPhotos = [...existing, ...newPhotos];
+    await db.collection('carousel_persons').doc(req.params.id).update({
+      photos: allPhotos,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    const withUrls = await getFacePhotoUrls(allPhotos);
+    res.json({ ok: true, photos: withUrls });
+  } catch (error) {
+    if (req.files) for (const f of req.files) await fs.unlink(f.path).catch(() => {});
+    console.error('[Person Photo Upload]', error);
+    res.status(500).json({ error: safeErrorMessage(error) });
+  }
+});
+
+// Delete single photo from person
+app.delete('/api/persons/:id/photos/:idx', requireAuth, async (req, res) => {
+  try {
+    if (!db) return res.status(503).json({ error: 'Database not available' });
+    const person = await getPersonById(req.params.id, req.user.uid);
+    if (!person) return res.status(404).json({ error: 'Person not found' });
+
+    const photoIndex = parseInt(req.params.idx);
+    const photos = person.photos || [];
+    if (photoIndex < 0 || photoIndex >= photos.length) return res.status(400).json({ error: 'Invalid photo index' });
+
+    const removed = photos[photoIndex];
+    if (bucket) {
+      try { await bucket.file(removed.storagePath).delete(); } catch (e) { console.warn('[Person Photo Delete]', e.message); }
+    } else {
+      await fs.unlink(path.join(outputDir, path.basename(removed.storagePath))).catch(() => {});
+    }
+
+    photos.splice(photoIndex, 1);
+    await db.collection('carousel_persons').doc(req.params.id).update({
+      photos,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    const withUrls = await getFacePhotoUrls(photos);
+    res.json({ ok: true, photos: withUrls });
+  } catch (error) {
+    console.error('[Person Photo Delete]', error);
+    res.status(500).json({ error: safeErrorMessage(error) });
+  }
+});
 
 // Return 204 for missing brand icons (avoids noisy 404 in console)
 app.get('/brands/:brandId/assets/app-icon.png', async (req, res, next) => {
