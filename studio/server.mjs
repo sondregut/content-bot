@@ -2253,6 +2253,7 @@ Return ONLY valid JSON (no markdown, no code fences) with this structure:
   "ideas": [
     {
       "title": "Short carousel title",
+      "caption": "Instagram/TikTok caption with hashtags",
       "slides": [
         {
           "number": 1,
@@ -2269,14 +2270,16 @@ Return ONLY valid JSON (no markdown, no code fences) with this structure:
 }
 
 Rules:
-- Each idea should cover a different angle (features, benefits, how-to, comparison, social proof, etc.)
-- First slide of each idea: strong hook (usually photo or text type)
+- Each idea MUST include a "caption" field: a ready-to-post Instagram/TikTok caption (2-3 engaging sentences + 5-8 relevant hashtags). Write in the brand's voice.
+- Each idea should cover a DISTINCTLY different angle — avoid repeating the same theme or structure across ideas. Use varied approaches: features, benefits, how-to, comparison, social proof, behind-the-scenes, myth-busting, user stories, etc.
+- First slide of each idea: strong hook (usually photo or text type) — each hook must be unique and attention-grabbing in a different way
 - Last slide: CTA with "${brand.name} — link in bio" or similar
 - Mix photo, text, and mockup types within each idea
 - Use mockup with text-statement layout for bold statement slides
-- Headlines: punchy, under 15 words
+- Headlines: punchy, under 15 words — avoid repeating similar phrasing across ideas
 - Body: 1-2 sentences max
-- Content should be based on REAL information from the website, not generic filler`,
+- Content should be based on REAL information from the website, not generic filler
+- Make each idea feel like a completely different post — vary the tone, angle, and structure`,
       }],
     });
 

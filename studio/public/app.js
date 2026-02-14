@@ -121,6 +121,7 @@ let currentBrand = null;
 let contentData = null;
 let selectedIdea = null;
 let pendingContentPillars = null;
+let pendingIconUrl = null;
 let currentSlideIndex = 0;
 let slideEdits = [];
 let generatedImages = {};
@@ -372,7 +373,8 @@ function openBrandModal(brand = null) {
   brandAiStatus.textContent = brand ? '' : 'Paste a URL to auto-setup';
   brandDeleteBtn.style.display = brand ? 'inline-block' : 'none';
 
-  // Reset analysis UI
+  // Reset analysis UI and pending icon
+  pendingIconUrl = null;
   if (analysisAbort) analysisAbort.abort();
   clearTimeout(analysisDebounce);
   const analysisEl = document.getElementById('brand-analysis-section');
@@ -547,6 +549,9 @@ async function analyzeWebsite(url) {
     setTimeout(() => collapseAnalysisSteps(), 600);
 
     const { brand, images, favicon, pageTitle } = data;
+
+    // Store favicon for auto-icon after brand save
+    if (favicon) pendingIconUrl = favicon;
 
     // Show preview card (prominent)
     if (favicon || (images && images.length > 0)) {
@@ -749,6 +754,19 @@ brandSaveBtn.addEventListener('click', async () => {
     updateIconPreview();
     const wasNewBrand = !editingBrandId;
     closeBrandModal();
+    // Auto-set icon from website favicon for new brands
+    if (wasNewBrand && pendingIconUrl) {
+      try {
+        const iconResp = await fetch(pendingIconUrl);
+        const blob = await iconResp.blob();
+        const iconForm = new FormData();
+        iconForm.append('icon', blob, 'website-icon.png');
+        iconForm.append('brand', currentBrand);
+        await authFetch('/api/upload-icon', { method: 'POST', body: iconForm });
+        updateIconPreview();
+      } catch (e) { console.warn('Auto icon failed:', e.message); }
+      pendingIconUrl = null;
+    }
     // Auto-generate content ideas for new brands with a website
     if (wasNewBrand && payload.website) {
       autoGenerateBtn.click();
@@ -866,6 +884,7 @@ function selectIdea(ideaId) {
 
   emptyState.style.display = 'none';
   personalizeView.style.display = 'none';
+  document.getElementById('content-plan-view').style.display = 'none';
   editorArea.style.display = 'block';
 
   ideaBadge.textContent = idea.id;
@@ -2298,6 +2317,42 @@ freeformGenerateBtn.addEventListener('click', async () => {
   }
 });
 
+// --- Content Plan Grid ---
+function renderContentPlanGrid(ideas, brandObj) {
+  const grid = document.getElementById('content-plan-grid');
+  const iconUrl = `/brands/${currentBrand}/assets/app-icon.png?t=${Date.now()}`;
+  const brandName = brandObj?.name || 'Brand';
+  const primaryColor = brandObj?.colors?.primary || '#1a1a2e';
+  const textColor = brandObj?.colors?.white || '#ffffff';
+
+  grid.innerHTML = ideas.map(idea => {
+    const hookSlide = idea.slides[0] || {};
+    const caption = idea.caption || '';
+    const truncCaption = caption.length > 120 ? caption.slice(0, 120) + '...' : caption;
+
+    return `
+      <div class="content-plan-card" data-idea-id="${idea.id}">
+        <div class="plan-card-header">
+          <img class="plan-card-icon" src="${iconUrl}" onerror="this.style.display='none'" />
+          <span class="plan-card-brand">${brandName}</span>
+        </div>
+        <div class="plan-card-visual" style="background:${primaryColor}; color:${textColor}">
+          <div class="plan-card-slide-count">${idea.slides.length} slides</div>
+          <div class="plan-card-headline">${hookSlide.headline || idea.title}</div>
+          ${hookSlide.body ? `<div class="plan-card-body">${hookSlide.body}</div>` : ''}
+        </div>
+        <div class="plan-card-caption">${truncCaption}</div>
+      </div>`;
+  }).join('');
+
+  grid.querySelectorAll('.content-plan-card').forEach(el => {
+    el.addEventListener('click', () => {
+      document.getElementById('content-plan-view').style.display = 'none';
+      selectIdea(el.dataset.ideaId);
+    });
+  });
+}
+
 // --- Auto-Generate Content Ideas from Website ---
 autoGenerateBtn.addEventListener('click', async () => {
   if (!currentBrand) {
@@ -2332,6 +2387,7 @@ autoGenerateBtn.addEventListener('click', async () => {
       ideas: data.ideas.map(idea => ({
         id: `AI-${idCounter++}`,
         title: idea.title,
+        caption: idea.caption || '',
         slides: idea.slides.map((s, i) => ({
           ...s,
           number: s.number || i + 1,
@@ -2351,10 +2407,15 @@ autoGenerateBtn.addEventListener('click', async () => {
     renderSidebar();
     autoGenerateStatus.textContent = `Generated ${data.ideas.length} carousel ideas.`;
 
-    // Auto-select the first idea
-    if (category.ideas.length > 0) {
-      selectIdea(category.ideas[0].id);
-    }
+    // Show content plan preview grid
+    emptyState.style.display = 'none';
+    editorArea.style.display = 'none';
+    personalizeView.style.display = 'none';
+    const contentPlanView = document.getElementById('content-plan-view');
+    contentPlanView.style.display = 'block';
+    document.getElementById('content-plan-subtitle').textContent =
+      `${data.ideas.length} carousel ideas for ${brandName}`;
+    renderContentPlanGrid(category.ideas, brandObj);
   } catch (err) {
     autoGenerateStatus.textContent = `Error: ${err.message}`;
   } finally {

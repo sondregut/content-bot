@@ -2839,3 +2839,33 @@ input:focus, select:focus, textarea:focus {
 }
 
 .bg-topic-item .bg-topic-remove:hover { background: rgba(220,38,38,0.1); }
+
+/* --- Content Plan Preview --- */
+.content-plan-view { padding: 24px; }
+.content-plan-header { text-align: center; margin-bottom: 24px; }
+.content-plan-header h2 { font-size: 1.4rem; margin-bottom: 4px; }
+.content-plan-header p { color: var(--text-secondary); font-size: 0.9rem; }
+.content-plan-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 20px; }
+
+.content-plan-card {
+  border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+  cursor: pointer; transition: transform 0.15s, box-shadow 0.15s; background: #fff;
+}
+.content-plan-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+
+.plan-card-header { display: flex; align-items: center; gap: 8px; padding: 10px 12px; }
+.plan-card-icon { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; }
+.plan-card-brand { font-weight: 600; font-size: 0.85rem; }
+
+.plan-card-visual {
+  aspect-ratio: 4/5; display: flex; flex-direction: column;
+  justify-content: center; align-items: center; padding: 24px; text-align: center; position: relative;
+}
+.plan-card-slide-count {
+  position: absolute; top: 8px; right: 8px;
+  background: rgba(0,0,0,0.4); color: #fff; padding: 2px 8px; border-radius: 10px; font-size: 0.7rem;
+}
+.plan-card-headline { font-size: 1.1rem; font-weight: 700; line-height: 1.3; }
+.plan-card-body { font-size: 0.8rem; margin-top: 8px; opacity: 0.85; }
+
+.plan-card-caption { padding: 10px 12px; font-size: 0.8rem; color: #333; line-height: 1.4; }
