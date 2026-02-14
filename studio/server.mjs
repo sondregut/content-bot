@@ -2354,7 +2354,7 @@ Return ONLY valid JSON (no markdown, no code fences) with this structure:
         {
           "number": 1,
           "label": "Hook",
-          "type": "photo, text, or mockup",
+          "type": "photo, text, mockup, or video",
           "microLabel": "${microLabel}",
           "headline": "Main headline text",
           "body": "Supporting body text (1-2 sentences)",
@@ -2370,7 +2370,11 @@ Return ONLY valid JSON (no markdown, no code fences) with this structure:
           "mockupTheme": "for mockup - dark or light",
           "imageUsage": "for mockup - phone, ai-background, or none",
           "aiBgSetting": "for mockup with ai-background - scene description",
-          "aiBgMood": "for mockup with ai-background - mood/tone"
+          "aiBgMood": "for mockup with ai-background - mood/tone",
+          "scene": "for video - describe what happens visually",
+          "videoMood": "for video - energetic and dynamic, calm and serene, dramatic and intense, etc.",
+          "cameraMove": "for video - slow tracking shot, smooth dolly-in, cinematic pan, handheld follow, drone aerial pullback, static wide angle",
+          "duration": "for video - 5 or 10"
         }
       ]
     }
@@ -2404,6 +2408,8 @@ Rules:
 - For photo slides: ALWAYS include sport, setting, action, mood, overlayStyle, overlayPlacement
 - For text slides: ALWAYS include backgroundStyle (a vivid 1-line visual description matching the brand's mood)
 - For mockup slides: ALWAYS include mockupLayout, mockupTheme, imageUsage. If imageUsage is "ai-background", also include aiBgSetting and aiBgMood
+- For video slides: ALWAYS include scene (vivid 1-2 sentence visual description with motion), videoMood, cameraMove, duration. Video slides work best for: hooks, emotional moments, product demos, before/after reveals. A video idea typically has just 1 slide.
+- Video ideas should have 1 slide (the video clip) with headline/body for optional text overlay
 - NOT every slide needs an AI-generated image — text slides and mockup slides with imageUsage "none" or "phone" are fast and effective
 - Vary the mix: a typical 7-slide carousel might be photo → text → text → mockup → photo → text → mockup(CTA)
 - Headlines: punchy, under 15 words — avoid repeating similar phrasing across ideas
@@ -4108,7 +4114,7 @@ Rules:
 // --- Auto-Generate Content Ideas from Website ---
 app.post('/api/generate-content-ideas', requireAuth, async (req, res) => {
   try {
-    const { brand: brandId, existingTitles, numIdeas, startIndex, userTopic, slidesPerIdea } = req.body || {};
+    const { brand: brandId, existingTitles, numIdeas, startIndex, userTopic, slidesPerIdea, format } = req.body || {};
     if (!brandId) return res.status(400).json({ error: 'Missing brand' });
 
     const brand = await getBrandAsync(brandId, req.user?.uid);
@@ -4190,6 +4196,11 @@ app.post('/api/generate-content-ideas', requireAuth, async (req, res) => {
     // Freeform user topic to guide idea generation
     if (userTopic?.trim()) {
       userPrompt += `\n\nUSER REQUEST: The user specifically wants this idea to be about: "${userTopic.trim()}". Generate content that directly addresses this topic using the brand's real information.`;
+    }
+
+    // Video format override
+    if (format === 'video') {
+      userPrompt += `\n\nFORMAT: Generate a VIDEO content idea (not a carousel). The idea should have exactly 1 slide with type "video". Include a compelling scene description, mood, and camera movement. The headline and body will be used as text overlay on the video.`;
     }
 
     const text = await generateText({

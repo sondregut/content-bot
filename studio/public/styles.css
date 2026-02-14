@@ -485,6 +485,18 @@ body {
   display: flex;
   gap: 6px;
 }
+.sidebar-format-select {
+  width: 80px;
+  flex-shrink: 0;
+  padding: 6px 8px;
+  font-size: 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  color: var(--text);
+  box-sizing: border-box;
+  cursor: pointer;
+}
 .sidebar-slides-input {
   width: 64px;
   flex-shrink: 0;

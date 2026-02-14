@@ -2192,7 +2192,8 @@ function renderSidebar() {
       html += `<div class="idea-item" data-idea-id="${escapeHtml(idea.id)}">`;
       html += `<span class="idea-id">${escapeHtml(idea.id)}</span>`;
       html += `<span class="idea-name">${escapeHtml(idea.title)}</span>`;
-      html += `<span class="idea-slides-count">${idea.slides.length}s</span>`;
+      const isVideo = idea.slides.length === 1 && idea.slides[0].type === 'video';
+      html += `<span class="idea-slides-count">${isVideo ? '&#9654;' : idea.slides.length + 's'}</span>`;
       html += `</div>`;
     }
     html += `</div>`;
@@ -2210,9 +2211,13 @@ function renderSidebar() {
   if (hasAiIdeas) {
     const moreDiv = document.createElement('div');
     moreDiv.className = 'sidebar-generate-more';
-    moreDiv.innerHTML = `<input type="text" class="sidebar-prompt-input" id="sidebar-prompt-input" placeholder="e.g. explain app features..." /><div class="sidebar-prompt-row"><input type="number" class="sidebar-slides-input" id="sidebar-slides-input" min="2" max="12" placeholder="Slides" title="Number of slides (default 6-7)" /><button class="btn secondary sidebar-more-btn" id="sidebar-generate-more-btn">+ Generate Idea</button></div><div class="sidebar-more-status" id="sidebar-more-status"></div>`;
+    moreDiv.innerHTML = `<input type="text" class="sidebar-prompt-input" id="sidebar-prompt-input" placeholder="e.g. explain app features..." /><div class="sidebar-prompt-row"><select id="sidebar-format-select" class="sidebar-format-select"><option value="carousel">Carousel</option><option value="video">Video</option></select><input type="number" class="sidebar-slides-input" id="sidebar-slides-input" min="2" max="12" placeholder="Slides" title="Number of slides (default 6-7)" /><button class="btn secondary sidebar-more-btn" id="sidebar-generate-more-btn">+ Generate Idea</button></div><div class="sidebar-more-status" id="sidebar-more-status"></div>`;
     sidebar.appendChild(moreDiv);
     document.getElementById('sidebar-generate-more-btn').addEventListener('click', generateMoreIdeas);
+    document.getElementById('sidebar-format-select').addEventListener('change', (e) => {
+      const slidesInput = document.getElementById('sidebar-slides-input');
+      if (slidesInput) slidesInput.style.display = e.target.value === 'video' ? 'none' : '';
+    });
   }
 }
 
@@ -2228,12 +2233,15 @@ async function generateMoreIdeas() {
     const allIdeas = app?.categories?.flatMap(c => c.ideas) || [];
     const existingTitles = allIdeas.map(i => i.title);
     const startIndex = allIdeas.length;
+    const format = document.getElementById('sidebar-format-select')?.value || 'carousel';
+    const isVideoFormat = format === 'video';
     const res = await authFetch('/api/generate-content-ideas', {
       method: 'POST',
       body: JSON.stringify({
         brand: currentBrand, existingTitles, numIdeas: 1, startIndex,
         userTopic: document.getElementById('sidebar-prompt-input')?.value?.trim() || '',
-        slidesPerIdea: parseInt(document.getElementById('sidebar-slides-input')?.value) || 0,
+        slidesPerIdea: isVideoFormat ? 1 : (parseInt(document.getElementById('sidebar-slides-input')?.value) || 0),
+        format,
         textModel: getSelectedTextModel(),
       }),
     });
