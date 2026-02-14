@@ -431,6 +431,7 @@
                       <option value="phone">Phone Frame</option>
                       <option value="figure">Figure / Icon</option>
                       <option value="background">Full Background</option>
+                      <option value="ai-background">AI Background</option>
                       <option value="none">No Image</option>
                     </select>
                   </div>
@@ -446,6 +447,19 @@
                     <button type="button" class="btn small danger" id="screenshot-clear-btn" style="display:none">Clear</button>
                   </div>
                   <img id="screenshot-preview" class="ref-preview-img" style="display:none" />
+                </div>
+
+                <div id="mockup-ai-bg-options" style="display:none">
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label class="label">Setting</label>
+                      <input name="aiBgSetting" id="aiBgSetting" type="text" placeholder="city skyline, mountain trail..." />
+                    </div>
+                    <div class="form-group">
+                      <label class="label">Mood</label>
+                      <input name="aiBgMood" id="aiBgMood" type="text" placeholder="energetic, calm, premium..." />
+                    </div>
+                  </div>
                 </div>
 
                 <div id="mockup-phone-options" style="display:none">

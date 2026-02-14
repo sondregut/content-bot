@@ -1119,7 +1119,15 @@ async function selectBrandImage(thumbEl, imageUrl) {
   try {
     // Fetch image and upload as file
     const resp = await fetch(imageUrl);
+    if (!resp.ok) {
+      console.warn('Could not fetch image:', resp.status);
+      return;
+    }
     const blob = await resp.blob();
+    if (!blob.type.startsWith('image/')) {
+      console.warn('Fetched resource is not an image:', blob.type);
+      return;
+    }
     const form = new FormData();
     form.append('icon', blob, 'website-icon.png');
     form.append('brand', editingBrandId || '__pending__');
@@ -1245,7 +1253,9 @@ brandSaveBtn.addEventListener('click', async () => {
     if (wasNewBrand && pendingIconUrl) {
       try {
         const iconResp = await fetch(pendingIconUrl);
+        if (!iconResp.ok) { pendingIconUrl = null; throw new Error('Fetch failed: ' + iconResp.status); }
         const blob = await iconResp.blob();
+        if (!blob.type.startsWith('image/')) { pendingIconUrl = null; throw new Error('Not an image: ' + blob.type); }
         const iconForm = new FormData();
         iconForm.append('icon', blob, 'website-icon.png');
         iconForm.append('brand', currentBrand);
@@ -1495,6 +1505,8 @@ function loadSlideIntoForm(index) {
   if (form.elements.figureSize) form.elements.figureSize.value = slide.figureSize || 'medium';
   if (form.elements.figureBorderRadius) form.elements.figureBorderRadius.value = slide.figureBorderRadius || '24';
   if (form.elements.bgOverlayOpacity) form.elements.bgOverlayOpacity.value = slide.bgOverlayOpacity || '0.55';
+  if (form.elements.aiBgSetting) form.elements.aiBgSetting.value = slide.aiBgSetting || '';
+  if (form.elements.aiBgMood) form.elements.aiBgMood.value = slide.aiBgMood || '';
 
   // New mockup controls
   if (form.elements.aspectRatio) form.elements.aspectRatio.value = slide.aspectRatio || '9:16';
@@ -1601,6 +1613,8 @@ function saveCurrentSlideEdits() {
     slide.figureBorderRadius = form.elements.figureBorderRadius?.value || '24';
     slide.bgOverlayOpacity = form.elements.bgOverlayOpacity?.value || '0.55';
     slide.screenshotImage = screenshotImageFilename || null;
+    slide.aiBgSetting = form.elements.aiBgSetting?.value || '';
+    slide.aiBgMood = form.elements.aiBgMood?.value || '';
     // Per-element offsets
     slide.microOffsetX = elementOffsets.micro.x;
     slide.microOffsetY = elementOffsets.micro.y;
@@ -1640,13 +1654,15 @@ function toggleTypeFields() {
 
 function toggleMockupPhoneOptions() {
   const usage = imageUsageSelect.value;
-  const needsImage = usage !== 'none';
+  const needsUpload = usage !== 'none' && usage !== 'ai-background';
 
   mockupPhoneOptions.style.display = usage === 'phone' ? 'block' : 'none';
   mockupFigureOptions.style.display = usage === 'figure' ? 'block' : 'none';
-  mockupBgOptions.style.display = usage === 'background' ? 'block' : 'none';
-  mockupImageUploadSection.style.display = needsImage ? 'block' : 'none';
-  screenshotWarning.style.display = needsImage && !screenshotImageFilename ? 'block' : 'none';
+  mockupBgOptions.style.display = (usage === 'background' || usage === 'ai-background') ? 'block' : 'none';
+  mockupImageUploadSection.style.display = needsUpload ? 'block' : 'none';
+  screenshotWarning.style.display = needsUpload && !screenshotImageFilename ? 'block' : 'none';
+  const aiBgOptions = document.getElementById('mockup-ai-bg-options');
+  if (aiBgOptions) aiBgOptions.style.display = usage === 'ai-background' ? 'block' : 'none';
 }
 
 slideTypeSelect.addEventListener('change', () => {
@@ -1759,11 +1775,17 @@ function updatePreviewMockup() {
   } else if (isMockup) {
     previewMockup.classList.remove('photo-type');
     const mockupTheme = mockupThemeSelect.value || 'dark';
-    const isBackground = imageUsageSelect.value === 'background';
+    const usage = imageUsageSelect.value;
+    const isBackground = usage === 'background';
+    const isAiBg = usage === 'ai-background';
     if (isBackground && screenshotImageFilename) {
       const opacity = form.elements.bgOverlayOpacity?.value || '0.55';
       previewMockup.style.background = `linear-gradient(rgba(0,0,0,${opacity}), rgba(0,0,0,${opacity})), url('/uploads/${screenshotImageFilename}') center/cover no-repeat`;
       mockupPhotoPlaceholder.style.display = 'none';
+    } else if (isAiBg) {
+      previewMockup.style.background = `linear-gradient(135deg, #0f172a 0%, #1e3a5f 50%, #0f172a 100%)`;
+      mockupPhotoPlaceholder.style.display = 'flex';
+      mockupPhotoPlaceholder.querySelector('span').textContent = 'AI will generate background';
     } else if (isBackground && !screenshotImageFilename) {
       previewMockup.style.background = `linear-gradient(135deg, #1e293b 0%, #334155 100%)`;
       mockupPhotoPlaceholder.style.display = 'flex';
@@ -2458,6 +2480,11 @@ function buildSlidePayload(slide, slideIndex) {
     payload.figureBorderRadius = slide.figureBorderRadius || form.elements.figureBorderRadius?.value || '24';
     payload.bgOverlayOpacity = slide.bgOverlayOpacity || form.elements.bgOverlayOpacity?.value || '0.55';
     payload.screenshotImage = slide.screenshotImage || screenshotImageFilename || null;
+    // AI background prompt fields
+    if (payload.imageUsage === 'ai-background') {
+      payload.aiBgSetting = slide.aiBgSetting || form.elements.aiBgSetting?.value || '';
+      payload.aiBgMood = slide.aiBgMood || form.elements.aiBgMood?.value || '';
+    }
     // Per-element offsets
     payload.microOffsetX = slide.microOffsetX || 0;
     payload.microOffsetY = slide.microOffsetY || 0;

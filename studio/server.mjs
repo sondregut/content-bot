@@ -1008,6 +1008,22 @@ async function generateMockupSlide(data, brand) {
 
 // --- End Mockup Helpers ---
 
+function buildMockupBackgroundPrompt(data, brand) {
+  const c = brand.colors;
+  const setting = data.aiBgSetting || 'abstract premium background';
+  const mood = data.aiBgMood || 'clean, modern';
+
+  return [
+    `Create a background image (1080x1920, 9:16) for a mobile app showcase slide.`,
+    `Scene: ${setting}. Mood: ${mood}.`,
+    `Color palette hint: primary ${c.primary}, accent ${c.accent}, secondary ${c.secondary}.`,
+    `This is ONLY a background — do NOT include any text, logos, phone mockups, UI elements, or people.`,
+    `The image should work as a backdrop with text and a phone frame composited on top.`,
+    `Keep the center area relatively uncluttered so overlaid content remains readable.`,
+    `Style: high quality, slightly blurred/bokeh where appropriate, professional.`,
+  ].join('\n\n');
+}
+
 function spacedLetters(word) {
   return word.split('').join(' - ');
 }
@@ -2573,8 +2589,53 @@ app.post('/api/generate', requireAuth, generationLimiter, async (req, res) => {
       return res.status(400).json({ error: 'Missing slideType' });
     }
 
-    // Mockup slides: render with Sharp, no AI
+    // Mockup slides: render with Sharp (optionally with AI-generated background)
     if (data.slideType === 'mockup') {
+      let bgPrompt = null;
+      let refinedBgPrompt = null;
+
+      // AI background: generate background image first, then composite mockup on top
+      if (data.imageUsage === 'ai-background') {
+        if (!openai) return res.status(503).json({ error: 'Image generation not configured' });
+
+        bgPrompt = buildMockupBackgroundPrompt(data, brand);
+        refinedBgPrompt = await refinePromptWithClaude(bgPrompt, 'photo', data, brand);
+        const prompt = refinedBgPrompt || bgPrompt;
+
+        console.log(`[Generate] ${brand.name} | AI background for mockup | ${refinedBgPrompt ? 'refined' : 'raw'}`);
+
+        const response = await openai.images.generate({
+          model: resolveImageModel(data.imageModel),
+          prompt,
+          size: '1024x1536',
+          quality: data.quality || 'high',
+          output_format: 'png',
+        });
+
+        const b64 = response.data?.[0]?.b64_json;
+        if (!b64) throw new Error('No background image returned from API');
+
+        // Save AI background to temp file so createBackgroundImage() can use it
+        const tempName = `aibg_${crypto.randomUUID().slice(0, 8)}.png`;
+        const tempPath = path.join(uploadsDir, tempName);
+        await fs.writeFile(tempPath, Buffer.from(b64, 'base64'));
+
+        // Set as screenshot image for the mockup render pipeline
+        data.screenshotImage = tempName;
+        data.imageUsage = 'background';
+
+        try {
+          const buffer = await generateMockupSlide(data, brand);
+          const slug = crypto.randomUUID().slice(0, 8);
+          const filename = `slide_${brandId}_mockup_${Date.now()}_${slug}.png`;
+          const url = await uploadToStorage(buffer, filename);
+          return res.json({ ok: true, filename, url, prompt: bgPrompt, refinedPrompt: refinedBgPrompt, usedRefined: Boolean(refinedBgPrompt) });
+        } finally {
+          // Clean up temp AI background file
+          await fs.unlink(tempPath).catch(() => {});
+        }
+      }
+
       const buffer = await generateMockupSlide(data, brand);
       const slug = crypto.randomUUID().slice(0, 8);
       const filename = `slide_${brandId}_mockup_${Date.now()}_${slug}.png`;
@@ -2791,14 +2852,43 @@ app.post('/api/generate-carousel', requireAuth, generationLimiter, async (req, r
       const slideData = { ...slides[i], includeOwl, owlPosition, quality: quality || 'high' };
 
       try {
-        // Mockup slides: render with Sharp, skip AI
+        // Mockup slides: render with Sharp (optionally with AI background)
         if (slideData.slideType === 'mockup') {
-          console.log(`[Carousel ${jobId}] ${brand.name} | Slide ${i + 1}/${slides.length} (mockup)`);
-          const mockupBuffer = await generateMockupSlide(slideData, brand);
-          const slug = crypto.randomUUID().slice(0, 8);
-          const filename = `carousel_${brand.id}_${jobId}_s${i + 1}_${slug}.png`;
-          const slideUrl = await uploadToStorage(mockupBuffer, filename);
-          job.slides.push({ slideNumber: i + 1, url: slideUrl, filename, ok: true });
+          if (slideData.imageUsage === 'ai-background') {
+            console.log(`[Carousel ${jobId}] ${brand.name} | Slide ${i + 1}/${slides.length} (mockup + AI bg)`);
+            const bgPrompt = buildMockupBackgroundPrompt(slideData, brand);
+            const refined = await refinePromptWithClaude(bgPrompt, 'photo', slideData, brand);
+            const response = await openai.images.generate({
+              model: resolveImageModel(slideData.imageModel),
+              prompt: refined || bgPrompt,
+              size: '1024x1536',
+              quality: slideData.quality || 'high',
+              output_format: 'png',
+            });
+            const b64 = response.data?.[0]?.b64_json;
+            if (!b64) throw new Error('No background image returned');
+            const tempName = `aibg_${crypto.randomUUID().slice(0, 8)}.png`;
+            const tempPath = path.join(uploadsDir, tempName);
+            await fs.writeFile(tempPath, Buffer.from(b64, 'base64'));
+            slideData.screenshotImage = tempName;
+            slideData.imageUsage = 'background';
+            try {
+              const mockupBuffer = await generateMockupSlide(slideData, brand);
+              const slug = crypto.randomUUID().slice(0, 8);
+              const filename = `carousel_${brand.id}_${jobId}_s${i + 1}_${slug}.png`;
+              const slideUrl = await uploadToStorage(mockupBuffer, filename);
+              job.slides.push({ slideNumber: i + 1, url: slideUrl, filename, ok: true });
+            } finally {
+              await fs.unlink(tempPath).catch(() => {});
+            }
+          } else {
+            console.log(`[Carousel ${jobId}] ${brand.name} | Slide ${i + 1}/${slides.length} (mockup)`);
+            const mockupBuffer = await generateMockupSlide(slideData, brand);
+            const slug = crypto.randomUUID().slice(0, 8);
+            const filename = `carousel_${brand.id}_${jobId}_s${i + 1}_${slug}.png`;
+            const slideUrl = await uploadToStorage(mockupBuffer, filename);
+            job.slides.push({ slideNumber: i + 1, url: slideUrl, filename, ok: true });
+          }
           job.completed = i + 1;
           continue;
         }
@@ -3341,7 +3431,12 @@ app.post('/api/upload-icon', requireAuth, upload.single('icon'), async (req, res
     if (!req.file) {
       return res.status(400).json({ error: 'No icon uploaded' });
     }
-    await validateImageFile(req.file);
+    try {
+      await validateImageFile(req.file);
+    } catch (err) {
+      await fs.unlink(req.file.path).catch(() => {});
+      return res.status(400).json({ error: 'Uploaded file is not a valid image' });
+    }
 
     const brandId = req.body.brand;
     if (!brandId) return res.status(400).json({ error: 'Missing brand' });
