@@ -12,6 +12,7 @@ import multer from 'multer';
 import admin from 'firebase-admin';
 import { spawn, execSync } from 'child_process';
 import rateLimit from 'express-rate-limit';
+import ffmpegPath from 'ffmpeg-static';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -81,6 +82,36 @@ async function generateWithFlux(faceImagePaths, prompt, { aspectRatio = '9:16', 
   const imgUrl = data.images?.[0]?.url;
   if (!imgUrl) throw new Error('No image returned from Flux');
 
+  const imgRes = await fetch(imgUrl);
+  return Buffer.from(await imgRes.arrayBuffer());
+}
+
+// --- LoRA Inference (trained person model via fal.ai) ---
+async function generateWithLoRA(loraUrl, prompt, { loraModel, aspectRatio = '9:16', falKey } = {}) {
+  if (!falKey) throw new Error('Fal.ai API key not configured. Add it in Settings.');
+  const isFlux2 = loraModel === 'flux-2';
+  const endpoint = isFlux2 ? 'fal-ai/flux-2/lora' : 'fal-ai/flux-lora';
+  const guidanceScale = isFlux2 ? 2.5 : 3.5;
+
+  const response = await fetch(`https://fal.run/${endpoint}`, {
+    method: 'POST',
+    headers: { 'Authorization': `Key ${falKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      prompt,
+      loras: [{ path: loraUrl, scale: 1.0 }],
+      image_size: aspectRatio === '9:16' ? 'portrait_16_9' : 'square_hd',
+      num_images: 1,
+      output_format: 'png',
+      guidance_scale: guidanceScale,
+      num_inference_steps: 28,
+      enable_safety_checker: false,
+    }),
+  });
+
+  if (!response.ok) throw new Error(`Flux LoRA API error: ${await response.text()}`);
+  const data = await response.json();
+  const imgUrl = data.images?.[0]?.url;
+  if (!imgUrl) throw new Error('No image returned from Flux LoRA');
   const imgRes = await fetch(imgUrl);
   return Buffer.from(await imgRes.arrayBuffer());
 }
@@ -1282,6 +1313,107 @@ async function compositeTextOverlay(imageBuffer, data, brand) {
     .composite([{ input: Buffer.from(overlaySvg) }])
     .png()
     .toBuffer();
+}
+
+// Generate a transparent PNG text overlay for compositing onto video frames
+async function generateVideoTextOverlay(data, brand) {
+  if (!data.videoTextOverlay) return null;
+
+  const { width, height } = { width: 1080, height: 1920 };
+  const safe = getSafeZone(height);
+  const fontFamily = resolveFontFamily(data.fontFamily);
+
+  const micro = data.microLabel || brand.defaultMicroLabel;
+  const headline = data.headline || '';
+  const body = data.body || '';
+  const highlight = data.highlightPhrase || '';
+  const highlightOpacity = 0.3;
+
+  if (!headline && !micro && !body) return null;
+
+  const textMaxWidth = width - safe.left - safe.right;
+  const headlineFontSize = parseInt(data.headlineFontSize) || 82;
+  const bodyFontSize = parseInt(data.bodyFontSize) || 34;
+  const microFontSize = 24;
+
+  const headlineLines = headline ? wrapText(headline, headlineFontSize, textMaxWidth, true) : [];
+  const bodyLines = body ? wrapText(body, bodyFontSize, textMaxWidth) : [];
+
+  const headlineBlockH = headlineLines.length * headlineFontSize * 1.25;
+  const bodyBlockH = bodyLines.length ? bodyLines.length * bodyFontSize * 1.5 + 30 : 0;
+  const microBlockH = micro ? microFontSize + headlineFontSize + 16 : 0;
+  const totalH = microBlockH + headlineBlockH + bodyBlockH;
+
+  const baseY = Math.max(height - totalH - safe.bottom - 40, Math.round(height * 0.55));
+  const baseX = safe.left;
+
+  const textFill = '#FFFFFF';
+  const subtextFill = 'rgba(255,255,255,0.75)';
+  const microColor = brand.colors?.accent || '#FFFFFF';
+  const highlightColor = brand.colors?.accent || '#FFFFFF';
+
+  const microSvg = micro ? svgTextLines([micro], { x: baseX, startY: baseY, fontSize: microFontSize, fontWeight: '700', fill: microColor, letterSpacing: '5', fontFamily }) : '';
+
+  const headlineY = baseY + microBlockH;
+  const highlightSvg = highlight ? svgHighlightBars(headlineLines, highlight, { x: baseX, startY: headlineY, fontSize: headlineFontSize, lineHeight: 1.25, color: highlightColor, opacity: highlightOpacity }) : '';
+  const headlineSvg = headlineLines.length ? svgTextLines(headlineLines, { x: baseX, startY: headlineY, fontSize: headlineFontSize, fontWeight: 'bold', fill: textFill, lineHeight: 1.25, fontFamily }) : '';
+
+  const bodyY = headlineY + headlineBlockH + 30;
+  const bodySvg = bodyLines.length ? svgTextLines(bodyLines, { x: baseX, startY: bodyY, fontSize: bodyFontSize, fill: subtextFill, lineHeight: 1.5, fontFamily }) : '';
+
+  const gradientSvg = `<defs>
+    <linearGradient id="textGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#000" stop-opacity="0"/>
+      <stop offset="40%" stop-color="#000" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#000" stop-opacity="0.7"/>
+    </linearGradient>
+  </defs>
+  <rect width="${width}" height="${height}" fill="url(#textGrad)"/>`;
+
+  const overlaySvg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+    ${gradientSvg}
+    ${microSvg}
+    ${highlightSvg}
+    ${headlineSvg}
+    ${bodySvg}
+  </svg>`;
+
+  return sharp(Buffer.from(overlaySvg)).png().toBuffer();
+}
+
+// Composite a transparent PNG overlay onto a video using ffmpeg
+async function overlayPngOnVideo(videoBuffer, overlayPngBuffer, outputPath) {
+  const videoTmp = path.join(outputDir, `tmp_vid_${crypto.randomUUID().slice(0, 8)}.mp4`);
+  const overlayTmp = path.join(outputDir, `tmp_ovl_${crypto.randomUUID().slice(0, 8)}.png`);
+
+  try {
+    await fs.writeFile(videoTmp, videoBuffer);
+    await fs.writeFile(overlayTmp, overlayPngBuffer);
+
+    await new Promise((resolve, reject) => {
+      const args = [
+        '-i', videoTmp,
+        '-i', overlayTmp,
+        '-filter_complex', 'overlay=0:0',
+        '-codec:a', 'copy',
+        '-codec:v', 'libx264',
+        '-preset', 'ultrafast',
+        '-crf', '18',
+        '-y', outputPath,
+      ];
+      const proc = spawn(ffmpegPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+      let stderr = '';
+      proc.stderr.on('data', d => stderr += d.toString());
+      proc.on('close', code => {
+        if (code === 0) resolve();
+        else reject(new Error(`ffmpeg exited with code ${code}: ${stderr.slice(-500)}`));
+      });
+      proc.on('error', reject);
+    });
+  } finally {
+    await fs.unlink(videoTmp).catch(() => {});
+    await fs.unlink(overlayTmp).catch(() => {});
+  }
 }
 
 async function generateMockupSlide(data, brand) {
@@ -3220,7 +3352,22 @@ Pick a DIFFERENT format each time. Do NOT default to two-panel approval.`,
 
       const videoRes = await fetch(videoUrl);
       if (!videoRes.ok) throw new Error('Failed to download generated video');
-      const videoBuffer = Buffer.from(await videoRes.arrayBuffer());
+      let videoBuffer = Buffer.from(await videoRes.arrayBuffer());
+
+      // Apply text overlay if enabled
+      try {
+        const overlayPng = await generateVideoTextOverlay(data, brand);
+        if (overlayPng) {
+          let overlay = overlayPng;
+          if (data.includeOwl) overlay = await addAppIconOverlay(overlay, data.owlPosition, brand);
+          const outPath = path.join(outputDir, `tmp_final_${crypto.randomUUID().slice(0, 8)}.mp4`);
+          await overlayPngOnVideo(videoBuffer, overlay, outPath);
+          videoBuffer = await fs.readFile(outPath);
+          await fs.unlink(outPath).catch(() => {});
+        }
+      } catch (overlayErr) {
+        console.error('[Video overlay] Failed, returning raw video:', overlayErr.message);
+      }
 
       const slug = crypto.randomUUID().slice(0, 8);
       const filename = `video_${brandId}_${Date.now()}_${slug}.mp4`;
@@ -3246,31 +3393,41 @@ Pick a DIFFERENT format each time. Do NOT default to two-panel approval.`,
           return res.status(400).json({ error: 'Person not found or has no photos' });
         }
 
-        personTempFiles = await downloadPersonPhotosToTemp(person);
         const rawPrompt = buildPhotoImagePrompt(data, brand);
         const refinedPrompt = await refinePromptWithClaude(rawPrompt, 'photo', data, brand, req);
         const prompt = refinedPrompt || rawPrompt;
 
-        console.log(`[Generate] ${brand.name} | Hybrid photo with person "${person.name}" | ${refinedPrompt ? 'Claude-refined' : 'raw'}`);
-
         let buffer;
-        if (isFalEnabled(req) && personTempFiles.length > 0) {
-          // Flux multi-ref for person consistency
-          buffer = await generateWithFlux(personTempFiles, prompt, { falKey: req.headers['x-fal-key'] });
-        } else {
-          // GPT fallback — single reference
-          const refBuffer = await fs.readFile(personTempFiles[0]);
-          const response = await openai.images.generate({
-            model: resolveImageModel(data.imageModel),
-            prompt,
-            image: [{ image: refBuffer, detail: 'auto' }],
-            size: '1024x1536',
-            quality: data.quality || 'high',
-            output_format: 'png',
+        if (person.loraStatus === 'ready' && person.loraUrl && isFalEnabled(req)) {
+          // LoRA inference — trained person model, no need to download photos
+          const loraPrompt = `${person.loraTriggerWord} ${prompt}`;
+          console.log(`[Generate] ${brand.name} | LoRA photo with person "${person.name}" (${person.loraModel}) | ${refinedPrompt ? 'Claude-refined' : 'raw'}`);
+          buffer = await generateWithLoRA(person.loraUrl, loraPrompt, {
+            loraModel: person.loraModel,
+            falKey: req.headers['x-fal-key'],
           });
-          const b64 = response.data?.[0]?.b64_json;
-          if (!b64) throw new Error('No image returned');
-          buffer = Buffer.from(b64, 'base64');
+        } else {
+          personTempFiles = await downloadPersonPhotosToTemp(person);
+          console.log(`[Generate] ${brand.name} | Hybrid photo with person "${person.name}" | ${refinedPrompt ? 'Claude-refined' : 'raw'}`);
+
+          if (isFalEnabled(req) && personTempFiles.length > 0) {
+            // Flux multi-ref for person consistency
+            buffer = await generateWithFlux(personTempFiles, prompt, { falKey: req.headers['x-fal-key'] });
+          } else {
+            // GPT fallback — single reference
+            const refBuffer = await fs.readFile(personTempFiles[0]);
+            const response = await openai.images.generate({
+              model: resolveImageModel(data.imageModel),
+              prompt,
+              image: [{ image: refBuffer, detail: 'auto' }],
+              size: '1024x1536',
+              quality: data.quality || 'high',
+              output_format: 'png',
+            });
+            const b64 = response.data?.[0]?.b64_json;
+            if (!b64) throw new Error('No image returned');
+            buffer = Buffer.from(b64, 'base64');
+          }
         }
 
         // Resize to exact canvas dimensions
@@ -3553,7 +3710,22 @@ app.post('/api/generate-carousel', requireAuth, generationLimiter, async (req, r
           // Download video to local storage
           const videoRes = await fetch(videoUrl);
           if (!videoRes.ok) throw new Error('Failed to download generated video');
-          const videoBuffer = Buffer.from(await videoRes.arrayBuffer());
+          let videoBuffer = Buffer.from(await videoRes.arrayBuffer());
+
+          // Apply text overlay if enabled
+          try {
+            const overlayPng = await generateVideoTextOverlay(slideData, brand);
+            if (overlayPng) {
+              let overlay = overlayPng;
+              if (slideData.includeOwl) overlay = await addAppIconOverlay(overlay, slideData.owlPosition, brand);
+              const outPath = path.join(outputDir, `tmp_final_${crypto.randomUUID().slice(0, 8)}.mp4`);
+              await overlayPngOnVideo(videoBuffer, overlay, outPath);
+              videoBuffer = await fs.readFile(outPath);
+              await fs.unlink(outPath).catch(() => {});
+            }
+          } catch (overlayErr) {
+            console.error(`[Carousel ${jobId}] Video overlay failed, using raw video:`, overlayErr.message);
+          }
 
           const slug = crypto.randomUUID().slice(0, 8);
           const filename = `carousel_${brand.id}_${jobId}_s${i + 1}_${slug}.mp4`;

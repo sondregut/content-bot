@@ -2245,6 +2245,7 @@ function loadSlideIntoForm(index) {
   if (form.elements.videoCamera) form.elements.videoCamera.value = slide.cameraMove || 'slow tracking shot';
   if (form.elements.videoDuration) form.elements.videoDuration.value = slide.duration || '5';
   if (form.elements.videoAudio) form.elements.videoAudio.checked = slide.audio || false;
+  if (form.elements.videoTextOverlay) form.elements.videoTextOverlay.checked = slide.videoTextOverlay ?? true;
 
   // Color overrides
   const textColorEnabled = document.getElementById('mockupTextColorEnabled');
@@ -2385,6 +2386,7 @@ function saveCurrentSlideEdits() {
     slide.cameraMove = form.elements.videoCamera?.value || 'slow tracking shot';
     slide.duration = parseInt(form.elements.videoDuration?.value) || 5;
     slide.audio = form.elements.videoAudio?.checked || false;
+    slide.videoTextOverlay = form.elements.videoTextOverlay?.checked ?? true;
   }
 }
 
@@ -3553,6 +3555,10 @@ function buildSlidePayload(slide, slideIndex) {
     payload.cameraMove = slide.cameraMove || form.elements.videoCamera?.value || 'slow tracking shot';
     payload.duration = slide.duration || parseInt(form.elements.videoDuration?.value) || 5;
     payload.audio = slide.audio || form.elements.videoAudio?.checked || false;
+    payload.videoTextOverlay = form.elements.videoTextOverlay?.checked ?? true;
+    payload.headlineFontSize = slide.headlineFontSize || parseInt(form.elements.headlineFontSize?.value) || 82;
+    payload.bodyFontSize = slide.bodyFontSize || parseInt(form.elements.bodyFontSize?.value) || 34;
+    payload.fontFamily = slide.fontFamily || form.elements.mockupFont?.value || 'Helvetica';
   } else {
     payload.backgroundStyle = form.elements.backgroundStyle?.value || 'dark premium navy/near-black with very subtle grain';
     payload.layoutTemplate = form.elements.layoutTemplate?.value || 'Layout A - Classic Left Lane';
