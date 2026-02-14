@@ -2276,13 +2276,23 @@ async function generateMoreIdeas() {
       caption: idea.caption || '',
       slides: (idea.slides || []).map((s, si) => ({ ...s, number: s.number || si + 1, type: s.type || 'text' })),
     }));
+    console.log('[generateMoreIdeas] format:', format, 'slides:', newIdeas.map(i => ({ id: i.id, numSlides: i.slides.length, type: i.slides[0]?.type })));
     let aiCat = app.categories.find(c => c.name === 'AI-Generated Ideas');
     if (aiCat) {
       aiCat.ideas.push(...newIdeas);
     } else {
       app.categories.push({ name: 'AI-Generated Ideas', ideas: newIdeas });
     }
+    const selectedFormat = format; // preserve before sidebar re-render resets dropdown
     renderSidebar();
+    // Restore format selection after sidebar re-render
+    const formatEl = document.getElementById('sidebar-format-select');
+    if (formatEl) {
+      formatEl.value = selectedFormat;
+      // Also re-hide slides input if video
+      const slidesInput = document.getElementById('sidebar-slides-input');
+      if (slidesInput) slidesInput.style.display = selectedFormat === 'video' ? 'none' : '';
+    }
     // Clear the prompt input (sidebar was re-rendered so the DOM element is fresh, but clear just in case)
     const promptEl = document.getElementById('sidebar-prompt-input');
     if (promptEl) promptEl.value = '';
@@ -2650,6 +2660,7 @@ function saveCurrentSlideEdits() {
 
 function applyVideoMode() {
   const isVideo = slideEdits.length === 1 && slideEdits[0].type === 'video';
+  console.log('[applyVideoMode] slides:', slideEdits.length, 'type:', slideEdits[0]?.type, 'isVideo:', isVideo);
   editorArea.classList.toggle('video-mode', isVideo);
 
   // Slide tabs
@@ -2659,9 +2670,6 @@ function applyVideoMode() {
   const firstFormRow = form.querySelector('.form-row');
   if (firstFormRow) firstFormRow.style.display = isVideo ? 'none' : '';
 
-  // Background + Text shortcut button
-  const bgShortcut = document.getElementById('bg-text-shortcut-btn');
-  if (bgShortcut) bgShortcut.style.display = isVideo ? 'none' : '';
 
   // Icon watermark section
   const iconSection = form.querySelector('.icon-section');
@@ -2693,10 +2701,13 @@ function toggleTypeFields() {
   textFields.style.display = type === 'text' ? 'block' : 'none';
   mockupFields.style.display = type === 'mockup' ? 'block' : 'none';
   videoFields.style.display = type === 'video' ? 'block' : 'none';
-  if (type === 'mockup') toggleMockupPhoneOptions();
-
-  // Hide mockup image upload section from sidebar — moved to preview overlay
-  mockupImageUploadSection.style.display = 'none';
+  if (type === 'mockup') {
+    toggleMockupPhoneOptions();
+    // Show image upload section for mockup type
+    mockupImageUploadSection.style.display = '';
+  } else {
+    mockupImageUploadSection.style.display = 'none';
+  }
   screenshotWarning.style.display = 'none';
 
   // Hide reference sections for mockup/video (they are ignored server-side)
@@ -2707,10 +2718,10 @@ function toggleTypeFields() {
   if (refSection) refSection.style.display = hideRef ? 'none' : '';
 
   const hints = {
-    photo: 'AI-generated background image with text overlay',
-    text: 'Text and colors only — no background image',
-    mockup: 'App screenshot in a phone frame with text overlay',
-    video: 'AI-generated video clip (Kling 3.0) — 5-10 seconds',
+    photo: 'AI-generated photo with text overlay',
+    text: 'Solid background with text — no AI',
+    mockup: 'Your image + text rendered locally (free, instant)',
+    video: 'AI-generated 5\u201310s video clip',
   };
   document.getElementById('slideTypeHint').textContent = hints[type] || '';
   updatePreviewImageOverlay();
@@ -2741,17 +2752,15 @@ slideTypeSelect.addEventListener('change', () => {
   updatePreviewMockup();
 });
 
-// Background + Text shortcut button
-const bgTextShortcutBtn = document.getElementById('bg-text-shortcut-btn');
-bgTextShortcutBtn.addEventListener('click', () => {
-  slideTypeSelect.value = 'mockup';
-  toggleTypeFields();
-  imageUsageSelect.value = 'background';
-  toggleMockupPhoneOptions();
-  if (!screenshotImageFilename) {
-    screenshotImageInput.click();
-  }
-  updatePreviewMockup();
+// --- Advanced Fields Toggle ---
+document.querySelectorAll('.advanced-toggle').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const fields = btn.nextElementSibling;
+    if (!fields || !fields.classList.contains('advanced-fields')) return;
+    const isOpen = fields.style.display !== 'none';
+    fields.style.display = isOpen ? 'none' : 'block';
+    btn.innerHTML = isOpen ? btn.innerHTML.replace('\u25BE', '\u25B8') : btn.innerHTML.replace('\u25B8', '\u25BE');
+  });
 });
 
 mockupLayoutSelect.addEventListener('change', () => {
