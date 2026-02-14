@@ -1041,6 +1041,20 @@ function getFigurePosition(position, figMeta, canvasW, canvasH, padding) {
 
 // --- Mockup Layout Renderers ---
 
+// Clip an image buffer so it fits within canvas bounds at the given position
+async function clipToCanvas(buffer, left, top, canvasWidth, canvasHeight) {
+  const meta = await sharp(buffer).metadata();
+  const visibleW = Math.min(meta.width, canvasWidth - left);
+  const visibleH = Math.min(meta.height, canvasHeight - top);
+  if (visibleW < meta.width || visibleH < meta.height) {
+    return sharp(buffer)
+      .extract({ left: 0, top: 0, width: visibleW, height: visibleH })
+      .png()
+      .toBuffer();
+  }
+  return buffer;
+}
+
 // Shared: build the text SVG layer for any layout
 function buildTextSvg({ width, height, bgFill, textX, textMaxWidth, microLabel, headline, body, highlight, highlightStyle, theme, fontSizes }) {
   const { headlineFontSize, bodyFontSize, microFontSize } = fontSizes;
@@ -1093,7 +1107,8 @@ async function renderPhoneRight(data, brand, theme) {
     if (figBuf) {
       const figMeta = await sharp(figBuf).metadata();
       const pos = getFigurePosition(data.figurePosition || 'bottom-right', figMeta, width, height, 60);
-      imageComposite = { input: figBuf, left: pos.left, top: pos.top };
+      const clippedFig = await clipToCanvas(figBuf, pos.left, pos.top, width, height);
+      imageComposite = { input: clippedFig, left: pos.left, top: pos.top };
     }
     textMaxWidth = Math.round(width * 0.65) - safe.left;
   } else {
@@ -1111,9 +1126,10 @@ async function renderPhoneRight(data, brand, theme) {
       angle: phoneAngle,
     });
     const phoneMeta = await sharp(phoneMockup).metadata();
-    const phoneLeft = width - (phoneMeta.width || pw) + 20;
-    const phoneTop = height - (phoneMeta.height || ph) + Math.round(ph * 0.12);
-    imageComposite = { input: phoneMockup, left: Math.max(0, phoneLeft), top: Math.max(0, Math.min(phoneTop, height - 10)) };
+    const phoneLeft = Math.max(0, width - (phoneMeta.width || pw) + 20);
+    const phoneTop = Math.max(0, Math.min(height - (phoneMeta.height || ph) + Math.round(ph * 0.12), height - 10));
+    const clippedPhone = await clipToCanvas(phoneMockup, phoneLeft, phoneTop, width, height);
+    imageComposite = { input: clippedPhone, left: phoneLeft, top: phoneTop };
     textMaxWidth = Math.round(width * 0.65) - safe.left;
   }
 
@@ -1226,7 +1242,8 @@ async function renderPhoneLeft(data, brand, theme) {
     if (figBuf) {
       const figMeta = await sharp(figBuf).metadata();
       const pos = getFigurePosition(data.figurePosition || 'center-left', figMeta, width, height, 60);
-      imageComposite = { input: figBuf, left: pos.left, top: pos.top };
+      const clippedFig = await clipToCanvas(figBuf, pos.left, pos.top, width, height);
+      imageComposite = { input: clippedFig, left: pos.left, top: pos.top };
       baseTextX = pos.left + (figMeta.width || maxW) + 40;
     } else {
       baseTextX = safe.left;
@@ -1247,9 +1264,10 @@ async function renderPhoneLeft(data, brand, theme) {
       angle: phoneAngle,
     });
     const phoneMeta = await sharp(phoneMockup).metadata();
-    const phoneLeft = safe.left - 20;
-    const phoneTop = Math.round((height - (phoneMeta.height || ph)) / 2);
-    imageComposite = { input: phoneMockup, left: Math.max(0, phoneLeft), top: Math.max(0, phoneTop) };
+    const phoneLeft = Math.max(0, safe.left - 20);
+    const phoneTop = Math.max(0, Math.round((height - (phoneMeta.height || ph)) / 2));
+    const clippedPhone = await clipToCanvas(phoneMockup, phoneLeft, phoneTop, width, height);
+    imageComposite = { input: clippedPhone, left: phoneLeft, top: phoneTop };
     baseTextX = (phoneMeta.width || pw) + safe.left + 40;
     textMaxWidth = Math.max(width - baseTextX - safe.right, 300);
   }
@@ -1350,7 +1368,8 @@ async function renderTextStatement(data, brand, theme) {
     if (figBuf) {
       const figMeta = await sharp(figBuf).metadata();
       const pos = getFigurePosition(data.figurePosition || 'bottom-right', figMeta, width, height, 80);
-      imageComposite = { input: figBuf, left: pos.left, top: pos.top };
+      const clippedFig = await clipToCanvas(figBuf, pos.left, pos.top, width, height);
+      imageComposite = { input: clippedFig, left: pos.left, top: pos.top };
     }
   }
 
