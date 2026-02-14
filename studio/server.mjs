@@ -2116,6 +2116,11 @@ Rules:
       }
       // Also send the full batch for contentData storage
       sendSSE('content-ideas', formattedIdeas);
+
+      // Persist to Firestore so ideas survive refresh/brand-switch
+      if (db) {
+        await db.collection('carousel_brands').doc(brandId).update({ contentIdeas: formattedIdeas });
+      }
     }
 
     // Step 9: Generate first carousel slides (slide 1 = AI, rest = mockup)
@@ -2550,7 +2555,14 @@ app.get('/api/content-ideas', requireAuth, async (req, res) => {
       const appData = parseContentIdeas(markdown, brandId || 'generic', brand.name);
       return res.json({ apps: [appData] });
     } catch {
-      // No content-ideas file — return empty categories
+      // No content-ideas.md — check Firestore for AI-generated ideas
+      if (db && brandId) {
+        const doc = await db.collection('carousel_brands').doc(brandId).get();
+        const stored = doc.data()?.contentIdeas;
+        if (stored && stored.length > 0) {
+          return res.json({ apps: [{ appName: brand.name, brandId, categories: [{ name: 'AI-Generated Ideas', ideas: stored }] }] });
+        }
+      }
       return res.json({ apps: [{ appName: brand.name, brandId: brandId || 'generic', categories: [] }] });
     }
   } catch (error) {
@@ -3326,8 +3338,21 @@ Rules:
       throw new Error('Failed to parse Claude response as JSON');
     }
 
-    console.log(`[Content Ideas] ${brand.name} | Generated ${parsed.ideas?.length || 0} ideas`);
-    res.json({ ok: true, ideas: parsed.ideas || [] });
+    const ideas = parsed.ideas || [];
+    console.log(`[Content Ideas] ${brand.name} | Generated ${ideas.length} ideas`);
+
+    // Persist to Firestore so ideas survive refresh/brand-switch
+    if (db && brandId) {
+      const formatted = ideas.map((idea, i) => ({
+        id: `AI-${i + 1}`,
+        title: idea.title,
+        caption: idea.caption || '',
+        slides: (idea.slides || []).map((s, si) => ({ ...s, number: s.number || si + 1, type: s.type || 'text' })),
+      }));
+      await db.collection('carousel_brands').doc(brandId).update({ contentIdeas: formatted });
+    }
+
+    res.json({ ok: true, ideas });
   } catch (error) {
     console.error('[Content Ideas]', error);
     res.status(500).json({ error: safeErrorMessage(error) });
