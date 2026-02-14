@@ -973,6 +973,14 @@ function loadSlideIntoForm(index) {
     const darkenLabel = document.getElementById('darkenValue');
     if (darkenLabel) darkenLabel.textContent = Math.round((slide.overlayDarken || 0) * 100) + '%';
   }
+  if (form.elements.headlineFontSize) {
+    form.elements.headlineFontSize.value = slide.headlineFontSize || 82;
+    document.getElementById('headlineFontSizeValue').textContent = slide.headlineFontSize || 82;
+  }
+  if (form.elements.bodyFontSize) {
+    form.elements.bodyFontSize.value = slide.bodyFontSize || 34;
+    document.getElementById('bodyFontSizeValue').textContent = slide.bodyFontSize || 34;
+  }
 
   // Color overrides
   const textColorEnabled = document.getElementById('mockupTextColorEnabled');
@@ -1075,6 +1083,8 @@ function saveCurrentSlideEdits() {
     slide.aspectRatio = form.elements.aspectRatio?.value || '9:16';
     slide.fontFamily = form.elements.mockupFont?.value || 'Helvetica';
     slide.overlayDarken = (parseInt(form.elements.overlayDarken?.value) || 0) / 100;
+    slide.headlineFontSize = parseInt(form.elements.headlineFontSize?.value) || 82;
+    slide.bodyFontSize = parseInt(form.elements.bodyFontSize?.value) || 34;
     // Color overrides (only if enabled)
     const textColorEnabled = document.getElementById('mockupTextColorEnabled');
     const accentColorEnabled = document.getElementById('mockupAccentColorEnabled');
@@ -1156,6 +1166,26 @@ document.getElementById('mockupTextColor').addEventListener('input', updatePrevi
 document.getElementById('mockupAccentColor').addEventListener('input', updatePreviewMockup);
 document.getElementById('mockupTextColorEnabled').addEventListener('change', updatePreviewMockup);
 document.getElementById('mockupAccentColorEnabled').addEventListener('change', updatePreviewMockup);
+
+// Font size sliders
+document.getElementById('headlineFontSize').addEventListener('input', () => {
+  document.getElementById('headlineFontSizeValue').textContent = document.getElementById('headlineFontSize').value;
+});
+document.getElementById('bodyFontSize').addEventListener('input', () => {
+  document.getElementById('bodyFontSizeValue').textContent = document.getElementById('bodyFontSize').value;
+});
+
+// Expand preview toggle
+const previewExpandBtn = document.getElementById('preview-expand-btn');
+const previewFrame = document.getElementById('preview-frame');
+previewExpandBtn.addEventListener('click', () => {
+  previewFrame.classList.toggle('expanded');
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && previewFrame.classList.contains('expanded')) {
+    previewFrame.classList.remove('expanded');
+  }
+});
 
 // Live preview update on form input
 ['microLabel', 'headline', 'body', 'highlightPhrase', 'slideLabel'].forEach((name) => {
@@ -1846,6 +1876,8 @@ function buildSlidePayload(slide, slideIndex) {
     payload.mood = slide.mood || 'calm intensity, disciplined';
     payload.overlayStyle = form.elements.overlayStyle?.value || 'dark gradient';
     payload.overlayPlacement = form.elements.overlayPlacement?.value || 'bottom third';
+    payload.headlineFontSize = slide.headlineFontSize || parseInt(form.elements.headlineFontSize?.value) || 82;
+    payload.bodyFontSize = slide.bodyFontSize || parseInt(form.elements.bodyFontSize?.value) || 34;
   } else if (payload.slideType === 'mockup') {
     payload.mockupLayout = slide.mockupLayout || mockupLayoutSelect.value || 'phone-right';
     payload.mockupTheme = slide.mockupTheme || mockupThemeSelect.value || 'dark';
@@ -1871,11 +1903,15 @@ function buildSlidePayload(slide, slideIndex) {
     payload.aspectRatio = slide.aspectRatio || form.elements.aspectRatio?.value || '9:16';
     payload.fontFamily = slide.fontFamily || form.elements.mockupFont?.value || 'Helvetica';
     payload.overlayDarken = slide.overlayDarken || 0;
+    payload.headlineFontSize = slide.headlineFontSize || parseInt(form.elements.headlineFontSize?.value) || 82;
+    payload.bodyFontSize = slide.bodyFontSize || parseInt(form.elements.bodyFontSize?.value) || 34;
     if (slide.textColor) payload.textColor = slide.textColor;
     if (slide.microColor) payload.microColor = slide.microColor;
   } else {
     payload.backgroundStyle = form.elements.backgroundStyle?.value || 'dark premium navy/near-black with very subtle grain';
     payload.layoutTemplate = form.elements.layoutTemplate?.value || 'Layout A - Classic Left Lane';
+    payload.headlineFontSize = slide.headlineFontSize || parseInt(form.elements.headlineFontSize?.value) || 82;
+    payload.bodyFontSize = slide.bodyFontSize || parseInt(form.elements.bodyFontSize?.value) || 34;
   }
 
   // Per-slide image takes priority over global

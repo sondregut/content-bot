@@ -534,8 +534,8 @@ async function renderPhoneRight(data, brand, theme) {
   let baseBuffer = null;
   let imageComposite = null;
   let textMaxWidth;
-  const headlineFontSize = 72;
-  const bodyFontSize = 32;
+  const headlineFontSize = parseInt(data.headlineFontSize) || 72;
+  const bodyFontSize = parseInt(data.bodyFontSize) || 32;
   const microFontSize = 24;
 
   if (imageUsage === 'background' && data.screenshotImage) {
@@ -666,8 +666,8 @@ async function renderPhoneLeft(data, brand, theme) {
   let imageComposite = null;
   let baseTextX;
   let textMaxWidth;
-  const headlineFontSize = 62;
-  const bodyFontSize = 30;
+  const headlineFontSize = parseInt(data.headlineFontSize) || 62;
+  const bodyFontSize = parseInt(data.bodyFontSize) || 30;
   const microFontSize = 22;
 
   if (imageUsage === 'background' && data.screenshotImage) {
@@ -815,8 +815,8 @@ async function renderTextStatement(data, brand, theme) {
   }
 
   const textMaxWidth = width - safe.left - safe.right;
-  const headlineFontSize = 82;
-  const bodyFontSize = 34;
+  const headlineFontSize = parseInt(data.headlineFontSize) || 82;
+  const bodyFontSize = parseInt(data.bodyFontSize) || 34;
   const microFontSize = 24;
 
   const headlineLines = wrapText(headline, headlineFontSize, textMaxWidth, true);
@@ -976,7 +976,7 @@ function buildTextPrompt(data, brand) {
     `Background: ${safeBackground} using brand palette primary ${c.primary}, accent ${c.accent}, white ${c.white}, secondary ${c.secondary}, CTA color ${c.cta} (CTA only).`,
     `Composition: ${safeLayout}. Large left-aligned text block within safe zones (top 180px, bottom 320px, sides 90px). Plenty of negative space.`,
     textBlocks.join('\n\n'),
-    'Typography constraints: modern sans-serif like Inter/SF Pro, headline extra-bold with tight line-height, body regular with comfortable line-height, clean kerning, high readability.',
+    `Typography constraints: modern sans-serif like Inter/SF Pro, headline extra-bold at approximately ${data.headlineFontSize || 82}pt with tight line-height, body regular at approximately ${data.bodyFontSize || 34}pt with comfortable line-height, clean kerning, high readability.`,
     'Icon constraints: do NOT add any logos or icons; the brand watermark will be added separately after generation.',
     trickyLine || null,
     'Hard constraints: No additional words beyond quoted text. No watermarks. No extra logos. No clutter. Keep background clean and minimal. High contrast, text must be perfectly legible.',
@@ -1026,7 +1026,7 @@ function buildPhotoPrompt(data, brand) {
     `Headline: "${safeHeadline}"`,
     highlightPhrase ? `Highlight ONLY: "${highlightPhrase}" in accent ${c.accent}` : null,
     safeBody ? `Body: "${safeBody}"` : null,
-    'Typography: modern sans-serif like Inter/SF Pro, headline bold, body regular, clean kerning.',
+    `Typography: modern sans-serif like Inter/SF Pro, headline bold at approximately ${data.headlineFontSize || 82}pt, body regular at approximately ${data.bodyFontSize || 34}pt, clean kerning.`,
     `Brand palette accents only (accent ${c.accent}, CTA color ${c.cta} for CTA only).`,
     trickyLine || null,
     'Hard constraints: no extra text beyond quoted. no watermarks. no random logos. no distorted faces/hands. no nonsense text. no perfect/flawless skin. no ultra-smooth rendering. no heavy retouching look.',

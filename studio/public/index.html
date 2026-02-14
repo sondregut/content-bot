@@ -325,6 +325,16 @@
                 </div>
                 <div class="form-row">
                   <div class="form-group">
+                    <label class="label">Headline Size <span id="headlineFontSizeValue">82</span></label>
+                    <input type="range" name="headlineFontSize" id="headlineFontSize" min="40" max="120" value="82" />
+                  </div>
+                  <div class="form-group">
+                    <label class="label">Body Size <span id="bodyFontSizeValue">34</span></label>
+                    <input type="range" name="bodyFontSize" id="bodyFontSize" min="20" max="60" value="34" />
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
                     <label class="label">Text Color</label>
                     <div class="color-override-row">
                       <input type="color" name="mockupTextColor" id="mockupTextColor" value="#FFFFFF" />
@@ -573,6 +583,7 @@
             <div class="preview-section">
               <div class="status" id="status">Ready.</div>
               <div class="preview-frame" id="preview-frame">
+                <button class="preview-expand-btn" id="preview-expand-btn" title="Expand preview">&#x26F6;</button>
                 <div class="loading-spinner" id="loading-spinner">
                   <div class="spinner-ring"></div>
                   <div class="spinner-text" id="spinner-text">Generating image...</div>

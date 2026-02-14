@@ -1246,6 +1246,73 @@ input:focus, select:focus, textarea:focus {
   display: none;
 }
 
+/* Expand Preview Button */
+.preview-expand-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 10;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: none;
+  background: rgba(0,0,0,0.5);
+  color: rgba(255,255,255,0.8);
+  font-size: 1.1rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+  line-height: 1;
+}
+
+.preview-expand-btn:hover {
+  background: rgba(0,0,0,0.7);
+  color: #fff;
+}
+
+/* Expanded Preview Overlay */
+.preview-frame.expanded {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2000;
+  background: rgba(0,0,0,0.92);
+  border-radius: 0;
+  padding: 24px;
+  min-height: 100vh;
+}
+
+.preview-frame.expanded img {
+  max-height: 95vh;
+  max-width: 95vw;
+  object-fit: contain;
+}
+
+.preview-frame.expanded .preview-expand-btn {
+  top: 16px;
+  right: 16px;
+  width: 40px;
+  height: 40px;
+  font-size: 1.3rem;
+  background: rgba(255,255,255,0.15);
+}
+
+.preview-frame.expanded .preview-expand-btn:hover {
+  background: rgba(255,255,255,0.25);
+}
+
+/* Font size slider value display */
+#headlineFontSizeValue,
+#bodyFontSizeValue {
+  font-weight: 400;
+  color: #9ca3af;
+  font-size: 0.72rem;
+}
+
 /* Loading Spinner */
 .loading-spinner {
   display: none;
