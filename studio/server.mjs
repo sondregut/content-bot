@@ -92,9 +92,9 @@ async function generateWithFlux(faceImagePaths, prompt, { aspectRatio = '9:16' }
 let bucket = null;
 let db = null;
 try {
-  // Strip literal newlines/carriage returns from JSON (common with env var storage)
+  // Strip literal newlines/carriage returns and fix escaped quotes from env var storage
   const rawSA = process.env.FIREBASE_SERVICE_ACCOUNT || '';
-  const cleanedSA = (rawSA || '{}').replace(/[\n\r]/g, '');
+  const cleanedSA = (rawSA || '{}').replace(/[\n\r]/g, '').replace(/\\"/g, '"');
   const serviceAccount = JSON.parse(cleanedSA);
   if (serviceAccount.project_id) {
     // Ensure private key has actual newlines
