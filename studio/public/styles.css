@@ -228,9 +228,9 @@ body {
 .sign-out-btn {
   padding: 6px 14px;
   border-radius: 8px;
-  border: 1px solid rgba(255,255,255,0.15);
-  background: rgba(255,255,255,0.06);
-  color: var(--white);
+  border: 1px solid rgba(0,0,0,0.15);
+  background: rgba(0,0,0,0.05);
+  color: var(--navy);
   font-family: inherit;
   font-size: 0.8rem;
   font-weight: 600;
@@ -239,7 +239,7 @@ body {
   white-space: nowrap;
 }
 
-.sign-out-btn:hover { background: rgba(255,60,60,0.25); color: #ff6b6b; border-color: rgba(255,60,60,0.3); }
+.sign-out-btn:hover { background: rgba(255,60,60,0.15); color: #d32f2f; border-color: rgba(255,60,60,0.3); }
 
 .app {
   display: flex;
