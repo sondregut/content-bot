@@ -218,8 +218,8 @@ async function uploadToStorage(buffer, filename) {
   try {
     const file = bucket.file(`carousel-studio/${filename}`);
     await file.save(buffer, { metadata: { contentType: 'image/png' } });
-    const [url] = await file.getSignedUrl({ action: 'read', expires: Date.now() + 2 * 60 * 60 * 1000 });
-    return url;
+    await file.makePublic();
+    return `https://storage.googleapis.com/${bucket.name}/carousel-studio/${filename}`;
   } catch (err) {
     console.error('[Storage Upload] Failed, falling back to local disk:', err.message);
     await fs.writeFile(path.join(outputDir, filename), buffer);
@@ -237,7 +237,8 @@ async function getFacePhotoUrls(facePhotos) {
   return Promise.all(facePhotos.map(async (photo) => {
     try {
       const file = bucket.file(photo.storagePath);
-      const [url] = await file.getSignedUrl({ action: 'read', expires: Date.now() + 2 * 60 * 60 * 1000 });
+      await file.makePublic();
+      const url = `https://storage.googleapis.com/${bucket.name}/${photo.storagePath}`;
       return { ...photo, url };
     } catch (err) {
       console.warn('[getFacePhotoUrls] Failed for', photo.storagePath, err.message);
