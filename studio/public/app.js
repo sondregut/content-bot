@@ -120,6 +120,7 @@ let brands = [];
 let currentBrand = null;
 let contentData = null;
 let selectedIdea = null;
+let pendingContentPillars = null;
 let currentSlideIndex = 0;
 let slideEdits = [];
 let generatedImages = {};
@@ -182,6 +183,9 @@ const freeformInput = document.getElementById('freeform-input');
 const freeformGenerateBtn = document.getElementById('freeform-generate-btn');
 const freeformStatus = document.getElementById('freeform-status');
 const freeformSlideCount = document.getElementById('freeform-slide-count');
+const autoGenerateBtn = document.getElementById('auto-generate-btn');
+const autoGenerateStatus = document.getElementById('auto-generate-status');
+const autoGenerateSection = document.getElementById('auto-generate-section');
 const settingsBtn = document.getElementById('settings-btn');
 const settingsModal = document.getElementById('settings-modal');
 const settingsClose = document.getElementById('settings-close');
@@ -579,6 +583,11 @@ async function analyzeWebsite(url) {
 
     if (brand.tone) brandAiStatus.textContent = `Tone: ${brand.tone}`;
 
+    // Store content pillars for saving with the brand
+    if (brand.contentPillars && brand.contentPillars.length > 0) {
+      pendingContentPillars = brand.contentPillars;
+    }
+
     // Render images grid
     if (images && images.length > 0) {
       brandImagesGrid.innerHTML = '';
@@ -719,6 +728,7 @@ brandSaveBtn.addEventListener('click', async () => {
     defaultBackground: document.getElementById('brand-bg-desc').value.trim() || 'dark premium background with subtle grain',
     iconOverlayText: document.getElementById('brand-watermark').value.trim() || brandWebsiteInput.value.trim(),
   };
+  if (pendingContentPillars) payload.contentPillars = pendingContentPillars;
   brandSaveBtn.disabled = true;
   brandModalStatus.textContent = 'Saving...';
   brandModalStatus.className = 'brand-modal-status';
@@ -733,6 +743,7 @@ brandSaveBtn.addEventListener('click', async () => {
     const bData = await bRes.json();
     brands = bData.brands || [];
     if (data.brand?.id) currentBrand = data.brand.id;
+    pendingContentPillars = null;
     renderBrandSelector();
     await loadContentIdeas();
     updateIconPreview();
@@ -2238,6 +2249,70 @@ freeformGenerateBtn.addEventListener('click', async () => {
     freeformStatus.textContent = `Error: ${err.message}`;
   } finally {
     freeformGenerateBtn.disabled = false;
+  }
+});
+
+// --- Auto-Generate Content Ideas from Website ---
+autoGenerateBtn.addEventListener('click', async () => {
+  if (!currentBrand) {
+    autoGenerateStatus.textContent = 'Create a brand first.';
+    return;
+  }
+
+  autoGenerateBtn.disabled = true;
+  autoGenerateStatus.textContent = 'Analyzing website and generating ideas...';
+
+  try {
+    const res = await authFetch('/api/generate-content-ideas', {
+      method: 'POST',
+      body: JSON.stringify({ brand: currentBrand }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Generation failed');
+
+    if (!data.ideas || data.ideas.length === 0) {
+      throw new Error('No ideas generated. Try the freeform input instead.');
+    }
+
+    // Load ideas into sidebar as a new category
+    const brandObj = brands.find(b => b.id === currentBrand);
+    const brandName = brandObj?.name || 'Brand';
+
+    // Build contentData structure
+    let idCounter = 1;
+    const category = {
+      name: 'AI-Generated Ideas',
+      ideas: data.ideas.map(idea => ({
+        id: `AI-${idCounter++}`,
+        title: idea.title,
+        slides: idea.slides.map((s, i) => ({
+          ...s,
+          number: s.number || i + 1,
+          type: s.type || 'text',
+        })),
+      })),
+    };
+
+    contentData = {
+      apps: [{
+        appName: brandName,
+        brandId: currentBrand,
+        categories: [category],
+      }],
+    };
+
+    renderSidebar();
+    autoGenerateStatus.textContent = `Generated ${data.ideas.length} carousel ideas.`;
+
+    // Auto-select the first idea
+    if (category.ideas.length > 0) {
+      selectIdea(category.ideas[0].id);
+    }
+  } catch (err) {
+    autoGenerateStatus.textContent = `Error: ${err.message}`;
+  } finally {
+    autoGenerateBtn.disabled = false;
   }
 });
 

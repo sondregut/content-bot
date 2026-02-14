@@ -1241,7 +1241,7 @@ input:focus, select:focus, textarea:focus {
 
 .preview-frame img {
   max-width: 100%;
-  max-height: 500px;
+  max-height: 700px;
   border-radius: 10px;
   display: none;
 }
@@ -1398,6 +1398,52 @@ input:focus, select:focus, textarea:focus {
 .edit-section { margin-bottom: 16px; }
 .edit-bar { display: flex; gap: 8px; }
 .edit-bar input { flex: 1; }
+
+/* Auto-Generate from Website */
+
+.auto-generate-section {
+  text-align: center;
+  margin-top: 20px;
+  width: 100%;
+  max-width: 600px;
+}
+
+.auto-generate-hint {
+  font-size: 0.82rem;
+  color: #6b7280;
+  margin: 8px 0 0;
+}
+
+.auto-generate-status {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--navy);
+  margin-top: 8px;
+  min-height: 20px;
+}
+
+.section-divider {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  max-width: 600px;
+  margin: 20px 0;
+  gap: 12px;
+}
+
+.section-divider::before,
+.section-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.section-divider span {
+  font-size: 0.82rem;
+  color: #9ca3af;
+  white-space: nowrap;
+}
 
 /* Freeform */
 

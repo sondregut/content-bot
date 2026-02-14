@@ -1299,7 +1299,7 @@ app.get('/api/brands', requireAuth, async (req, res) => {
 // Create a new brand
 app.post('/api/brands', requireAuth, async (req, res) => {
   try {
-    const { name, website, colors, systemPrompt, defaultMicroLabel, defaultBackground, iconOverlayText } = req.body;
+    const { name, website, colors, systemPrompt, defaultMicroLabel, defaultBackground, iconOverlayText, contentPillars } = req.body;
     if (!name || !colors) return res.status(400).json({ error: 'Name and colors are required' });
     const id = slugify(name) + '-' + crypto.randomUUID().slice(0, 6);
     const brand = {
@@ -1316,6 +1316,7 @@ app.post('/api/brands', requireAuth, async (req, res) => {
       defaultMicroLabel: defaultMicroLabel || name.toUpperCase(),
       defaultBackground: defaultBackground || `dark premium background with subtle grain`,
       iconOverlayText: iconOverlayText || website || '',
+      contentPillars: contentPillars || [],
       createdBy: req.user.uid,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     };
@@ -1336,7 +1337,7 @@ app.put('/api/brands/:id', requireAuth, async (req, res) => {
     if (!doc.exists) return res.status(404).json({ error: 'Brand not found' });
     if (doc.data().createdBy !== req.user.uid) return res.status(403).json({ error: 'Not your brand' });
     const updates = {};
-    for (const key of ['name', 'website', 'colors', 'systemPrompt', 'defaultMicroLabel', 'defaultBackground', 'iconOverlayText']) {
+    for (const key of ['name', 'website', 'colors', 'systemPrompt', 'defaultMicroLabel', 'defaultBackground', 'iconOverlayText', 'contentPillars']) {
       if (req.body[key] !== undefined) updates[key] = req.body[key];
     }
     await db.collection('carousel_brands').doc(req.params.id).update(updates);
@@ -1542,11 +1543,44 @@ app.post('/api/brands/analyze-website', requireAuth, async (req, res) => {
       }
     } catch { /* ignore bundle scanning errors */ }
 
-    // Extract CSS colors (hex codes from style blocks and inline styles)
+    // Fetch external CSS files for color extraction (catches Tailwind, Vite, etc.)
+    let externalCssText = '';
+    try {
+      const cssLinkRegex = /<link[^>]*rel=["']stylesheet["'][^>]*href=["']([^"']+)["']/gi;
+      const cssLinkRegex2 = /<link[^>]*href=["']([^"']+)["'][^>]*rel=["']stylesheet["']/gi;
+      const cssUrls = [];
+      let cssMatch;
+      while ((cssMatch = cssLinkRegex.exec(html)) !== null) cssUrls.push(cssMatch[1]);
+      while ((cssMatch = cssLinkRegex2.exec(html)) !== null) {
+        if (!cssUrls.includes(cssMatch[1])) cssUrls.push(cssMatch[1]);
+      }
+      const cssBaseUrl = new URL(finalUrl);
+      const sameDomain = cssUrls.filter(u => {
+        try {
+          const parsed = new URL(u, cssBaseUrl);
+          return parsed.hostname === cssBaseUrl.hostname || cssBaseUrl.hostname.endsWith(parsed.hostname) || parsed.hostname.endsWith(cssBaseUrl.hostname);
+        } catch { return false; }
+      }).slice(0, 3);
+      for (const cssSrc of sameDomain) {
+        try {
+          const cssUrl = new URL(cssSrc, cssBaseUrl).href;
+          const cssResp = await fetch(cssUrl, {
+            signal: AbortSignal.timeout(3000),
+            headers: { 'User-Agent': 'Mozilla/5.0 (compatible; CarouselStudio/1.0)' },
+          });
+          if (cssResp.ok) externalCssText += ' ' + await cssResp.text();
+        } catch { /* timeout or fetch error — skip */ }
+      }
+    } catch { /* ignore CSS fetch errors */ }
+
+    // Extract CSS colors (hex codes from style blocks, inline styles, and external CSS)
     const colorRegex = /#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b/g;
     const styleBlocks = html.match(/<style[\s\S]*?<\/style>/gi) || [];
     const inlineStyles = html.match(/style=["'][^"']*["']/gi) || [];
-    const cssColorsRaw = [...styleBlocks.join(' ').matchAll(colorRegex), ...inlineStyles.join(' ').matchAll(colorRegex)].map(m => m[0]);
+    // Also extract CSS custom property values (--var: #hex)
+    const customPropRegex = /--[\w-]+:\s*(#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b)/g;
+    const allCssSources = styleBlocks.join(' ') + ' ' + inlineStyles.join(' ') + ' ' + externalCssText;
+    const cssColorsRaw = [...allCssSources.matchAll(colorRegex), ...allCssSources.matchAll(customPropRegex)].map(m => m[1] || m[0]);
     // Deduplicate and count frequency
     const colorFreq = {};
     for (const c of cssColorsRaw) {
@@ -1652,15 +1686,24 @@ Theme color: ${themeColor || 'none'}
 CSS colors found on site (by frequency): ${extractedColors.join(', ') || 'none'}
 Page text (first 3000 chars): ${textContent}
 
+IMPORTANT for colors: You MUST use the exact hex codes from the "CSS colors found on site" list above. Do NOT invent new hex values. Map the extracted colors to their roles:
+- primary: the dominant dark background color from the site
+- accent: the most prominent brand/highlight color
+- white: the main text color (often #ffffff or a light color)
+- secondary: an alternate background color
+- cta: the button/action color (often same as accent)
+If the CSS colors list is empty, use the theme-color and make reasonable guesses from the page content.
+
 Return ONLY valid JSON (no markdown, no code fences) with:
 - name: brand name (short, clean)
 - description: 1-2 sentence brand description
-- colors: { primary (dark bg color), accent (highlight/brand color), white (text color), secondary (alt bg), cta (button/action color) } — hex codes that match the website's actual color scheme. Use the CSS colors found on the site as reference.
+- colors: { primary, accent, white, secondary, cta } — hex codes mapped from the actual CSS colors above
 - systemPrompt: 150-200 word brand brief for AI content generation describing tone, audience, content pillars, visual style
 - defaultBackground: one-line visual description for slide backgrounds matching the brand aesthetic
 - tone: 2-3 word tone description (e.g. "bold, energetic")
 - microLabel: short uppercase label for slides (e.g. "SPORTYLAB")
-- watermarkText: website domain for watermark (e.g. "sportylab.no")`
+- watermarkText: website domain for watermark (e.g. "sportylab.no")
+- contentPillars: array of 4-5 content theme strings suited to this brand (e.g. ["Product Features", "User Success Stories", "Industry Tips", "Behind the Scenes"])`
       }],
     });
 
@@ -1675,11 +1718,17 @@ Return ONLY valid JSON (no markdown, no code fences) with:
 
     if (!brand) return res.status(500).json({ error: 'Failed to parse AI response' });
 
+    // Find best icon: apple-touch-icon > favicon > og:image
+    const appleTouchMatch = html.match(/<link[^>]*rel=["']apple-touch-icon["'][^>]*href=["']([^"']*)["']/i)
+      || html.match(/<link[^>]*href=["']([^"']*)["'][^>]*rel=["']apple-touch-icon["']/i);
+    const bestIconUrl = appleTouchMatch ? resolveUrl(appleTouchMatch[1]) : favicon;
+
     res.json({
       ok: true,
       brand,
       images,
       favicon,
+      iconUrl: bestIconUrl || favicon,
       pageTitle,
     });
   } catch (err) {
@@ -2126,6 +2175,126 @@ Rules:
     res.json({ ok: true, ...parsed });
   } catch (error) {
     console.error('[Freeform]', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// --- Auto-Generate Content Ideas from Website ---
+app.post('/api/generate-content-ideas', requireAuth, async (req, res) => {
+  try {
+    const { brand: brandId } = req.body || {};
+    if (!brandId) return res.status(400).json({ error: 'Missing brand' });
+    if (!anthropic) return res.status(500).json({ error: 'Claude API not configured' });
+
+    const brand = await getBrandAsync(brandId, req.user?.uid);
+    if (!brand.website) {
+      return res.status(400).json({ error: 'No website set for this brand. Edit your brand and add a website URL first.' });
+    }
+
+    // Fetch website HTML
+    let websiteUrl = brand.website.trim();
+    if (!/^https?:\/\//i.test(websiteUrl)) websiteUrl = `https://${websiteUrl}`;
+
+    let html;
+    try {
+      const resp = await fetch(websiteUrl, {
+        signal: AbortSignal.timeout(8000),
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; CarouselStudio/1.0)' },
+        redirect: 'follow',
+      });
+      html = await resp.text();
+    } catch (e) {
+      return res.status(400).json({ error: `Could not reach website: ${e.message}` });
+    }
+
+    // Extract text content
+    const websiteText = html
+      .replace(/<script[\s\S]*?<\/script>/gi, '')
+      .replace(/<style[\s\S]*?<\/style>/gi, '')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 4000);
+
+    const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+    const pageTitle = titleMatch ? titleMatch[1].replace(/\s+/g, ' ').trim() : '';
+
+    const metaTag = (name) => {
+      const re = new RegExp(`<meta[^>]*(?:name|property)=["']${name}["'][^>]*content=["']([^"']*)["']`, 'i');
+      const re2 = new RegExp(`<meta[^>]*content=["']([^"']*)["'][^>]*(?:name|property)=["']${name}["']`, 'i');
+      return (html.match(re)?.[1] || html.match(re2)?.[1] || '').trim();
+    };
+    const metaDesc = metaTag('description') || metaTag('og:description');
+
+    const brandContext = [
+      brand.systemPrompt || '',
+      `Brand: ${brand.name}`,
+      brand.website ? `Website: ${brand.website}` : '',
+      brand.contentPillars?.length ? `Content pillars: ${brand.contentPillars.join(', ')}` : '',
+    ].filter(Boolean).join('\n');
+
+    const response = await anthropic.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 4096,
+      system: brandContext,
+      messages: [{
+        role: 'user',
+        content: `Based on this website content, generate 5 carousel content ideas for ${brand.name}'s social media (TikTok/Instagram).
+
+Website: ${websiteUrl}
+Page title: ${pageTitle}
+Description: ${metaDesc}
+Website text: ${websiteText}
+
+Generate exactly 5 carousel concepts. Each should have 6-7 slides and be based on real content/features/value props from the website.
+
+Return ONLY valid JSON (no markdown, no code fences) with this structure:
+{
+  "ideas": [
+    {
+      "title": "Short carousel title",
+      "slides": [
+        {
+          "number": 1,
+          "label": "Hook",
+          "type": "photo, text, or mockup",
+          "microLabel": "${brand.defaultMicroLabel || brand.name.toUpperCase()}",
+          "headline": "Main headline text",
+          "body": "Supporting body text (1-2 sentences)",
+          "highlight": "key phrase to highlight"
+        }
+      ]
+    }
+  ]
+}
+
+Rules:
+- Each idea should cover a different angle (features, benefits, how-to, comparison, social proof, etc.)
+- First slide of each idea: strong hook (usually photo or text type)
+- Last slide: CTA with "${brand.name} — link in bio" or similar
+- Mix photo, text, and mockup types within each idea
+- Use mockup with text-statement layout for bold statement slides
+- Headlines: punchy, under 15 words
+- Body: 1-2 sentences max
+- Content should be based on REAL information from the website, not generic filler`,
+      }],
+    });
+
+    const text = response.content?.[0]?.text?.trim();
+    if (!text) throw new Error('No response from Claude');
+
+    let parsed;
+    try {
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      parsed = JSON.parse(jsonMatch ? jsonMatch[0] : text);
+    } catch {
+      throw new Error('Failed to parse Claude response as JSON');
+    }
+
+    console.log(`[Content Ideas] ${brand.name} | Generated ${parsed.ideas?.length || 0} ideas`);
+    res.json({ ok: true, ideas: parsed.ideas || [] });
+  } catch (error) {
+    console.error('[Content Ideas]', error);
     res.status(500).json({ error: error.message });
   }
 });
