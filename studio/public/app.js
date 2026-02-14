@@ -21,6 +21,14 @@ async function authFetch(url, opts = {}) {
   if (opts.body instanceof FormData) {
     delete opts.headers['Content-Type'];
   }
+  // BYOK: send user's API keys from localStorage (scoped per user)
+  const _prefix = getKeyPrefix();
+  const openaiKey = localStorage.getItem(_prefix + 'openai_key');
+  const anthropicKey = localStorage.getItem(_prefix + 'anthropic_key');
+  const falKey = localStorage.getItem(_prefix + 'fal_key');
+  if (openaiKey) opts.headers['X-OpenAI-Key'] = openaiKey;
+  if (anthropicKey) opts.headers['X-Anthropic-Key'] = anthropicKey;
+  if (falKey) opts.headers['X-Fal-Key'] = falKey;
   return fetch(url, opts);
 }
 
@@ -41,6 +49,8 @@ async function authFetch(url, opts = {}) {
     appShell.style.display = 'flex';
     // Reset state from any previous user session
     resetAppState();
+    // Migrate legacy un-scoped API keys to this user (one-time)
+    migrateApiKeys(user.uid);
     // Init app
     loadApiKeysFromStorage();
     try {
@@ -132,6 +142,10 @@ document.getElementById('google-login-btn').addEventListener('click', async () =
 
 document.getElementById('sign-out-btn').addEventListener('click', async () => {
   resetAppState();
+  // Clear API key fields so next user doesn't see them
+  settingsOpenaiKey.value = '';
+  settingsAnthropicKey.value = '';
+  if (settingsFalKey) settingsFalKey.value = '';
   // Close settings modal
   document.getElementById('settings-modal').style.display = 'none';
   if (firebase.apps.length) {
@@ -415,14 +429,50 @@ let selectedElement = 'headline'; // which element is selected for dragging
 // --- API Key Settings ---
 const settingsFalKey = document.getElementById('settings-fal-key');
 
+function getKeyPrefix() {
+  const user = firebase.apps.length ? firebase.auth().currentUser : null;
+  return user ? `carousel_${user.uid}_` : 'carousel_local_';
+}
+
+function migrateApiKeys(uid) {
+  const prefix = `carousel_${uid}_`;
+  // If user already has scoped keys, skip
+  if (localStorage.getItem(prefix + 'openai_key')) return;
+  // Migrate legacy un-scoped keys
+  const oldKeys = ['carousel_openai_key', 'carousel_anthropic_key', 'carousel_fal_key'];
+  const newSuffixes = ['openai_key', 'anthropic_key', 'fal_key'];
+  let migrated = false;
+  oldKeys.forEach((oldKey, i) => {
+    const val = localStorage.getItem(oldKey);
+    if (val) {
+      localStorage.setItem(prefix + newSuffixes[i], val);
+      localStorage.removeItem(oldKey);
+      migrated = true;
+    }
+  });
+  if (migrated) console.log('[API Keys] Migrated legacy keys to user-scoped storage');
+}
+
 function loadApiKeysFromStorage() {
-  const openai = localStorage.getItem('carousel_openai_key') || '';
-  const anthropic = localStorage.getItem('carousel_anthropic_key') || '';
-  const fal = localStorage.getItem('carousel_fal_key') || '';
+  const prefix = getKeyPrefix();
+  const openai = localStorage.getItem(prefix + 'openai_key') || '';
+  const anthropic = localStorage.getItem(prefix + 'anthropic_key') || '';
+  const fal = localStorage.getItem(prefix + 'fal_key') || '';
   settingsOpenaiKey.value = openai;
   settingsAnthropicKey.value = anthropic;
   if (settingsFalKey) settingsFalKey.value = fal;
 }
+
+// API key show/hide toggles
+document.querySelectorAll('.api-key-toggle').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const input = document.getElementById(btn.dataset.target);
+    const showing = input.type === 'text';
+    input.type = showing ? 'password' : 'text';
+    btn.querySelectorAll('.eye-open').forEach(el => el.style.display = showing ? '' : 'none');
+    btn.querySelectorAll('.eye-closed').forEach(el => el.style.display = showing ? 'none' : '');
+  });
+});
 
 // Headers are now handled by authFetch — these are kept for localStorage key storage only
 function getHeaders() {
@@ -456,35 +506,20 @@ settingsSaveBtn.addEventListener('click', async () => {
   const anthropicKey = settingsAnthropicKey.value.trim();
   const falKey = settingsFalKey ? settingsFalKey.value.trim() : '';
 
-  if (openaiKey) localStorage.setItem('carousel_openai_key', openaiKey);
-  else localStorage.removeItem('carousel_openai_key');
+  const prefix = getKeyPrefix();
+  if (openaiKey) localStorage.setItem(prefix + 'openai_key', openaiKey);
+  else localStorage.removeItem(prefix + 'openai_key');
 
-  if (anthropicKey) localStorage.setItem('carousel_anthropic_key', anthropicKey);
-  else localStorage.removeItem('carousel_anthropic_key');
+  if (anthropicKey) localStorage.setItem(prefix + 'anthropic_key', anthropicKey);
+  else localStorage.removeItem(prefix + 'anthropic_key');
 
-  if (falKey) localStorage.setItem('carousel_fal_key', falKey);
-  else localStorage.removeItem('carousel_fal_key');
+  if (falKey) localStorage.setItem(prefix + 'fal_key', falKey);
+  else localStorage.removeItem(prefix + 'fal_key');
 
-  // Send to server to update .env
-  try {
-    const res = await authFetch('/api/settings', {
-      method: 'POST',
-      body: JSON.stringify({ openaiKey, anthropicKey, falKey }),
-    });
-    const data = await res.json();
-    if (data.ok) {
-      settingsStatus.textContent = 'Keys saved and applied!';
-      settingsStatus.className = 'settings-status success';
-      setTimeout(() => { settingsModal.style.display = 'none'; }, 1200);
-    } else {
-      settingsStatus.textContent = data.error || 'Failed to save';
-      settingsStatus.className = 'settings-status error';
-    }
-  } catch {
-    // Still saved to localStorage
-    settingsStatus.textContent = 'Saved to browser (server unreachable).';
-    settingsStatus.className = 'settings-status success';
-  }
+  // Keys are stored in browser only — sent via headers on each API request
+  settingsStatus.textContent = 'Keys saved! They will be used for all AI requests.';
+  settingsStatus.className = 'settings-status success';
+  setTimeout(() => { settingsModal.style.display = 'none'; }, 1200);
 });
 
 // --- AI Prompt Settings ---
@@ -988,14 +1023,34 @@ function handleCreationEvent(event, data) {
       document.querySelectorAll('.creation-step').forEach(el => {
         if (!el.classList.contains('error')) el.className = 'creation-step done';
       });
-      document.getElementById('brand-creation-footer').style.display = 'flex';
       document.getElementById('brand-creation-generate-btn').disabled = false;
-      // Update output header
+      // Update output header briefly, then auto-navigate to studio
       const doneHeader = document.querySelector('.brand-creation-output-header');
       if (doneHeader) {
         doneHeader.querySelector('h2').textContent = 'Your brand is ready!';
-        doneHeader.querySelector('p').textContent = 'Click "Continue to Studio" in the sidebar to start creating content.';
+        doneHeader.querySelector('p').textContent = 'Opening studio...';
       }
+      // Auto-continue to studio after a short delay so user sees completion
+      setTimeout(async () => {
+        closeBrandCreationSidebar();
+        try {
+          const res = await authFetch('/api/brands');
+          const bData = await res.json();
+          brands = bData.brands || [];
+          renderBrandSelector();
+          if (currentBrand) {
+            const hasIdeas = contentData?.apps?.[0]?.categories?.some(c => c.ideas?.length > 0);
+            if (hasIdeas) {
+              renderSidebar();
+            } else {
+              await loadContentIdeas();
+            }
+            updateIconPreview();
+          }
+        } catch (err) {
+          console.error('Failed to refresh brands:', err);
+        }
+      }, 1200);
       break;
     }
 
@@ -1912,9 +1967,15 @@ function updatePreviewMockup() {
   // Update mockup background based on type
   if (isPhoto) {
     previewMockup.classList.add('photo-type');
-    previewMockup.style.background = '';
-    mockupPhotoPlaceholder.style.display = 'flex';
-    mockupPhotoPlaceholder.querySelector('span').textContent = ''; // overlay handles prompt
+    const slideRef = slideReferenceImages[currentSlideIndex];
+    if (slideRef) {
+      previewMockup.style.background = `linear-gradient(180deg, rgba(15,23,42,0.2) 0%, rgba(15,23,42,0.85) 70%), url('/uploads/${slideRef.filename}') center/cover no-repeat`;
+      mockupPhotoPlaceholder.style.display = 'none';
+    } else {
+      previewMockup.style.background = '';
+      mockupPhotoPlaceholder.style.display = 'flex';
+      mockupPhotoPlaceholder.querySelector('span').textContent = '';
+    }
   } else if (isMockup) {
     previewMockup.classList.remove('photo-type');
     const mockupTheme = mockupThemeSelect.value || 'dark';
@@ -4163,8 +4224,8 @@ function renderVault() {
     });
   });
 
-  grid.querySelectorAll('.vault-item img').forEach(img => {
-    img.addEventListener('click', () => window.open(img.src, '_blank'));
+  grid.querySelectorAll('.vault-item img').forEach((img, idx) => {
+    img.addEventListener('click', () => openVaultLightbox(idx));
   });
 
   document.getElementById('vault-load-more')?.addEventListener('click', async () => {
@@ -4172,6 +4233,59 @@ function renderVault() {
     renderVault();
   });
 }
+
+// --- Vault Lightbox ---
+let lightboxIndex = 0;
+const lightboxEl = document.getElementById('vault-lightbox');
+const lightboxImg = document.getElementById('vault-lightbox-img');
+
+function openVaultLightbox(idx) {
+  lightboxIndex = idx;
+  updateLightboxImage();
+  lightboxEl.classList.add('active');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeLightbox() {
+  lightboxEl.classList.remove('active');
+  document.body.style.overflow = '';
+}
+
+function updateLightboxImage() {
+  if (!vaultImages[lightboxIndex]) return;
+  lightboxImg.src = vaultImages[lightboxIndex].url;
+}
+
+document.getElementById('vault-lightbox-close').addEventListener('click', closeLightbox);
+lightboxEl.addEventListener('click', (e) => { if (e.target === lightboxEl) closeLightbox(); });
+document.getElementById('vault-lightbox-prev').addEventListener('click', (e) => {
+  e.stopPropagation();
+  if (lightboxIndex > 0) { lightboxIndex--; updateLightboxImage(); }
+});
+document.getElementById('vault-lightbox-next').addEventListener('click', (e) => {
+  e.stopPropagation();
+  if (lightboxIndex < vaultImages.length - 1) { lightboxIndex++; updateLightboxImage(); }
+});
+document.getElementById('vault-lightbox-dl').addEventListener('click', async (e) => {
+  e.stopPropagation();
+  const v = vaultImages[lightboxIndex];
+  if (!v) return;
+  try {
+    const res = await fetch(v.url);
+    const blob = await res.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = v.filename || 'image.png';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  } catch { window.open(v.url, '_blank'); }
+});
+document.addEventListener('keydown', (e) => {
+  if (!lightboxEl.classList.contains('active')) return;
+  if (e.key === 'Escape') closeLightbox();
+  else if (e.key === 'ArrowLeft' && lightboxIndex > 0) { lightboxIndex--; updateLightboxImage(); }
+  else if (e.key === 'ArrowRight' && lightboxIndex < vaultImages.length - 1) { lightboxIndex++; updateLightboxImage(); }
+});
 
 async function migrateLocalVault() {
   const uid = firebase.auth?.()?.currentUser?.uid;
