@@ -52,8 +52,8 @@ async function authFetch(url, opts = {}) {
       }
       renderBrandSelector();
       // Auto-open brand creation for new users with no brands
-      if (brands.length === 0 && typeof openBrandCreationPage === 'function') {
-        setTimeout(() => openBrandCreationPage(), 300);
+      if (brands.length === 0 && typeof openBrandCreationSidebar === 'function') {
+        setTimeout(() => openBrandCreationSidebar(), 300);
       }
     } catch (err) {
       console.error('Failed to load brands:', err);
@@ -592,35 +592,57 @@ function closeBrandModal() {
   editingBrandId = null;
 }
 
-// --- Full-Page Brand Creation ---
+// --- Sidebar Brand Creation ---
 let brandCreationEventSource = null;
+let brandCreationAbort = null;
 
-function openBrandCreationPage() {
-  const page = document.getElementById('brand-creation-page');
-  page.style.display = 'block';
+function openBrandCreationSidebar() {
+  // Switch sidebar mode
+  document.getElementById('sidebar-ideas-mode').style.display = 'none';
+  document.getElementById('sidebar-creation-mode').style.display = 'flex';
+  // Show creation output in main area, hide others
+  document.getElementById('empty-state').style.display = 'none';
+  document.getElementById('editor-area').style.display = 'none';
+  document.getElementById('brand-creation-output').style.display = 'block';
+  try { document.getElementById('content-plan-view').style.display = 'none'; } catch {}
+  try { document.getElementById('personalize-view').style.display = 'none'; } catch {}
+  try { document.getElementById('meme-view').style.display = 'none'; } catch {}
+  // Reset form state
   document.getElementById('brand-creation-url').value = '';
   document.getElementById('brand-creation-url').focus();
   document.getElementById('brand-creation-error').style.display = 'none';
   document.getElementById('brand-creation-progress').style.display = 'none';
   document.getElementById('brand-creation-footer').style.display = 'none';
   document.getElementById('brand-creation-generate-btn').disabled = false;
-  // Reset all sections
   document.querySelectorAll('.creation-section').forEach(el => el.style.display = 'none');
-  // Reset progress steps
-  document.querySelectorAll('.creation-step').forEach(el => {
-    el.className = 'creation-step';
-  });
+  document.querySelectorAll('.creation-step').forEach(el => el.className = 'creation-step');
+  // Reset output header
+  const header = document.querySelector('.brand-creation-output-header');
+  if (header) {
+    header.querySelector('h2').textContent = 'Setting up your brand...';
+    header.querySelector('p').textContent = 'Results will appear below as we analyze your website.';
+  }
 }
 
-function closeBrandCreationPage() {
-  document.getElementById('brand-creation-page').style.display = 'none';
+function closeBrandCreationSidebar() {
+  // Abort any in-flight request
+  if (brandCreationAbort) {
+    brandCreationAbort.abort();
+    brandCreationAbort = null;
+  }
   if (brandCreationEventSource) {
     brandCreationEventSource.close();
     brandCreationEventSource = null;
   }
+  // Switch sidebar back
+  document.getElementById('sidebar-creation-mode').style.display = 'none';
+  document.getElementById('sidebar-ideas-mode').style.display = 'flex';
+  // Switch main area back
+  document.getElementById('brand-creation-output').style.display = 'none';
+  document.getElementById('empty-state').style.display = '';
 }
 
-document.getElementById('brand-creation-back').addEventListener('click', closeBrandCreationPage);
+document.getElementById('sidebar-creation-close').addEventListener('click', closeBrandCreationSidebar);
 document.getElementById('brand-creation-generate-btn').addEventListener('click', () => {
   const url = document.getElementById('brand-creation-url').value.trim();
   if (!url) return;
@@ -634,7 +656,7 @@ document.getElementById('brand-creation-url').addEventListener('keydown', (e) =>
 });
 
 document.getElementById('brand-creation-continue').addEventListener('click', async () => {
-  closeBrandCreationPage();
+  closeBrandCreationSidebar();
   // Refresh brands list and select the new one
   try {
     const res = await authFetch('/api/brands');
@@ -666,6 +688,7 @@ async function startBrandGeneration(url) {
   document.querySelectorAll('.creation-step').forEach(el => el.className = 'creation-step');
 
   const token = await getIdToken();
+  brandCreationAbort = new AbortController();
 
   // Use fetch with streaming for SSE (EventSource doesn't support POST)
   try {
@@ -676,6 +699,7 @@ async function startBrandGeneration(url) {
         ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
       },
       body: JSON.stringify({ url }),
+      signal: brandCreationAbort.signal,
     });
 
     if (!response.ok) {
@@ -710,6 +734,7 @@ async function startBrandGeneration(url) {
       }
     }
   } catch (err) {
+    if (err.name === 'AbortError') return; // User cancelled
     errorEl.textContent = err.message;
     errorEl.style.display = 'block';
     generateBtn.disabled = false;
@@ -874,8 +899,14 @@ function handleCreationEvent(event, data) {
       document.querySelectorAll('.creation-step').forEach(el => {
         if (!el.classList.contains('error')) el.className = 'creation-step done';
       });
-      document.getElementById('brand-creation-footer').style.display = 'block';
+      document.getElementById('brand-creation-footer').style.display = 'flex';
       document.getElementById('brand-creation-generate-btn').disabled = false;
+      // Update output header
+      const doneHeader = document.querySelector('.brand-creation-output-header');
+      if (doneHeader) {
+        doneHeader.querySelector('h2').textContent = 'Your brand is ready!';
+        doneHeader.querySelector('p').textContent = 'Click "Continue to Studio" in the sidebar to start creating content.';
+      }
       break;
     }
 
@@ -890,7 +921,7 @@ function handleCreationEvent(event, data) {
   }
 }
 
-document.getElementById('create-brand-btn').addEventListener('click', () => openBrandCreationPage());
+document.getElementById('create-brand-btn').addEventListener('click', () => openBrandCreationSidebar());
 document.getElementById('edit-brand-btn').addEventListener('click', () => {
   const brand = brands.find((b) => b.id === currentBrand);
   if (brand) openBrandModal(brand);

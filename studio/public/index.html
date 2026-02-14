@@ -64,20 +64,91 @@
 
       <div class="app-body">
         <aside class="sidebar" id="sidebar">
-          <div class="sidebar-header">
-            <h2>Content Ideas</h2>
-            <span class="idea-count" id="idea-count">0 ideas</span>
+          <!-- MODE 1: Content Ideas (default) -->
+          <div class="sidebar-mode" id="sidebar-ideas-mode">
+            <div class="sidebar-header">
+              <h2>Content Ideas</h2>
+              <span class="idea-count" id="idea-count">0 ideas</span>
+            </div>
+            <div class="sidebar-list" id="ideas-list">
+              <div class="sidebar-loading">Loading ideas...</div>
+            </div>
+            <div class="sidebar-footer">
+              <button type="button" class="sidebar-face-btn" id="sidebar-face-btn">&#128247; Face Studio</button>
+              <button type="button" class="sidebar-face-btn" id="sidebar-meme-btn">&#127912; Meme Studio</button>
+            </div>
           </div>
-          <div class="sidebar-list" id="ideas-list">
-            <div class="sidebar-loading">Loading ideas...</div>
-          </div>
-          <div class="sidebar-footer">
-            <button type="button" class="sidebar-face-btn" id="sidebar-face-btn">&#128247; Face Studio</button>
-            <button type="button" class="sidebar-face-btn" id="sidebar-meme-btn">&#127912; Meme Studio</button>
+
+          <!-- MODE 2: Brand Creation -->
+          <div class="sidebar-mode" id="sidebar-creation-mode" style="display:none">
+            <div class="sidebar-creation-header">
+              <h2>Create Brand</h2>
+              <button class="sidebar-creation-close" id="sidebar-creation-close" aria-label="Cancel" title="Cancel">&times;</button>
+            </div>
+            <div class="sidebar-creation-body">
+              <div class="sidebar-creation-input-row">
+                <input type="text" id="brand-creation-url" placeholder="https://yourwebsite.com" class="sidebar-creation-url-input" />
+                <button class="btn primary small" id="brand-creation-generate-btn">Go</button>
+              </div>
+              <div class="brand-creation-error" id="brand-creation-error" style="display:none"></div>
+              <div class="sidebar-creation-progress" id="brand-creation-progress" style="display:none">
+                <div class="sidebar-creation-steps" id="creation-progress-steps">
+                  <div class="creation-step" data-step="fetch"><span class="creation-step-dot"></span> Analyzing website</div>
+                  <div class="creation-step" data-step="colors"><span class="creation-step-dot"></span> Extracting colors</div>
+                  <div class="creation-step" data-step="config"><span class="creation-step-dot"></span> Generating brand profile</div>
+                  <div class="creation-step" data-step="content-ideas"><span class="creation-step-dot"></span> Creating content ideas</div>
+                  <div class="creation-step" data-step="carousel"><span class="creation-step-dot"></span> Generating first carousel</div>
+                </div>
+              </div>
+            </div>
+            <div class="sidebar-creation-footer" id="brand-creation-footer" style="display:none">
+              <button class="btn primary" id="brand-creation-continue">Continue to Studio &rarr;</button>
+            </div>
           </div>
         </aside>
 
         <main class="main-area">
+          <!-- Brand Creation Output -->
+          <div class="brand-creation-output" id="brand-creation-output" style="display:none">
+            <div class="brand-creation-output-header">
+              <h2>Setting up your brand...</h2>
+              <p>Results will appear below as we analyze your website.</p>
+            </div>
+            <div class="brand-creation-sections">
+              <div class="creation-section" id="creation-section-brand" style="display:none">
+                <h3>Brand</h3>
+                <div class="creation-brand-info">
+                  <strong id="creation-brand-name"></strong>
+                  <p id="creation-brand-desc"></p>
+                </div>
+              </div>
+              <div class="creation-section" id="creation-section-colors" style="display:none">
+                <h3>Colors</h3>
+                <div class="creation-color-swatches" id="creation-color-swatches"></div>
+              </div>
+              <div class="creation-section" id="creation-section-icon" style="display:none">
+                <h3>Icon</h3>
+                <img class="creation-icon-preview" id="creation-icon-preview" />
+              </div>
+              <div class="creation-section" id="creation-section-images" style="display:none">
+                <h3>Website Images</h3>
+                <div class="creation-images-grid" id="creation-images-grid"></div>
+              </div>
+              <div class="creation-section" id="creation-section-config" style="display:none">
+                <h3>Brand Voice &amp; Style</h3>
+                <div class="creation-config-content" id="creation-config-content"></div>
+              </div>
+              <div class="creation-section" id="creation-section-ideas" style="display:none">
+                <h3>Content Ideas</h3>
+                <div class="creation-ideas-list" id="creation-ideas-list"></div>
+              </div>
+              <div class="creation-section" id="creation-section-carousel" style="display:none">
+                <h3>First Carousel Preview</h3>
+                <div class="creation-carousel-strip" id="creation-carousel-strip"></div>
+              </div>
+            </div>
+          </div>
+
           <div class="empty-state" id="empty-state">
             <div class="empty-icon">&#9998;</div>
             <h2>Select a content idea or use freeform</h2>
@@ -719,77 +790,6 @@
             </div><!-- /.editor-columns -->
           </div>
         </main>
-      </div>
-    </div>
-
-    <!-- Full-Page Brand Creation -->
-    <div class="brand-creation-page" id="brand-creation-page" style="display:none">
-      <div class="brand-creation-inner">
-        <div class="brand-creation-header">
-          <button class="btn small" id="brand-creation-back">&larr; Back</button>
-          <h1>Create Your Brand</h1>
-        </div>
-
-        <div class="brand-creation-input-row">
-          <input type="text" id="brand-creation-url" placeholder="https://yourwebsite.com" class="brand-creation-url-input" />
-          <button class="btn primary" id="brand-creation-generate-btn">Generate</button>
-        </div>
-
-        <div class="brand-creation-progress" id="brand-creation-progress" style="display:none">
-          <div class="creation-progress-steps" id="creation-progress-steps">
-            <div class="creation-step" data-step="fetch"><span class="creation-step-dot"></span> Analyzing website</div>
-            <div class="creation-step" data-step="colors"><span class="creation-step-dot"></span> Extracting colors</div>
-            <div class="creation-step" data-step="config"><span class="creation-step-dot"></span> Generating brand profile</div>
-            <div class="creation-step" data-step="content-ideas"><span class="creation-step-dot"></span> Creating content ideas</div>
-            <div class="creation-step" data-step="carousel"><span class="creation-step-dot"></span> Generating first carousel</div>
-          </div>
-        </div>
-
-        <div class="brand-creation-error" id="brand-creation-error" style="display:none"></div>
-
-        <div class="brand-creation-sections">
-          <div class="creation-section" id="creation-section-brand" style="display:none">
-            <h3>Brand</h3>
-            <div class="creation-brand-info">
-              <strong id="creation-brand-name"></strong>
-              <p id="creation-brand-desc"></p>
-            </div>
-          </div>
-
-          <div class="creation-section" id="creation-section-colors" style="display:none">
-            <h3>Colors</h3>
-            <div class="creation-color-swatches" id="creation-color-swatches"></div>
-          </div>
-
-          <div class="creation-section" id="creation-section-icon" style="display:none">
-            <h3>Icon</h3>
-            <img class="creation-icon-preview" id="creation-icon-preview" />
-          </div>
-
-          <div class="creation-section" id="creation-section-images" style="display:none">
-            <h3>Website Images</h3>
-            <div class="creation-images-grid" id="creation-images-grid"></div>
-          </div>
-
-          <div class="creation-section" id="creation-section-config" style="display:none">
-            <h3>Brand Voice &amp; Style</h3>
-            <div class="creation-config-content" id="creation-config-content"></div>
-          </div>
-
-          <div class="creation-section" id="creation-section-ideas" style="display:none">
-            <h3>Content Ideas</h3>
-            <div class="creation-ideas-list" id="creation-ideas-list"></div>
-          </div>
-
-          <div class="creation-section" id="creation-section-carousel" style="display:none">
-            <h3>First Carousel Preview</h3>
-            <div class="creation-carousel-strip" id="creation-carousel-strip"></div>
-          </div>
-        </div>
-
-        <div class="brand-creation-footer" id="brand-creation-footer" style="display:none">
-          <button class="btn primary" id="brand-creation-continue">Continue to Studio &rarr;</button>
-        </div>
       </div>
     </div>
 

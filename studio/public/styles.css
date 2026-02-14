@@ -3022,65 +3022,127 @@ input:focus, select:focus, textarea:focus {
 .plan-card-caption { padding: 10px 12px; font-size: 0.8rem; color: #333; line-height: 1.4; }
 
 /* --- Full-Page Brand Creation --- */
-.brand-creation-page {
-  position: fixed;
-  top: 0; left: 0; right: 0; bottom: 0;
-  background: #f0ede7;
-  z-index: 100;
-  overflow-y: auto;
+/* --- Sidebar Mode Switching --- */
+
+.sidebar-mode {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
 }
 
-.brand-creation-inner {
-  max-width: 680px;
-  margin: 0 auto;
-  padding: 40px 24px 80px;
-}
+/* --- Sidebar Creation Mode --- */
 
-.brand-creation-header {
+.sidebar-creation-header {
+  padding: 16px 18px 12px;
   display: flex;
   align-items: center;
-  gap: 16px;
-  margin-bottom: 32px;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
 }
 
-.brand-creation-header h1 {
+.sidebar-creation-header h2 {
   font-family: 'Space Grotesk', sans-serif;
-  font-size: 1.6rem;
-  color: var(--navy);
+  font-size: 0.95rem;
   margin: 0;
+  color: var(--navy);
 }
 
-.brand-creation-input-row {
+.sidebar-creation-close {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: none;
+  color: #6b7280;
+  font-size: 1.1rem;
+  cursor: pointer;
   display: flex;
-  gap: 12px;
-  margin-bottom: 24px;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, color 0.15s;
 }
 
-.brand-creation-url-input {
+.sidebar-creation-close:hover {
+  background: rgba(220,38,38,0.08);
+  color: var(--danger);
+}
+
+.sidebar-creation-body {
   flex: 1;
-  padding: 14px 18px;
-  border-radius: 12px;
+  overflow-y: auto;
+  padding: 16px 18px;
+}
+
+.sidebar-creation-input-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.sidebar-creation-url-input {
+  flex: 1;
+  padding: 10px 12px;
+  border-radius: 10px;
   border: 1px solid var(--border);
   font-family: inherit;
-  font-size: 1rem;
+  font-size: 0.85rem;
   color: var(--ink);
   background: #fff;
+  min-width: 0;
 }
 
-.brand-creation-url-input:focus {
+.sidebar-creation-url-input:focus {
   outline: none;
   border-color: var(--cyan);
   box-shadow: 0 0 0 3px rgba(115, 166, 209, 0.15);
 }
 
-.brand-creation-progress {
+.sidebar-creation-progress {
+  margin-top: 8px;
+}
+
+.sidebar-creation-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sidebar-creation-footer {
+  padding: 12px 18px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+  display: flex;
+}
+
+.sidebar-creation-footer .btn {
+  width: 100%;
+}
+
+/* --- Brand Creation Main Area Output --- */
+
+.brand-creation-output {
+  max-width: 720px;
+  margin: 0 auto;
+  padding-bottom: 40px;
+}
+
+.brand-creation-output-header {
   margin-bottom: 24px;
 }
 
-.creation-progress-steps {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 20px;
+.brand-creation-output-header h2 {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 1.3rem;
+  color: var(--navy);
+  margin: 0 0 4px;
+}
+
+.brand-creation-output-header p {
+  color: #9ca3af;
+  font-size: 0.9rem;
+  margin: 0;
 }
 
 .creation-step {
@@ -3135,10 +3197,10 @@ input:focus, select:focus, textarea:focus {
 .brand-creation-error {
   background: #fef2f2;
   color: var(--danger);
-  padding: 12px 16px;
-  border-radius: 10px;
-  font-size: 0.9rem;
-  margin-bottom: 16px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 0.82rem;
+  margin-bottom: 8px;
 }
 
 .brand-creation-sections {
@@ -3303,16 +3365,6 @@ input:focus, select:focus, textarea:focus {
   border-radius: 10px;
   flex-shrink: 0;
   object-fit: cover;
-}
-
-.brand-creation-footer {
-  margin-top: 32px;
-  text-align: center;
-}
-
-.brand-creation-footer .btn {
-  padding: 14px 40px;
-  font-size: 1.05rem;
 }
 
 /* --- Meme Studio --- */
