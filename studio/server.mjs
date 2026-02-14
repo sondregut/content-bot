@@ -246,19 +246,19 @@ async function generateWithLoRA(loraUrl, prompt, { loraModel, aspectRatio = '9:1
 const FAL_VIDEO_ENDPOINT = 'https://queue.fal.run/fal-ai/kling-video/v3/standard/text-to-video';
 
 function buildVideoPrompt(data, brand) {
-  const c = brand.colors || {};
   const scene = data.scene || data.headline || 'dynamic product showcase';
   const mood = data.mood || 'energetic and professional';
   const cameraMove = data.cameraMove || 'slow tracking shot';
 
   return [
+    `Brand: ${brand.name}.`,
     brand.imageStyle ? `Visual style: ${brand.imageStyle}.` : null,
-    `Scene: ${scene}. The color palette features ${c.primary || 'dark'} as the dominant background tone with ${c.accent || 'bright'} accent highlights.`,
-    `Mood: ${mood}. ${brand.defaultBackground || ''}`.trim(),
-    `Camera: ${cameraMove}, cinematic lighting, shallow depth of field.`,
-    `Technical: Vertical 9:16 format, social media style, ${data.duration || 5} seconds.`,
-    'No text, watermarks, or logos in the generated video.',
-  ].filter(Boolean).join('\n\n');
+    brand.defaultBackground ? `Brand aesthetic: ${brand.defaultBackground}.` : null,
+    `Scene: ${scene}.`,
+    `Mood: ${mood}.`,
+    `Camera: ${cameraMove}.`,
+    `Duration: ${data.duration || 5} seconds.`,
+  ].filter(Boolean).join('\n');
 }
 
 async function generateVideoSlide(prompt, options = {}) {
@@ -277,7 +277,7 @@ async function generateVideoSlide(prompt, options = {}) {
       duration: String(options.duration || 5),
       aspect_ratio: options.aspectRatio || '9:16',
       generate_audio: options.audio || false,
-      negative_prompt: 'blur, distort, low quality, text, watermark',
+      negative_prompt: 'blur, distortion, low quality, morphing, flickering, disfigured hands, extra fingers, watermark, text overlay, logo, compression artifacts',
     }),
   });
 
@@ -1933,15 +1933,53 @@ CRITICAL: Respect the brand's visual style direction. Do not override it with ge
 
 Return ONLY the refined prompt text. No preamble, no explanation, no markdown formatting.`;
 
+const VIDEO_REFINEMENT_INSTRUCTIONS = `Your job: Transform a raw video brief into an optimized prompt for Kling 3.0 AI video generation.
+
+PROMPT STRUCTURE (follow this order):
+1. Scene & environment — describe the setting, lighting, time of day
+2. Subject & appearance — who/what is in frame, what they look like, what they wear
+3. Action & motion — describe what HAPPENS over time ("starts with... transitions to... ends with..."). Video needs change — never describe a static scene.
+4. Camera movement — use cinematic terms: tracking shot, dolly-in, dolly-out, crane shot, pan, tilt, orbit, steadicam, handheld, push-in, low-angle, FPV drone. Describe movement relative to the subject.
+5. Atmosphere — lighting quality (golden hour, volumetric, Rembrandt, soft studio), depth of field, color grading feel
+
+KLING 3.0 BEST PRACTICES:
+- Think like a Director of Photography — describe time, space, and intent
+- Use ++double plus++ markers around the most important visual element to emphasize it
+- Add motion/physics details: dust kicked up, hair flowing, fabric rippling, light rays shifting — Kling handles these well
+- Use speed modifiers for camera: "slowly," "smoothly," "rapidly"
+- Keep to one camera movement per shot — simultaneous complex movements cause warping
+- Describe colors as natural language ("warm amber tones", "deep navy atmosphere", "electric orange accents") — never use hex codes
+- 50-150 words is the sweet spot — shorter lacks detail, longer introduces conflicts
+
+AVOID:
+- Hex color codes (#FF6B35) — the model doesn't understand them
+- Static descriptions with no motion or change over time
+- Conflicting instructions (e.g. "golden hour" + "studio lighting")
+- Abstract quality words alone ("beautiful", "amazing", "cinematic") — pair with specifics
+- Any text, watermarks, or logos in the video — text is overlaid separately afterward
+- AI-tell words: "perfect", "flawless", "ultra-detailed", "8K", "hyper-realistic", "masterpiece"
+- Mentioning aspect ratio or duration — these are set as API parameters
+
+BRAND ADAPTATION:
+- Translate the brand's visual identity into natural language that Kling understands
+- Match the brand's energy level and aesthetic (premium vs playful, minimal vs bold)
+- Use the brand's color palette as atmospheric/lighting direction, not literal color instructions
+
+Return ONLY the refined prompt. No preamble, no explanation, no markdown.`;
+
 async function refinePromptWithClaude(rawPrompt, slideType, formData, brand, req) {
   try {
-    const refinementInstructions = slideType === 'meme' ? MEME_REFINEMENT_INSTRUCTIONS : BASE_REFINEMENT_INSTRUCTIONS;
+    const refinementInstructions = slideType === 'meme'
+      ? MEME_REFINEMENT_INSTRUCTIONS
+      : slideType === 'video'
+        ? VIDEO_REFINEMENT_INSTRUCTIONS
+        : BASE_REFINEMENT_INSTRUCTIONS;
     const systemPrompt = `${brand.systemPrompt}\n\n${refinementInstructions}`;
     let context;
     if (slideType === 'meme') {
       context = `This is a MEME for ${brand.name}. It must look like a genuine internet meme — informal, humorous, culturally aware. Do NOT apply carousel rules (no safe zones, no TikTok composition, no professional typography). Preserve the meme format and humor. Only refine for text legibility and spelling accuracy. Keep the raw, authentic meme aesthetic. CRITICAL: If the user prompt mentions real people by name (Drake, celebrities, public figures), replace them with generic characters — OpenAI will reject prompts depicting real people.`;
     } else if (slideType === 'video') {
-      context = `This is a VIDEO prompt for ${brand.name} using Kling 3.0 AI video generation. Use cinematic language: describe camera movements (tracking shot, dolly-in, crane, handheld, pan), motion over time ("starts with... transitions to... ends with..."), and maintain brand visual identity. Do NOT request any text, watermarks, or logos in the video — text will be overlaid separately. Keep the prompt under 500 words. Focus on visual storytelling, mood, and motion.`;
+      context = `This is a VIDEO prompt for ${brand.name} using Kling 3.0 AI video generation. Transform the brief below into a cinematic prompt optimized for Kling 3.0. The brand's colors are: ${Object.entries(brand.colors || {}).map(([k,v]) => `${k}: ${v}`).join(', ')} — translate these into natural atmospheric/lighting descriptions, never pass hex codes to Kling.`;
     } else if (slideType === 'photo') {
       context = `This is a photo-led slide for ${brand.name} featuring a ${formData.sport || 'person in action'} scene with text overlay.`;
     } else {
