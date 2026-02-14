@@ -1,0 +1,40 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Brands: users can only access brands they created
+    match /carousel_brands/{brandId} {
+      allow read, write: if request.auth != null
+                         && resource.data.createdBy == request.auth.uid;
+      allow create: if request.auth != null
+                    && request.resource.data.createdBy == request.auth.uid;
+    }
+
+    // Generated images (vault): users can only access their own
+    match /generated_images/{imageId} {
+      allow read, write: if request.auth != null
+                         && resource.data.userId == request.auth.uid;
+      allow create: if request.auth != null
+                    && request.resource.data.userId == request.auth.uid;
+    }
+
+    // TikTok tokens: doc ID must match user's UID
+    match /tiktok_tokens/{uid} {
+      allow read, write: if request.auth != null
+                         && request.auth.uid == uid;
+    }
+
+    // TikTok posts: users can only access their own
+    match /tiktok_posts/{postId} {
+      allow read, write: if request.auth != null
+                         && resource.data.userId == request.auth.uid;
+      allow create: if request.auth != null
+                    && request.resource.data.userId == request.auth.uid;
+    }
+
+    // Deny all other collections
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

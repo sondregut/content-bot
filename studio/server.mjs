@@ -215,10 +215,16 @@ async function uploadToStorage(buffer, filename) {
     await fs.writeFile(path.join(outputDir, filename), buffer);
     return `/output/${filename}`;
   }
-  const file = bucket.file(`carousel-studio/${filename}`);
-  await file.save(buffer, { metadata: { contentType: 'image/png' } });
-  const [url] = await file.getSignedUrl({ action: 'read', expires: Date.now() + 2 * 60 * 60 * 1000 });
-  return url;
+  try {
+    const file = bucket.file(`carousel-studio/${filename}`);
+    await file.save(buffer, { metadata: { contentType: 'image/png' } });
+    const [url] = await file.getSignedUrl({ action: 'read', expires: Date.now() + 2 * 60 * 60 * 1000 });
+    return url;
+  } catch (err) {
+    console.error('[Storage Upload] Failed, falling back to local disk:', err.message);
+    await fs.writeFile(path.join(outputDir, filename), buffer);
+    return `/output/${filename}`;
+  }
 }
 
 // --- Save image record to Firestore for vault ---
