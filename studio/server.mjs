@@ -242,8 +242,27 @@ async function generateWithLoRA(loraUrl, prompt, { loraModel, aspectRatio = '9:1
   return Buffer.from(await imgRes.arrayBuffer());
 }
 
-// --- Video Generation (Kling 3.0 via fal.ai) ---
-const FAL_VIDEO_ENDPOINT = 'https://queue.fal.run/fal-ai/kling-video/v3/standard/text-to-video';
+// --- Video Generation ---
+const FAL_VIDEO_ENDPOINTS = {
+  'kling-v3-standard': 'https://queue.fal.run/fal-ai/kling-video/v3/standard/text-to-video',
+  'kling-v3-pro': 'https://queue.fal.run/fal-ai/kling-video/v3/pro/text-to-video',
+  'kling-v2-master': 'https://queue.fal.run/fal-ai/kling-video/v2/master/text-to-video',
+};
+
+const VIDEO_MODEL_NAMES = {
+  'kling-v3-standard': 'Kling 3.0',
+  'kling-v3-pro': 'Kling 3.0 Pro',
+  'kling-v2-master': 'Kling 2.0 Master',
+  'veo-2': 'Veo 2',
+  'veo-3': 'Veo 3',
+  'veo-3.1': 'Veo 3.1',
+};
+
+const VEO_API_MODELS = {
+  'veo-2': 'veo-2.0-generate-001',
+  'veo-3': 'veo-3.0-generate-preview',
+  'veo-3.1': 'veo-3.1-generate-preview',
+};
 
 function buildVideoPrompt(data, brand) {
   const scene = data.scene || data.headline || 'dynamic product showcase';
@@ -261,12 +280,56 @@ function buildVideoPrompt(data, brand) {
   ].filter(Boolean).join('\n');
 }
 
-async function generateVideoSlide(prompt, options = {}) {
-  const { falKey } = options;
-  if (!falKey) throw new Error('Fal.ai API key not configured. Add it in Settings.');
+function resolveVideoModel(data) {
+  return data.videoModel || 'kling-v3-standard';
+}
 
-  // Submit to fal.ai queue
-  const submitRes = await fetch(FAL_VIDEO_ENDPOINT, {
+async function generateVideoSlide(prompt, options = {}) {
+  const videoModel = options.videoModel || 'kling-v3-standard';
+
+  // Veo models via Google Generative AI
+  if (VEO_API_MODELS[videoModel]) {
+    const gemini = options.gemini;
+    const modelLabel = VIDEO_MODEL_NAMES[videoModel] || videoModel;
+    if (!gemini) throw new Error(`Add your Google Gemini API key in Settings to use ${modelLabel}.`);
+    const response = await gemini.models.generateVideos({
+      model: VEO_API_MODELS[videoModel],
+      prompt,
+      config: {
+        aspectRatio: options.aspectRatio === '16:9' ? '16:9' : '9:16',
+        numberOfVideos: 1,
+        durationSeconds: Math.min(options.duration || 5, 8),
+        personGeneration: 'allow_all',
+      },
+    });
+    // Poll Veo operation
+    let op = response;
+    const deadline = Date.now() + 600_000;
+    while (!op.done && Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 5000));
+      op = await gemini.operations.get({ operation: op });
+    }
+    if (!op.done) throw new Error(`${modelLabel} video generation timed out`);
+    const videoData = op.response?.generatedVideos?.[0]?.video;
+    if (!videoData?.uri) throw new Error(`${modelLabel} returned no video`);
+    // Download the video from the URI
+    const dlRes = await fetch(videoData.uri, { headers: { 'Authorization': `Bearer ${options.geminiKey}` } });
+    if (!dlRes.ok) {
+      // Try fetching without auth (public URI)
+      const dlRes2 = await fetch(videoData.uri);
+      if (!dlRes2.ok) throw new Error(`Failed to download ${modelLabel} video`);
+      return videoData.uri;
+    }
+    return videoData.uri;
+  }
+
+  // Kling models via fal.ai
+  const { falKey } = options;
+  if (!falKey) throw new Error('Add your Fal.ai API key in Settings for Kling video generation.');
+
+  const endpoint = FAL_VIDEO_ENDPOINTS[videoModel] || FAL_VIDEO_ENDPOINTS['kling-v3-standard'];
+
+  const submitRes = await fetch(endpoint, {
     method: 'POST',
     headers: {
       'Authorization': `Key ${falKey}`,
@@ -276,7 +339,7 @@ async function generateVideoSlide(prompt, options = {}) {
       prompt,
       duration: String(options.duration || 5),
       aspect_ratio: options.aspectRatio || '9:16',
-      generate_audio: options.audio || false,
+      generate_audio: options.audio !== false,
       negative_prompt: 'blur, distortion, low quality, morphing, flickering, disfigured hands, extra fingers, watermark, text overlay, logo, compression artifacts',
     }),
   });
@@ -290,7 +353,6 @@ async function generateVideoSlide(prompt, options = {}) {
   const { request_id, status_url, response_url } = submitData;
   if (!request_id) throw new Error('fal.ai did not return a request_id');
 
-  // Poll for completion (timeout after 10 min)
   const deadline = Date.now() + 600_000;
   while (Date.now() < deadline) {
     await new Promise(r => setTimeout(r, 5000));
@@ -300,7 +362,6 @@ async function generateVideoSlide(prompt, options = {}) {
     if (!statusRes.ok) continue;
     const status = await statusRes.json();
     if (status.status === 'COMPLETED') {
-      // Fetch the result
       const resultRes = await fetch(response_url, {
         headers: { 'Authorization': `Key ${falKey}` },
       });
@@ -3489,19 +3550,26 @@ Pick a DIFFERENT format each time. Do NOT default to two-panel approval.`,
       });
     }
 
-    // Video generation (Kling 3.0 via fal.ai)
+    // Video generation
     if (data.slideType === 'video') {
-      if (!isFalEnabled(req)) return res.status(400).json({ error: 'Fal.ai API key required for video generation. Add it in Settings.' });
-      console.log(`[Generate] ${brand.name} | Video clip | ${data.duration || 5}s`);
+      const videoModel = resolveVideoModel(data);
+      const isVeo = Boolean(VEO_API_MODELS[videoModel]);
+      if (!isVeo && !isFalEnabled(req)) return res.status(400).json({ error: 'Fal.ai API key required for Kling video generation. Add it in Settings.' });
+      if (isVeo && !getGemini(req)) return res.status(400).json({ error: `Google Gemini API key required for ${VIDEO_MODEL_NAMES[videoModel] || videoModel}. Add it in Settings.` });
+      const modelName = VIDEO_MODEL_NAMES[videoModel] || videoModel;
+      console.log(`[Generate] ${brand.name} | Video (${modelName}) | ${data.duration || 5}s`);
       const rawPrompt = buildVideoPrompt(data, brand);
       const refinedPrompt = await refinePromptWithClaude(rawPrompt, 'video', data, brand, req);
       const prompt = refinedPrompt || rawPrompt;
 
       const videoUrl = await generateVideoSlide(prompt, {
+        videoModel,
         duration: data.duration || 5,
         aspectRatio: '9:16',
         audio: data.audio || false,
         falKey: req.headers['x-fal-key'],
+        gemini: isVeo ? getGemini(req) : null,
+        geminiKey: req.headers['x-gemini-key'],
       });
 
       const videoRes = await fetch(videoUrl);
@@ -3526,7 +3594,7 @@ Pick a DIFFERENT format each time. Do NOT default to two-panel approval.`,
       const slug = crypto.randomUUID().slice(0, 8);
       const filename = `video_${brandId}_${Date.now()}_${slug}.mp4`;
       const url = await uploadVideoToStorage(videoBuffer, filename);
-      saveImageRecord({ userId: req.user?.uid, brandId, filename, type: 'video', prompt: rawPrompt, refinedPrompt, model: 'kling-3.0', brandName: brand.name });
+      saveImageRecord({ userId: req.user?.uid, brandId, filename, type: 'video', prompt: rawPrompt, refinedPrompt, model: modelName, brandName: brand.name });
 
       return res.json({
         ok: true, filename, url, isVideo: true,
@@ -3813,19 +3881,26 @@ app.post('/api/generate-carousel', requireAuth, generationLimiter, async (req, r
           continue;
         }
 
-        // Video slides: Kling 3.0 via fal.ai
+        // Video slides
         if (slideData.slideType === 'video') {
-          if (!isFalEnabled(req)) throw new Error('Fal.ai API key required for video generation');
-          console.log(`[Carousel ${jobId}] ${brand.name} | Slide ${i + 1}/${slides.length} (video)`);
+          const videoModel = resolveVideoModel(slideData);
+          const isVeo = Boolean(VEO_API_MODELS[videoModel]);
+          if (!isVeo && !isFalEnabled(req)) throw new Error('Fal.ai API key required for Kling video generation');
+          if (isVeo && !getGemini(req)) throw new Error(`Google Gemini API key required for ${VIDEO_MODEL_NAMES[videoModel] || videoModel}`);
+          const vidModelName = VIDEO_MODEL_NAMES[videoModel] || videoModel;
+          console.log(`[Carousel ${jobId}] ${brand.name} | Slide ${i + 1}/${slides.length} (video: ${vidModelName})`);
           const rawPrompt = buildVideoPrompt(slideData, brand);
           const refined = await refinePromptWithClaude(rawPrompt, 'video', slideData, brand, req);
           const prompt = refined || rawPrompt;
 
           const videoUrl = await generateVideoSlide(prompt, {
+            videoModel,
             duration: slideData.duration || 5,
             aspectRatio: '9:16',
             audio: slideData.audio || false,
             falKey: req.headers['x-fal-key'],
+            gemini: isVeo ? getGemini(req) : null,
+            geminiKey: req.headers['x-gemini-key'],
           });
 
           // Download video to local storage
@@ -3851,7 +3926,7 @@ app.post('/api/generate-carousel', requireAuth, generationLimiter, async (req, r
           const slug = crypto.randomUUID().slice(0, 8);
           const filename = `carousel_${brand.id}_${jobId}_s${i + 1}_${slug}.mp4`;
           const slideUrl = await uploadVideoToStorage(videoBuffer, filename);
-          saveImageRecord({ userId: req.user?.uid, brandId: brand.id, filename, type: 'carousel-video', prompt: rawPrompt, refinedPrompt: refined, model: 'kling-3.0', brandName: brand.name });
+          saveImageRecord({ userId: req.user?.uid, brandId: brand.id, filename, type: 'carousel-video', prompt: rawPrompt, refinedPrompt: refined, model: vidModelName, brandName: brand.name });
 
           job.slides.push({ slideNumber: i + 1, url: slideUrl, filename, ok: true, isVideo: true });
           job.completed = i + 1;
