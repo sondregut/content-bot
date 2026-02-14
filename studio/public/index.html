@@ -80,6 +80,18 @@
               <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
             </optgroup>
           </select>
+          <select class="app-dropdown" id="video-model-select">
+            <optgroup label="Kling (fal.ai)">
+              <option value="kling-v3-standard">Kling 3.0</option>
+              <option value="kling-v3-pro">Kling 3.0 Pro</option>
+              <option value="kling-v2-master">Kling 2.0 Master</option>
+            </optgroup>
+            <optgroup label="Google (Gemini key)">
+              <option value="veo-3.1">Veo 3.1</option>
+              <option value="veo-3">Veo 3</option>
+              <option value="veo-2">Veo 2</option>
+            </optgroup>
+          </select>
           <button class="header-btn" id="header-media-btn" title="Media Library" aria-label="Media Library">&#128194;</button>
           <button class="header-btn" id="settings-btn" title="Settings" aria-label="Settings">&#9881;</button>
         </div>
@@ -505,6 +517,16 @@
 
               <div class="form-section" id="video-fields" style="display:none">
                 <div class="form-row">
+                  <div class="form-group">
+                    <label class="label" for="video-method">Video Method</label>
+                    <select name="videoMethod" id="video-method">
+                      <option value="ai">AI Video (Kling/Veo)</option>
+                      <option value="ken-burns">Ken Burns (image + zoom) — free</option>
+                    </select>
+                  </div>
+                </div>
+                <div id="ai-video-fields">
+                <div class="form-row">
                   <div class="form-group full">
                     <label class="label" for="video-scene">Scene Description</label>
                     <textarea name="videoScene" id="video-scene" rows="2" placeholder="A runner mid-stride on an urban track at golden hour..."></textarea>
@@ -562,6 +584,35 @@
                       <span class="field-hint">Burns headline &amp; body onto video. Uncheck for raw AI video.</span>
                     </div>
                   </div>
+                </div>
+                </div><!-- /ai-video-fields -->
+                <div id="ken-burns-fields" style="display:none">
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label class="label">Setting / Background</label>
+                      <input name="kbSetting" id="kb-setting" type="text" placeholder="Urban track at golden hour, mountain trail..." />
+                    </div>
+                    <div class="form-group">
+                      <label class="label">Mood</label>
+                      <input name="kbMood" id="kb-mood" type="text" placeholder="Energetic, cinematic, serene..." />
+                    </div>
+                  </div>
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label class="label" for="kb-duration">Duration</label>
+                      <select name="kbDuration" id="kb-duration">
+                        <option value="5">5 seconds</option>
+                        <option value="10">10 seconds</option>
+                      </select>
+                    </div>
+                    <div class="form-group">
+                      <label class="checkbox" style="margin-top:20px">
+                        <input type="checkbox" name="kbTextOverlay" id="kb-text-overlay" checked />
+                        Text overlay on video
+                      </label>
+                    </div>
+                  </div>
+                  <span class="field-hint">Uses AI-generated or uploaded image with slow zoom animation. Free &amp; instant.</span>
                 </div>
               </div>
 
@@ -1167,14 +1218,14 @@
             <span class="field-hint">Used for Gemini/Imagen image generation and Gemini text models. Get one at <a href="https://aistudio.google.com/apikey" target="_blank" style="color:var(--cyan)">aistudio.google.com/apikey</a></span>
           </div>
           <div class="form-group full">
-            <label class="label" for="settings-fal-key">Fal.ai API Key (face personalization)</label>
+            <label class="label" for="settings-fal-key">Fal.ai API Key (video generation + face personalization)</label>
             <div class="api-key-input-wrap">
               <input type="password" id="settings-fal-key" placeholder="fal-..." />
               <button type="button" class="api-key-toggle" data-target="settings-fal-key" title="Show/hide key">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path class="eye-open" d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle class="eye-open" cx="12" cy="12" r="3"/><line class="eye-closed" style="display:none" x1="1" y1="1" x2="23" y2="23"/><path class="eye-closed" style="display:none" d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/></svg>
               </button>
             </div>
-            <span class="field-hint">Used for Flux Kontext Pro face-consistent image generation. Get one at <a href="https://fal.ai/dashboard/keys" target="_blank" style="color:var(--cyan)">fal.ai/dashboard/keys</a></span>
+            <span class="field-hint">Used for Kling video generation and Flux Kontext Pro face-consistent images. Get one at <a href="https://fal.ai/dashboard/keys" target="_blank" style="color:var(--cyan)">fal.ai/dashboard/keys</a></span>
           </div>
           <div class="settings-divider"></div>
           <p class="field-hint" style="margin-bottom:12px">To post carousels to TikTok, create a TikTok Developer App at <a href="https://developers.tiktok.com" target="_blank" style="color:var(--cyan)">developers.tiktok.com</a> and add this callback URL: <code style="color:var(--cyan);font-size:0.85em">&lt;your-domain&gt;/api/tiktok/callback</code></p>

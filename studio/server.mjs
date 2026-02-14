@@ -1631,6 +1631,81 @@ async function overlayPngOnVideo(videoBuffer, overlayPngBuffer, outputPath) {
   }
 }
 
+// Generate a Ken Burns video from a still image (slow zoom-out with subtle drift)
+async function generateKenBurnsVideo(imageBuffer, { duration = 5, overlayPng = null, includeOwl = false, owlPosition, brand } = {}) {
+  const fps = 30;
+  const totalFrames = duration * fps;
+
+  // Resize input image to 1080x1920, then upscale to give headroom for zoom
+  const scale = 1.15; // 115% start -> 100% end
+  const zoomW = Math.round(1080 * scale);
+  const zoomH = Math.round(1920 * scale);
+  const resizedBuf = await sharp(imageBuffer).resize(zoomW, zoomH, { fit: 'cover' }).png().toBuffer();
+
+  const imgTmp = path.join(outputDir, `kb_img_${crypto.randomUUID().slice(0, 8)}.png`);
+  const outPath = path.join(outputDir, `kb_out_${crypto.randomUUID().slice(0, 8)}.mp4`);
+
+  try {
+    await fs.writeFile(imgTmp, resizedBuf);
+
+    // zoompan: zoom from 1.15 to 1.0 (zoom-out), with subtle x drift
+    // zoom = 1.15 - 0.15 * (on/totalFrames) => starts at 1.15, ends at 1.0
+    // x drifts slightly right over the duration
+    const zoomExpr = `'if(eq(on,0),1.15,zoom-0.15/${totalFrames})'`;
+    const xExpr = `'iw/2-(iw/zoom/2)+on*0.15'`; // subtle rightward drift
+    const yExpr = `'ih/2-(ih/zoom/2)'`; // centered vertically
+
+    const filterComplex = `zoompan=z=${zoomExpr}:x=${xExpr}:y=${yExpr}:d=${totalFrames}:s=1080x1920:fps=${fps},format=yuv420p`;
+
+    await new Promise((resolve, reject) => {
+      const args = [
+        '-loop', '1',
+        '-i', imgTmp,
+        '-filter_complex', filterComplex,
+        '-t', String(duration),
+        '-codec:v', 'libx264',
+        '-preset', 'ultrafast',
+        '-crf', '18',
+        '-pix_fmt', 'yuv420p',
+        '-y', outPath,
+      ];
+      const proc = spawn(ffmpegPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+      let stderr = '';
+      proc.stderr.on('data', d => stderr += d.toString());
+      proc.on('close', code => {
+        if (code === 0) resolve();
+        else reject(new Error(`ffmpeg ken-burns exited with code ${code}: ${stderr.slice(-500)}`));
+      });
+      proc.on('error', reject);
+    });
+
+    let videoBuffer = await fs.readFile(outPath);
+
+    // Composite text overlay + icon if provided
+    if (overlayPng || includeOwl) {
+      let overlay = overlayPng;
+      if (includeOwl && overlay && brand) {
+        overlay = await addAppIconOverlay(overlay, owlPosition, brand);
+      } else if (includeOwl && !overlay && brand) {
+        // Create blank overlay just for icon
+        overlay = await sharp({ create: { width: 1080, height: 1920, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } }).png().toBuffer();
+        overlay = await addAppIconOverlay(overlay, owlPosition, brand);
+      }
+      if (overlay) {
+        const finalPath = path.join(outputDir, `kb_final_${crypto.randomUUID().slice(0, 8)}.mp4`);
+        await overlayPngOnVideo(videoBuffer, overlay, finalPath);
+        videoBuffer = await fs.readFile(finalPath);
+        await fs.unlink(finalPath).catch(() => {});
+      }
+    }
+
+    return videoBuffer;
+  } finally {
+    await fs.unlink(imgTmp).catch(() => {});
+    await fs.unlink(outPath).catch(() => {});
+  }
+}
+
 async function generateMockupSlide(data, brand) {
   const themeFn = MOCKUP_THEMES[data.mockupTheme] || MOCKUP_THEMES.dark;
   const theme = themeFn(brand);
@@ -3572,6 +3647,53 @@ Pick a DIFFERENT format each time. Do NOT default to two-panel approval.`,
 
     // Video generation
     if (data.slideType === 'video') {
+      // Ken Burns: generate video from still image with zoom animation
+      if (data.videoMethod === 'ken-burns') {
+        console.log(`[Generate] ${brand.name} | Ken Burns video | ${data.duration || 5}s`);
+
+        let imageBuffer;
+        // Use uploaded reference image if available, otherwise generate with AI
+        if (data.referenceImage) {
+          const refPath = path.join(uploadsDir, data.referenceImage);
+          imageBuffer = await fs.readFile(refPath);
+        } else {
+          const rawPrompt = buildPhotoPrompt(data, brand);
+          const refinedPrompt = await refinePromptWithClaude(rawPrompt, 'photo', data, brand, req);
+          const prompt = refinedPrompt || rawPrompt;
+          imageBuffer = await generateImage({
+            model: data.imageModel,
+            prompt,
+            size: '1024x1536',
+            quality: data.quality || 'high',
+            req,
+          });
+        }
+
+        // Generate text overlay if enabled
+        const overlayPng = data.videoTextOverlay ? await generateVideoTextOverlay(data, brand) : null;
+
+        const videoBuffer = await generateKenBurnsVideo(imageBuffer, {
+          duration: data.duration || 5,
+          overlayPng,
+          includeOwl: data.includeOwl,
+          owlPosition: data.owlPosition,
+          brand,
+        });
+
+        const slug = crypto.randomUUID().slice(0, 8);
+        const filename = `video_${brandId}_kb_${Date.now()}_${slug}.mp4`;
+        const url = await uploadVideoToStorage(videoBuffer, filename);
+        saveImageRecord({ userId: req.user?.uid, brandId, filename, type: 'video', prompt: 'Ken Burns', model: 'ken-burns', brandName: brand.name });
+
+        return res.json({
+          ok: true, filename, url, isVideo: true,
+          prompt: 'Ken Burns effect',
+          refinedPrompt: null,
+          usedRefined: false,
+        });
+      }
+
+      // AI Video generation (Kling/Veo)
       const videoModel = resolveVideoModel(data);
       const isVeo = Boolean(VEO_API_MODELS[videoModel]);
       if (!isVeo && !isFalEnabled(req)) return res.status(400).json({ error: 'Fal.ai API key required for Kling video generation. Add it in Settings.' });
@@ -3903,6 +4025,47 @@ app.post('/api/generate-carousel', requireAuth, generationLimiter, async (req, r
 
         // Video slides
         if (slideData.slideType === 'video') {
+          // Ken Burns: generate video from still image with zoom animation
+          if (slideData.videoMethod === 'ken-burns') {
+            console.log(`[Carousel ${jobId}] ${brand.name} | Slide ${i + 1}/${slides.length} (ken-burns)`);
+
+            let imageBuffer;
+            if (slideData.referenceImage) {
+              const refPath = path.join(uploadsDir, slideData.referenceImage);
+              imageBuffer = await fs.readFile(refPath);
+            } else {
+              const rawPrompt = buildPhotoPrompt(slideData, brand);
+              const refined = await refinePromptWithClaude(rawPrompt, 'photo', slideData, brand, req);
+              imageBuffer = await generateImage({
+                model: slideData.imageModel,
+                prompt: refined || rawPrompt,
+                size: '1024x1536',
+                quality: slideData.quality || 'high',
+                req,
+              });
+            }
+
+            const overlayPng = slideData.videoTextOverlay ? await generateVideoTextOverlay(slideData, brand) : null;
+
+            const videoBuffer = await generateKenBurnsVideo(imageBuffer, {
+              duration: slideData.duration || 5,
+              overlayPng,
+              includeOwl: slideData.includeOwl,
+              owlPosition: slideData.owlPosition,
+              brand,
+            });
+
+            const slug = crypto.randomUUID().slice(0, 8);
+            const filename = `carousel_${brand.id}_${jobId}_s${i + 1}_${slug}.mp4`;
+            const slideUrl = await uploadVideoToStorage(videoBuffer, filename);
+            saveImageRecord({ userId: req.user?.uid, brandId: brand.id, filename, type: 'carousel-video', prompt: 'Ken Burns', model: 'ken-burns', brandName: brand.name });
+
+            job.slides.push({ slideNumber: i + 1, url: slideUrl, filename, ok: true, isVideo: true });
+            job.completed = i + 1;
+            continue;
+          }
+
+          // AI Video (Kling/Veo)
           const videoModel = resolveVideoModel(slideData);
           const isVeo = Boolean(VEO_API_MODELS[videoModel]);
           if (!isVeo && !isFalEnabled(req)) throw new Error('Fal.ai API key required for Kling video generation');

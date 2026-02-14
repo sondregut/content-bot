@@ -2452,7 +2452,7 @@ function renderSlideTabs() {
     const s = slideEdits[i];
     const active = i === currentSlideIndex ? 'active' : '';
     const generated = generatedImages[i] ? 'generated' : '';
-    const typeIcon = s.type === 'photo' ? 'P' : s.type === 'mockup' ? 'M' : 'T';
+    const typeIcon = s.type === 'video' ? 'V' : s.type === 'photo' ? 'P' : s.type === 'mockup' ? 'M' : 'T';
     const hasSlideRef = slideReferenceImages[i] ? 'has-ref' : '';
     html += `<button class="slide-tab ${active} ${generated} ${hasSlideRef}" data-index="${i}">`;
     html += `<span class="tab-num">${s.number}</span>`;
@@ -2536,12 +2536,19 @@ function loadSlideIntoForm(index) {
   }
 
   // Video fields
+  const vmSelect = document.getElementById('video-method');
+  if (vmSelect) vmSelect.value = slide.videoMethod || 'ai';
   if (form.elements.videoScene) form.elements.videoScene.value = slide.scene || '';
   if (form.elements.videoMood) form.elements.videoMood.value = slide.videoMood || 'energetic and dynamic';
   if (form.elements.videoCamera) form.elements.videoCamera.value = slide.cameraMove || 'slow tracking shot';
   if (form.elements.videoDuration) form.elements.videoDuration.value = slide.duration || '5';
   if (form.elements.videoAudio) form.elements.videoAudio.checked = slide.audio || false;
   if (form.elements.videoTextOverlay) form.elements.videoTextOverlay.checked = slide.videoTextOverlay ?? true;
+  // Ken Burns fields
+  if (form.elements.kbSetting) form.elements.kbSetting.value = slide.kbSetting || '';
+  if (form.elements.kbMood) form.elements.kbMood.value = slide.kbMood || '';
+  if (form.elements.kbDuration) form.elements.kbDuration.value = slide.duration || '5';
+  if (form.elements.kbTextOverlay) form.elements.kbTextOverlay.checked = slide.videoTextOverlay ?? true;
 
   // Color overrides
   const textColorEnabled = document.getElementById('mockupTextColorEnabled');
@@ -2677,12 +2684,20 @@ function saveCurrentSlideEdits() {
     slide.textColor = textColorEnabled?.checked ? form.elements.mockupTextColor?.value : null;
     slide.microColor = accentColorEnabled?.checked ? form.elements.mockupAccentColor?.value : null;
   } else if (slide.type === 'video') {
-    slide.scene = form.elements.videoScene?.value || '';
-    slide.videoMood = form.elements.videoMood?.value || 'energetic and dynamic';
-    slide.cameraMove = form.elements.videoCamera?.value || 'slow tracking shot';
-    slide.duration = parseInt(form.elements.videoDuration?.value) || 5;
-    slide.audio = form.elements.videoAudio?.checked || false;
-    slide.videoTextOverlay = form.elements.videoTextOverlay?.checked ?? true;
+    slide.videoMethod = document.getElementById('video-method')?.value || 'ai';
+    if (slide.videoMethod === 'ken-burns') {
+      slide.kbSetting = form.elements.kbSetting?.value || '';
+      slide.kbMood = form.elements.kbMood?.value || '';
+      slide.duration = parseInt(form.elements.kbDuration?.value) || 5;
+      slide.videoTextOverlay = form.elements.kbTextOverlay?.checked ?? true;
+    } else {
+      slide.scene = form.elements.videoScene?.value || '';
+      slide.videoMood = form.elements.videoMood?.value || 'energetic and dynamic';
+      slide.cameraMove = form.elements.videoCamera?.value || 'slow tracking shot';
+      slide.duration = parseInt(form.elements.videoDuration?.value) || 5;
+      slide.audio = form.elements.videoAudio?.checked || false;
+      slide.videoTextOverlay = form.elements.videoTextOverlay?.checked ?? true;
+    }
   }
 }
 
@@ -2737,10 +2752,21 @@ function toggleTypeFields() {
   }
   screenshotWarning.style.display = 'none';
 
-  // Hide reference sections for mockup/video (they are ignored server-side)
+  // Toggle video method sub-fields
+  const videoMethodSelect = document.getElementById('video-method');
+  const aiVideoFields = document.getElementById('ai-video-fields');
+  const kenBurnsFields = document.getElementById('ken-burns-fields');
+  if (type === 'video' && videoMethodSelect) {
+    const method = videoMethodSelect.value;
+    if (aiVideoFields) aiVideoFields.style.display = method === 'ai' ? '' : 'none';
+    if (kenBurnsFields) kenBurnsFields.style.display = method === 'ken-burns' ? '' : 'none';
+  }
+
+  // Hide reference sections for mockup/video (they are ignored server-side, except ken-burns)
   const slideRefSection = document.querySelector('.slide-ref-section');
   const refSection = document.querySelector('.ref-section');
-  const hideRef = type === 'mockup' || type === 'video';
+  const isKenBurns = type === 'video' && videoMethodSelect?.value === 'ken-burns';
+  const hideRef = type === 'mockup' || (type === 'video' && !isKenBurns);
   if (slideRefSection) slideRefSection.style.display = hideRef ? 'none' : '';
   if (refSection) refSection.style.display = hideRef ? 'none' : '';
 
@@ -2748,7 +2774,9 @@ function toggleTypeFields() {
     photo: 'AI-generated photo with text overlay',
     text: 'Solid background with text — no AI',
     mockup: 'Your image + text rendered locally (free, instant)',
-    video: 'AI-generated 5\u201310s video clip',
+    video: videoMethodSelect?.value === 'ken-burns'
+      ? 'Image with slow zoom animation \u2014 free & instant'
+      : 'AI-generated 5\u201310s video clip',
   };
   document.getElementById('slideTypeHint').textContent = hints[type] || '';
 
@@ -2784,6 +2812,10 @@ function toggleMockupPhoneOptions() {
 slideTypeSelect.addEventListener('change', () => {
   toggleTypeFields();
   updatePreviewMockup();
+});
+
+document.getElementById('video-method')?.addEventListener('change', () => {
+  toggleTypeFields();
 });
 
 // --- Advanced Fields Toggle ---
@@ -3900,13 +3932,21 @@ function buildSlidePayload(slide, slideIndex) {
     if (slide.textColor) payload.textColor = slide.textColor;
     if (slide.microColor) payload.microColor = slide.microColor;
   } else if (payload.slideType === 'video') {
-    payload.videoModel = getSelectedVideoModel();
-    payload.scene = slide.scene || form.elements.videoScene?.value || '';
-    payload.mood = slide.videoMood || form.elements.videoMood?.value || 'energetic and dynamic';
-    payload.cameraMove = slide.cameraMove || form.elements.videoCamera?.value || 'slow tracking shot';
-    payload.duration = slide.duration || parseInt(form.elements.videoDuration?.value) || 5;
-    payload.audio = slide.audio || form.elements.videoAudio?.checked || false;
-    payload.videoTextOverlay = form.elements.videoTextOverlay?.checked ?? true;
+    payload.videoMethod = slide.videoMethod || document.getElementById('video-method')?.value || 'ai';
+    if (payload.videoMethod === 'ken-burns') {
+      payload.setting = slide.kbSetting || form.elements.kbSetting?.value || '';
+      payload.mood = slide.kbMood || form.elements.kbMood?.value || '';
+      payload.duration = slide.duration || parseInt(form.elements.kbDuration?.value) || 5;
+      payload.videoTextOverlay = form.elements.kbTextOverlay?.checked ?? true;
+    } else {
+      payload.videoModel = getSelectedVideoModel();
+      payload.scene = slide.scene || form.elements.videoScene?.value || '';
+      payload.mood = slide.videoMood || form.elements.videoMood?.value || 'energetic and dynamic';
+      payload.cameraMove = slide.cameraMove || form.elements.videoCamera?.value || 'slow tracking shot';
+      payload.duration = slide.duration || parseInt(form.elements.videoDuration?.value) || 5;
+      payload.audio = slide.audio || form.elements.videoAudio?.checked || false;
+      payload.videoTextOverlay = form.elements.videoTextOverlay?.checked ?? true;
+    }
     payload.headlineFontSize = slide.headlineFontSize || parseInt(form.elements.headlineFontSize?.value) || 82;
     payload.bodyFontSize = slide.bodyFontSize || parseInt(form.elements.bodyFontSize?.value) || 34;
     payload.fontFamily = slide.fontFamily || form.elements.mockupFont?.value || 'Helvetica';
