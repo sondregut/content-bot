@@ -2276,7 +2276,7 @@ async function generateMoreIdeas() {
       caption: idea.caption || '',
       slides: (idea.slides || []).map((s, si) => ({ ...s, number: s.number || si + 1, type: s.type || 'text' })),
     }));
-    console.log('[generateMoreIdeas] format:', format, 'slides:', newIdeas.map(i => ({ id: i.id, numSlides: i.slides.length, type: i.slides[0]?.type })));
+    console.log(`[generateMoreIdeas] format=${format} newIdea: id=${newIdeas[0]?.id} slides=${newIdeas[0]?.slides.length} type=${newIdeas[0]?.slides[0]?.type}`);
     let aiCat = app.categories.find(c => c.name === 'AI-Generated Ideas');
     if (aiCat) {
       aiCat.ideas.push(...newIdeas);
@@ -2289,19 +2289,22 @@ async function generateMoreIdeas() {
     const formatEl = document.getElementById('sidebar-format-select');
     if (formatEl) {
       formatEl.value = selectedFormat;
-      // Also re-hide slides input if video
       const slidesInput = document.getElementById('sidebar-slides-input');
       if (slidesInput) slidesInput.style.display = selectedFormat === 'video' ? 'none' : '';
     }
-    // Clear the prompt input (sidebar was re-rendered so the DOM element is fresh, but clear just in case)
+    // Clear the prompt input
     const promptEl = document.getElementById('sidebar-prompt-input');
     if (promptEl) promptEl.value = '';
+    // Auto-select the newly generated idea
+    if (newIdeas.length > 0) {
+      selectIdea(newIdeas[0].id);
+    }
     // Update content plan grid if visible
     const contentPlanView = document.getElementById('content-plan-view');
     if (contentPlanView && contentPlanView.style.display !== 'none') {
       const brandObj = brands.find(b => b.id === currentBrand);
       const allUpdatedIdeas = app.categories.flatMap(c => c.ideas);
-      document.getElementById('content-plan-subtitle').textContent = `${allUpdatedIdeas.length} carousel ideas for ${brandObj?.name || 'Brand'}`;
+      document.getElementById('content-plan-subtitle').textContent = `${allUpdatedIdeas.length} ideas for ${brandObj?.name || 'Brand'}`;
       renderContentPlanGrid(allUpdatedIdeas, brandObj);
     }
   } catch (err) {
