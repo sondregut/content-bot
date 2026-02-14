@@ -265,6 +265,7 @@ let pendingIconUrl = null;
 let currentSlideIndex = 0;
 let slideEdits = [];
 let generatedImages = {};
+let generatedImagesCache = {}; // { ideaId: { slideIndex: { url, filename, isVideo } } }
 let batchJobId = null;
 let pollTimer = null;
 let referenceImageFilename = null;
@@ -285,6 +286,7 @@ function resetAppState() {
   currentSlideIndex = 0;
   slideEdits = [];
   generatedImages = {};
+  generatedImagesCache = {};
 
   // Generation state
   batchJobId = null;
@@ -472,6 +474,12 @@ function getSelectedImageModel() {
 const textModelSelect = document.getElementById('text-model-select');
 function getSelectedTextModel() {
   return textModelSelect ? textModelSelect.value : 'claude-haiku-4-5-20251001';
+}
+
+// Video model selector
+const videoModelSelect = document.getElementById('video-model-select');
+function getSelectedVideoModel() {
+  return videoModelSelect ? videoModelSelect.value : 'kling-v3-standard';
 }
 
 // Loading spinner refs
@@ -1169,6 +1177,7 @@ brandSelector.addEventListener('change', async () => {
   selectedIdea = null;
   currentSlideIndex = 0;
   generatedImages = {};
+  generatedImagesCache = {};
   slideEdits = [];
   editorArea.style.display = 'none';
   personalizeView.style.display = 'none';
@@ -2332,9 +2341,14 @@ function selectIdea(ideaId) {
     el.classList.toggle('active', el.dataset.ideaId === ideaId);
   });
 
+  // Save current idea's generated images before switching
+  if (selectedIdea) {
+    generatedImagesCache[selectedIdea.id] = generatedImages;
+  }
+
   selectedIdea = idea;
   currentSlideIndex = 0;
-  generatedImages = {};
+  generatedImages = generatedImagesCache[idea.id] || {};
   batchJobId = null;
   slideReferenceImages = {};
 
@@ -2378,6 +2392,11 @@ function loadFreeformContent(data) {
   if (generateAbort) generateAbort.abort();
   loadingSpinner.classList.remove('active');
 
+  // Save current idea's generated images before switching
+  if (selectedIdea) {
+    generatedImagesCache[selectedIdea.id] = generatedImages;
+  }
+
   selectedIdea = {
     id: 'AI',
     title: data.title || 'Freeform Carousel',
@@ -2386,7 +2405,7 @@ function loadFreeformContent(data) {
   };
 
   currentSlideIndex = 0;
-  generatedImages = {};
+  generatedImages = generatedImagesCache[selectedIdea.id] || {};
   batchJobId = null;
   slideReferenceImages = {};
 
@@ -3881,6 +3900,7 @@ function buildSlidePayload(slide, slideIndex) {
     if (slide.textColor) payload.textColor = slide.textColor;
     if (slide.microColor) payload.microColor = slide.microColor;
   } else if (payload.slideType === 'video') {
+    payload.videoModel = getSelectedVideoModel();
     payload.scene = slide.scene || form.elements.videoScene?.value || '';
     payload.mood = slide.videoMood || form.elements.videoMood?.value || 'energetic and dynamic';
     payload.cameraMove = slide.cameraMove || form.elements.videoCamera?.value || 'slow tracking shot';
@@ -4941,8 +4961,14 @@ const SESSION_KEY = 'carousel-studio-session';
 
 function saveSession() {
   try {
+    // Stash current idea's images into cache before saving
+    const cacheToSave = { ...generatedImagesCache };
+    if (selectedIdea && Object.keys(generatedImages).length > 0) {
+      cacheToSave[selectedIdea.id] = generatedImages;
+    }
     const session = {
       generatedImages,
+      generatedImagesCache: cacheToSave,
       slideEdits,
       selectedIdeaId: selectedIdea?.id || null,
       selectedIdeaTitle: selectedIdea?.title || null,
@@ -4967,6 +4993,9 @@ function restoreSession(rawSession) {
     }
     if (session.generatedImages && Object.keys(session.generatedImages).length > 0) {
       generatedImages = session.generatedImages;
+    }
+    if (session.generatedImagesCache) {
+      generatedImagesCache = session.generatedImagesCache;
     }
     if (session.slideReferenceImages) slideReferenceImages = session.slideReferenceImages;
     if (session.referenceImageFilename) referenceImageFilename = session.referenceImageFilename;
