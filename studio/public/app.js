@@ -182,6 +182,7 @@ let pollTimer = null;
 let referenceImageFilename = null;
 let screenshotImageFilename = null;
 let slideReferenceImages = {}; // { slideIndex: { filename, displayName } }
+let generateAbort = null; // AbortController for in-flight single-slide generation
 
 // --- DOM refs ---
 const brandSelector = document.getElementById('brand-selector');
@@ -498,6 +499,10 @@ function renderBrandSelector() {
 }
 
 brandSelector.addEventListener('change', async () => {
+  if (generateAbort) generateAbort.abort();
+  loadingSpinner.classList.remove('active');
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+
   currentBrand = brandSelector.value;
   selectedIdea = null;
   currentSlideIndex = 0;
@@ -1057,6 +1062,9 @@ function renderSidebar() {
 
 // --- Idea Selection ---
 function selectIdea(ideaId) {
+  if (generateAbort) generateAbort.abort();
+  loadingSpinner.classList.remove('active');
+
   const app = contentData.apps[0];
   let idea = null;
   for (const cat of app.categories) {
@@ -1095,6 +1103,9 @@ function selectIdea(ideaId) {
 
 // --- Load freeform-generated content as idea ---
 function loadFreeformContent(data) {
+  if (generateAbort) generateAbort.abort();
+  loadingSpinner.classList.remove('active');
+
   selectedIdea = {
     id: 'AI',
     title: data.title || 'Freeform Carousel',
@@ -2177,42 +2188,55 @@ form.addEventListener('submit', async (e) => {
   e.preventDefault();
   saveCurrentSlideEdits();
 
-  const slide = slideEdits[currentSlideIndex];
-  const payload = buildSlidePayload(slide, currentSlideIndex);
+  if (generateAbort) generateAbort.abort();
+  generateAbort = new AbortController();
+  const signal = generateAbort.signal;
+  const slideIndex = currentSlideIndex;
 
-  statusEl.textContent = `Generating slide ${currentSlideIndex + 1}...`;
+  const slide = slideEdits[slideIndex];
+  const payload = buildSlidePayload(slide, slideIndex);
+
+  statusEl.textContent = `Generating slide ${slideIndex + 1}...`;
   previewImg.style.display = 'none';
   downloadButtons.style.display = 'none';
   loadingSpinner.classList.add('active');
-  spinnerText.textContent = `Generating slide ${currentSlideIndex + 1}...`;
+  spinnerText.textContent = `Generating slide ${slideIndex + 1}...`;
 
   try {
     const res = await authFetch('/api/generate', {
       method: 'POST',
       body: JSON.stringify(payload),
+      signal,
     });
 
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Generation failed');
 
-    generatedImages[currentSlideIndex] = { url: data.url, filename: data.filename };
-    previewImg.src = data.url;
-    previewImg.style.display = 'block';
-    downloadButtons.style.display = 'flex';
-    statusEl.textContent = data.usedRefined
-      ? `Slide ${currentSlideIndex + 1} done (Claude-refined).`
-      : `Slide ${currentSlideIndex + 1} done.`;
+    generatedImages[slideIndex] = { url: data.url, filename: data.filename };
+
+    // Only update UI if still viewing this slide
+    if (currentSlideIndex === slideIndex) {
+      previewImg.src = data.url;
+      previewImg.style.display = 'block';
+      downloadButtons.style.display = 'flex';
+      statusEl.textContent = data.usedRefined
+        ? `Slide ${slideIndex + 1} done (Claude-refined).`
+        : `Slide ${slideIndex + 1} done.`;
+      updatePreviewDragOverlay();
+    }
 
     renderSlideTabs();
     updateGallery();
     updateEditSection();
-    updatePreviewDragOverlay();
     saveSession();
     addToVault(data.url, data.filename);
   } catch (err) {
+    if (err.name === 'AbortError') return;
     statusEl.textContent = `Error: ${err.message}`;
   } finally {
-    loadingSpinner.classList.remove('active');
+    if (currentSlideIndex === slideIndex) {
+      loadingSpinner.classList.remove('active');
+    }
   }
 });
 
@@ -2230,8 +2254,13 @@ function updateEditSection() {
 applyEditBtn.addEventListener('click', async () => {
   const instructions = editInstructions.value.trim();
   if (!instructions) return;
-  const gen = generatedImages[currentSlideIndex];
+  const slideIndex = currentSlideIndex;
+  const gen = generatedImages[slideIndex];
   if (!gen) return;
+
+  if (generateAbort) generateAbort.abort();
+  generateAbort = new AbortController();
+  const signal = generateAbort.signal;
 
   applyEditBtn.disabled = true;
   statusEl.textContent = 'Editing slide...';
@@ -2248,25 +2277,32 @@ applyEditBtn.addEventListener('click', async () => {
         imageModel: getSelectedImageModel(),
         brand: currentBrand,
       }),
+      signal,
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Edit failed');
 
-    generatedImages[currentSlideIndex] = { url: data.url, filename: data.filename };
-    previewImg.src = data.url;
-    previewImg.style.display = 'block';
-    statusEl.textContent = `Slide ${currentSlideIndex + 1} edited.`;
-    editInstructions.value = '';
+    generatedImages[slideIndex] = { url: data.url, filename: data.filename };
+
+    if (currentSlideIndex === slideIndex) {
+      previewImg.src = data.url;
+      previewImg.style.display = 'block';
+      statusEl.textContent = `Slide ${slideIndex + 1} edited.`;
+      editInstructions.value = '';
+    }
 
     renderSlideTabs();
     updateGallery();
     saveSession();
     addToVault(data.url, data.filename);
   } catch (err) {
+    if (err.name === 'AbortError') return;
     statusEl.textContent = `Edit error: ${err.message}`;
   } finally {
     applyEditBtn.disabled = false;
-    loadingSpinner.classList.remove('active');
+    if (currentSlideIndex === slideIndex) {
+      loadingSpinner.classList.remove('active');
+    }
   }
 });
 
