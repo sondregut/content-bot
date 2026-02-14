@@ -151,11 +151,12 @@ document.getElementById('delete-account-btn').addEventListener('click', async ()
     const data = await res.json();
     if (data.ok) {
       clearSession();
-      if (firebase.apps.length) await firebase.auth().signOut();
-      document.getElementById('settings-modal').style.display = 'none';
-      document.getElementById('login-overlay').classList.add('visible');
-      document.getElementById('app-shell').style.display = 'none';
       alert('Your account has been deleted.');
+      if (firebase.apps.length) {
+        await firebase.auth().signOut();
+      } else {
+        window.location.reload();
+      }
     } else {
       alert(data.error || 'Failed to delete account');
     }

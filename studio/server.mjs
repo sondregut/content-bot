@@ -1598,18 +1598,26 @@ app.delete('/api/brands/:id', requireAuth, async (req, res) => {
 app.delete('/api/account', requireAuth, async (req, res) => {
   try {
     const uid = req.user.uid;
-    if (!admin.apps.length) return res.status(500).json({ error: 'Firebase not configured' });
 
-    // Delete all user's brands from Firestore
+    // Delete all user's brands from Firestore or local storage
     if (db) {
       const brands = await db.collection('carousel_brands').where('createdBy', '==', uid).get();
       const batch = db.batch();
       brands.forEach(doc => batch.delete(doc.ref));
       await batch.commit();
+    } else {
+      const allBrands = await readLocalBrands();
+      for (const [id, brand] of Object.entries(allBrands)) {
+        if (brand.createdBy === uid) delete allBrands[id];
+      }
+      await writeLocalBrands(allBrands);
     }
 
-    // Delete the Firebase Auth user
-    await admin.auth().deleteUser(uid);
+    // Delete the Firebase Auth user (only when Firebase admin is available)
+    if (admin.apps.length) {
+      await admin.auth().deleteUser(uid);
+    }
+
     res.json({ ok: true });
   } catch (err) {
     console.error('[Delete Account]', err);
