@@ -2877,6 +2877,7 @@ slideRefInput.addEventListener('change', async () => {
       slideRefClear.style.display = 'inline-block';
       renderSlideTabs();
       updatePreviewImageOverlay();
+      updatePreviewMockup();
     } else {
       slideRefFilename.textContent = 'Upload failed';
     }
@@ -2896,6 +2897,7 @@ slideRefClear.addEventListener('click', () => {
   slideRefInput.value = '';
   renderSlideTabs();
   updatePreviewImageOverlay();
+  updatePreviewMockup();
 });
 
 // --- Build payload ---
