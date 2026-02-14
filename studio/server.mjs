@@ -4170,15 +4170,7 @@ app.post('/api/generate-content-ideas', requireAuth, async (req, res) => {
     const microLabel = brand.defaultMicroLabel || brand.name.toUpperCase();
     const count = numIdeas || 5;
     let userPrompt;
-    if (brand.contentIdeaPrompt) {
-      userPrompt = brand.contentIdeaPrompt
-        .replace(/\{\{brand_name\}\}/g, brand.name)
-        .replace(/\{\{website_url\}\}/g, websiteUrl)
-        .replace(/\{\{page_title\}\}/g, pageTitle)
-        .replace(/\{\{meta_description\}\}/g, metaDesc)
-        .replace(/\{\{website_text\}\}/g, websiteText)
-        .replace(/\{\{micro_label\}\}/g, microLabel);
-    } else if (format === 'video') {
+    if (format === 'video') {
       userPrompt = `Based on this website content, generate ${count} short-form VIDEO content idea(s) for ${brand.name}'s social media (TikTok/Instagram Reels).
 
 Website: ${websiteUrl}
@@ -4220,6 +4212,14 @@ Rules:
 - Body: 1 short sentence max
 - Caption: hook line first (under 125 chars), then value, then CTA, then 3-5 hashtags
 - Content must be based on REAL information from the website`;
+    } else if (brand.contentIdeaPrompt) {
+      userPrompt = brand.contentIdeaPrompt
+        .replace(/\{\{brand_name\}\}/g, brand.name)
+        .replace(/\{\{website_url\}\}/g, websiteUrl)
+        .replace(/\{\{page_title\}\}/g, pageTitle)
+        .replace(/\{\{meta_description\}\}/g, metaDesc)
+        .replace(/\{\{website_text\}\}/g, websiteText)
+        .replace(/\{\{micro_label\}\}/g, microLabel);
     } else {
       userPrompt = buildContentIdeasPrompt({ brand, microLabel, websiteUrl, pageTitle, metaDesc, websiteText, numIdeas: count, slidesPerIdea });
     }
@@ -4266,7 +4266,7 @@ Rules:
     if (format === 'video') {
       ideas = ideas.map(idea => ({
         ...idea,
-        slides: (idea.slides || []).map(s => ({ ...s, type: 'video' })),
+        slides: [{ ...(idea.slides?.[0] || {}), type: 'video' }],
       }));
     }
     console.log(`[Content Ideas] ${brand.name} | Generated ${ideas.length} ideas | format=${format || 'carousel'}`);
