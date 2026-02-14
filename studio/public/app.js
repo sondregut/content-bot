@@ -2245,16 +2245,17 @@ async function generateMoreIdeas() {
   const btn = document.getElementById('sidebar-generate-more-btn');
   const status = document.getElementById('sidebar-more-status');
   if (!btn || !currentBrand) return;
+  const format = document.getElementById('sidebar-format-select')?.value || 'carousel';
+  const isVideoFormat = format === 'video';
   btn.disabled = true;
-  btn.textContent = 'Generating...';
+  btn.innerHTML = `<span class="sidebar-btn-spinner"></span>${isVideoFormat ? 'Generating video idea...' : 'Generating idea...'}`;
+  btn.classList.add('generating');
   if (status) status.textContent = '';
   try {
     const app = contentData?.apps?.[0];
     const allIdeas = app?.categories?.flatMap(c => c.ideas) || [];
     const existingTitles = allIdeas.map(i => i.title);
     const startIndex = allIdeas.length;
-    const format = document.getElementById('sidebar-format-select')?.value || 'carousel';
-    const isVideoFormat = format === 'video';
     const res = await authFetch('/api/generate-content-ideas', {
       method: 'POST',
       body: JSON.stringify({
@@ -2296,7 +2297,8 @@ async function generateMoreIdeas() {
     if (status) status.textContent = `Error: ${err.message}`;
   } finally {
     btn.disabled = false;
-    btn.textContent = '+ Generate Idea';
+    btn.classList.remove('generating');
+    btn.innerHTML = '+ Generate Idea';
   }
 }
 

@@ -4224,8 +4224,15 @@ app.post('/api/generate-content-ideas', requireAuth, async (req, res) => {
       throw new Error('Failed to parse AI response as JSON');
     }
 
-    const ideas = parsed.ideas || [];
-    console.log(`[Content Ideas] ${brand.name} | Generated ${ideas.length} ideas`);
+    let ideas = parsed.ideas || [];
+    // Enforce video type when format=video (LLM may not always set it)
+    if (format === 'video') {
+      ideas = ideas.map(idea => ({
+        ...idea,
+        slides: (idea.slides || []).map(s => ({ ...s, type: 'video' })),
+      }));
+    }
+    console.log(`[Content Ideas] ${brand.name} | Generated ${ideas.length} ideas | format=${format || 'carousel'}`);
 
     // Persist so ideas survive refresh/brand-switch
     const idStart = startIndex || 0;
