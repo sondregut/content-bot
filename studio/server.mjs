@@ -2529,7 +2529,7 @@ Return ONLY a JSON array of 12 strings, no other text.`
       }]
     });
 
-    const text = msg.content[0].text.trim();
+    const text = msg.content[0].text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
     const topics = JSON.parse(text);
     res.json({ topics });
   } catch (err) {
