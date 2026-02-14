@@ -1753,6 +1753,17 @@ function selectIdea(ideaId) {
   ideaBadge.textContent = idea.id;
   ideaTitle.textContent = idea.title;
 
+  // Populate caption editor
+  const captionEditor = document.getElementById('caption-editor');
+  const captionTextarea = document.getElementById('caption-textarea');
+  if (idea.caption) {
+    captionTextarea.value = idea.caption;
+    captionEditor.style.display = 'block';
+  } else {
+    captionTextarea.value = '';
+    captionEditor.style.display = 'block';
+  }
+
   renderSlideTabs();
   loadSlideIntoForm(0);
   updatePreviewMockup();
@@ -2094,6 +2105,14 @@ document.getElementById('headlineFontSize').addEventListener('input', () => {
 document.getElementById('bodyFontSize').addEventListener('input', () => {
   document.getElementById('bodyFontSizeValue').textContent = document.getElementById('bodyFontSize').value;
   updatePreviewMockup();
+});
+
+// Caption editor saves edits back to selectedIdea
+document.getElementById('caption-textarea').addEventListener('input', (e) => {
+  if (selectedIdea) {
+    selectedIdea.caption = e.target.value;
+    saveSession();
+  }
 });
 
 // Layout/highlight/overlay controls trigger preview update
@@ -3420,6 +3439,9 @@ function updateGallery() {
       document.body.removeChild(a);
     });
   });
+
+  // Update TikTok post UI when gallery changes
+  if (typeof updateTikTokUI === 'function') updateTikTokUI();
 }
 
 // --- Screenshot Upload (Mockup) ---
@@ -3705,7 +3727,7 @@ async function loadStoredFacePhotos(brandId) {
     if (storedFacePhotos.length > 0 && faceImageFiles.length === 0) {
       renderFacePhotos();
     }
-  } catch { storedFacePhotos = []; }
+  } catch (err) { console.warn('[Face Photos] Load failed:', err.message); storedFacePhotos = []; }
 }
 
 function closePersonalizeView() {
@@ -4381,12 +4403,6 @@ function pollTikTokPostStatus(publishId) {
   }, 2000);
 }
 
-// Hook into gallery updates to show/hide post button
-const _originalUpdateGallery = updateGallery;
-updateGallery = function () {
-  _originalUpdateGallery();
-  updateTikTokUI();
-};
 
 // --- Session Persistence (localStorage) ---
 // =============================================
@@ -4402,6 +4418,9 @@ function saveSession() {
       selectedIdeaTitle: selectedIdea?.title || null,
       currentBrand,
       currentSlideIndex,
+      slideReferenceImages,
+      referenceImageFilename,
+      screenshotImageFilename,
     };
     localStorage.setItem(SESSION_KEY, JSON.stringify(session));
   } catch { /* quota exceeded — ignore */ }
@@ -4416,6 +4435,9 @@ function restoreSession() {
     if (session.generatedImages && Object.keys(session.generatedImages).length > 0) {
       generatedImages = session.generatedImages;
     }
+    if (session.slideReferenceImages) slideReferenceImages = session.slideReferenceImages;
+    if (session.referenceImageFilename) referenceImageFilename = session.referenceImageFilename;
+    if (session.screenshotImageFilename) screenshotImageFilename = session.screenshotImageFilename;
     if (session.slideEdits && session.slideEdits.length > 0) {
       slideEdits = session.slideEdits;
       // Reconstruct selectedIdea from saved data
@@ -4488,7 +4510,7 @@ async function fetchVaultCount() {
     const data = await res.json();
     const el = document.getElementById('vault-count');
     if (el) el.textContent = data.count || 0;
-  } catch { /* ignore */ }
+  } catch (err) { console.warn('[Vault] Count fetch failed:', err.message); }
 }
 
 // Images are auto-saved server-side now; just refresh the count
