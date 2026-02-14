@@ -75,7 +75,7 @@ body {
 
 .login-card p {
   font-size: 0.9rem;
-  color: #6b7280;
+  color: var(--muted);
   margin: 0 0 24px;
 }
 
@@ -118,7 +118,7 @@ body {
   align-items: center;
   gap: 12px;
   margin: 20px 0;
-  color: #9ca3af;
+  color: var(--text-secondary);
   font-size: 0.82rem;
 }
 
@@ -156,7 +156,7 @@ body {
 .auth-toggle {
   margin-top: 16px;
   font-size: 0.85rem;
-  color: #6b7280;
+  color: var(--muted);
 }
 
 .auth-toggle-btn {
@@ -357,7 +357,7 @@ body {
 
 .idea-count {
   font-size: 0.75rem;
-  color: #9ca3af;
+  color: var(--text-secondary);
   font-weight: 600;
 }
 
@@ -370,7 +370,7 @@ body {
 .sidebar-loading, .sidebar-error {
   padding: 24px 18px;
   text-align: center;
-  color: #9ca3af;
+  color: var(--text-secondary);
   font-size: 0.9rem;
 }
 
@@ -461,7 +461,7 @@ body {
 
 .idea-slides-count {
   font-size: 0.7rem;
-  color: #9ca3af;
+  color: var(--text-secondary);
   flex-shrink: 0;
 }
 
@@ -481,7 +481,7 @@ body {
   justify-content: flex-start;
   padding-top: 40px;
   text-align: center;
-  color: #9ca3af;
+  color: var(--text-secondary);
 }
 
 .empty-icon { font-size: 3rem; margin-bottom: 12px; opacity: 0.4; }
@@ -1211,7 +1211,7 @@ input:focus, select:focus, textarea:focus {
 
 .field-hint {
   font-size: 0.72rem;
-  color: #9ca3af;
+  color: var(--text-secondary);
   margin-top: 2px;
   display: block;
 }
@@ -1230,7 +1230,7 @@ input:focus, select:focus, textarea:focus {
   right: 8px;
   background: none;
   border: none;
-  color: #9ca3af;
+  color: var(--text-secondary);
   cursor: pointer;
   padding: 4px;
   display: flex;
@@ -1276,7 +1276,7 @@ input:focus, select:focus, textarea:focus {
 
 .ref-filename {
   font-size: 0.82rem;
-  color: #6b7280;
+  color: var(--muted);
 }
 
 .ref-preview-img {
@@ -1343,7 +1343,7 @@ input:focus, select:focus, textarea:focus {
   font-weight: 700;
   cursor: pointer;
   transition: all 0.15s;
-  color: #6b7280;
+  color: var(--muted);
 }
 
 .corner-btn:hover { border-color: var(--cyan); }
@@ -1392,7 +1392,7 @@ input:focus, select:focus, textarea:focus {
 
 .screenshot-filename {
   font-size: 0.82rem;
-  color: #6b7280;
+  color: var(--muted);
 }
 
 /* Buttons */
@@ -1537,7 +1537,7 @@ input:focus, select:focus, textarea:focus {
 #headlineFontSizeValue,
 #bodyFontSizeValue {
   font-weight: 400;
-  color: #9ca3af;
+  color: var(--text-secondary);
   font-size: 0.72rem;
 }
 
@@ -1705,7 +1705,7 @@ input:focus, select:focus, textarea:focus {
 
 .auto-generate-hint {
   font-size: 0.82rem;
-  color: #6b7280;
+  color: var(--muted);
   margin: 8px 0 0;
 }
 
@@ -1736,7 +1736,7 @@ input:focus, select:focus, textarea:focus {
 
 .section-divider span {
   font-size: 0.82rem;
-  color: #9ca3af;
+  color: var(--text-secondary);
   white-space: nowrap;
 }
 
@@ -1762,7 +1762,7 @@ input:focus, select:focus, textarea:focus {
 
 .freeform-hint {
   font-size: 0.82rem;
-  color: #6b7280;
+  color: var(--muted);
   margin: 0 0 10px;
 }
 
@@ -1820,7 +1820,7 @@ input:focus, select:focus, textarea:focus {
 
 .personalize-cta p {
   font-size: 0.85rem;
-  color: #6b7280;
+  color: var(--muted);
   margin: 0 0 14px;
 }
 
@@ -1854,7 +1854,7 @@ input:focus, select:focus, textarea:focus {
 .face-photo-count {
   font-size: 0.75rem;
   font-weight: 500;
-  color: #9ca3af;
+  color: var(--text-secondary);
   margin-left: 6px;
 }
 
@@ -1874,7 +1874,7 @@ input:focus, select:focus, textarea:focus {
 
 .brand-face-photo-status {
   font-size: 0.8rem;
-  color: #9ca3af;
+  color: var(--text-secondary);
   margin-top: 6px;
   min-height: 1.2em;
 }
@@ -1936,7 +1936,7 @@ input:focus, select:focus, textarea:focus {
   border-radius: 10px;
   border: 2px dashed var(--border);
   background: transparent;
-  color: #9ca3af;
+  color: var(--text-secondary);
   font-size: 1.8rem;
   cursor: pointer;
   display: flex;
@@ -2071,7 +2071,7 @@ input:focus, select:focus, textarea:focus {
   grid-column: 1 / -1;
   text-align: center;
   padding: 40px 16px;
-  color: #9ca3af;
+  color: var(--text-secondary);
   font-size: 0.85rem;
 }
 
@@ -2136,7 +2136,7 @@ input:focus, select:focus, textarea:focus {
   background: none;
   font-size: 1.2rem;
   cursor: pointer;
-  color: #6b7280;
+  color: var(--muted);
   border-radius: 6px;
 }
 
@@ -2182,8 +2182,8 @@ input:focus, select:focus, textarea:focus {
 .brand-modal-wide { width: 560px; max-width: 95vw; }
 .brand-modal-wide .modal-body { max-height: 70vh; overflow-y: auto; }
 
-.brand-add-btn {
-  font-size: 1.2rem !important;
+button.brand-add-btn {
+  font-size: 1.2rem;
   font-weight: 700;
   width: 32px;
   height: 32px;
@@ -2193,8 +2193,8 @@ input:focus, select:focus, textarea:focus {
   justify-content: center;
 }
 
-.brand-edit-btn {
-  font-size: 0.85rem !important;
+button.brand-edit-btn {
+  font-size: 0.85rem;
   width: 32px;
   height: 32px;
   padding: 0;
@@ -2635,7 +2635,7 @@ input:focus, select:focus, textarea:focus {
   border-radius: 8px;
   border: none;
   background: transparent;
-  color: #6b7280;
+  color: var(--muted);
   font-size: 1.3rem;
   cursor: pointer;
   display: flex;
@@ -2706,13 +2706,13 @@ input:focus, select:focus, textarea:focus {
   display: block;
   text-align: right;
   font-size: 0.72rem;
-  color: #9ca3af;
+  color: var(--text-secondary);
   margin-top: 4px;
 }
 
 .tiktok-field-note {
   font-size: 0.75rem;
-  color: #9ca3af;
+  color: var(--text-secondary);
   margin: 4px 0 0;
   line-height: 1.4;
 }
@@ -2752,7 +2752,7 @@ input:focus, select:focus, textarea:focus {
 .tiktok-section-label {
   font-size: 0.75rem;
   font-weight: 600;
-  color: #6b7280;
+  color: var(--muted);
   margin: 0 0 8px;
 }
 
@@ -2896,7 +2896,7 @@ input:focus, select:focus, textarea:focus {
   border-radius: 8px;
   border: none;
   background: transparent;
-  color: #6b7280;
+  color: var(--muted);
   font-size: 1.3rem;
   cursor: pointer;
   display: flex;
@@ -3246,7 +3246,7 @@ input:focus, select:focus, textarea:focus {
   border-radius: 6px;
   border: 1px solid var(--border);
   background: none;
-  color: #6b7280;
+  color: var(--muted);
   font-size: 1.1rem;
   cursor: pointer;
   display: flex;
@@ -3331,7 +3331,7 @@ input:focus, select:focus, textarea:focus {
 }
 
 .brand-creation-output-header p {
-  color: #9ca3af;
+  color: var(--text-secondary);
   font-size: 0.9rem;
   margin: 0;
 }
@@ -3341,7 +3341,7 @@ input:focus, select:focus, textarea:focus {
   align-items: center;
   gap: 6px;
   font-size: 0.82rem;
-  color: #9ca3af;
+  color: var(--text-secondary);
   transition: color 0.3s;
 }
 
@@ -3416,7 +3416,7 @@ input:focus, select:focus, textarea:focus {
 .creation-section h3 {
   font-family: 'Space Grotesk', sans-serif;
   font-size: 0.9rem;
-  color: #6b7280;
+  color: var(--muted);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   margin: 0 0 12px;
@@ -3431,7 +3431,7 @@ input:focus, select:focus, textarea:focus {
 
 .creation-brand-info p {
   font-size: 0.9rem;
-  color: #6b7280;
+  color: var(--muted);
   margin: 0;
   line-height: 1.5;
 }
@@ -3458,13 +3458,13 @@ input:focus, select:focus, textarea:focus {
 
 .creation-swatch-label {
   font-size: 0.7rem;
-  color: #9ca3af;
+  color: var(--text-secondary);
   text-transform: capitalize;
 }
 
 .creation-swatch-hex {
   font-size: 0.68rem;
-  color: #6b7280;
+  color: var(--muted);
   font-family: monospace;
 }
 
@@ -3503,7 +3503,7 @@ input:focus, select:focus, textarea:focus {
 
 .creation-config-content .config-label {
   font-weight: 600;
-  color: #6b7280;
+  color: var(--muted);
   font-size: 0.78rem;
   text-transform: uppercase;
   letter-spacing: 0.03em;
@@ -3553,7 +3553,7 @@ input:focus, select:focus, textarea:focus {
 
 .creation-idea-slides {
   font-size: 0.78rem;
-  color: #9ca3af;
+  color: var(--text-secondary);
 }
 
 .creation-carousel-strip {
@@ -3612,7 +3612,7 @@ input:focus, select:focus, textarea:focus {
 }
 
 .meme-placeholder {
-  color: var(--text-secondary, #9ca3af);
+  color: var(--text-secondary);
   font-size: 0.9rem;
   padding: 40px;
   text-align: center;
@@ -3646,3 +3646,76 @@ input:focus, select:focus, textarea:focus {
 .creation-icon-preview { cursor: pointer; }
 .creation-images-grid img { cursor: pointer; }
 .brand-image-thumb { cursor: pointer; }
+
+/* --- Reduced Motion --- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* --- Focus Visible --- */
+:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, a:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+
+/* --- Mobile Responsive --- */
+@media (max-width: 600px) {
+  .app-header {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px 12px;
+  }
+
+  .header-brand-section {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .editor-columns {
+    flex-direction: column;
+  }
+
+  .editor-left-col, .editor-right-col {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .form-row {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .form-row > * {
+    width: 100%;
+  }
+
+  .personalize-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .color-pickers {
+    flex-wrap: wrap;
+  }
+
+  .color-pickers .color-picker-item {
+    width: 100%;
+  }
+
+  .scenario-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .slide-tabs {
+    flex-wrap: wrap;
+  }
+}
