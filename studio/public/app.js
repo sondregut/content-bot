@@ -39,6 +39,10 @@ async function authFetch(url, opts = {}) {
   if (user) {
     overlay.classList.remove('visible');
     appShell.style.display = 'flex';
+    // Reset state from any previous user session
+    brands = [];
+    currentBrand = null;
+    clearSession();
     // Init app
     loadApiKeysFromStorage();
     try {
@@ -57,6 +61,8 @@ async function authFetch(url, opts = {}) {
       }
     } catch (err) {
       console.error('Failed to load brands:', err);
+      brands = [];
+      currentBrand = null;
     }
     if (currentBrand) {
       await loadContentIdeas();
