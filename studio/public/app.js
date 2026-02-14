@@ -1,3 +1,12 @@
+// --- Image lightbox ---
+function openLightbox(src) {
+  const overlay = document.createElement('div');
+  overlay.className = 'lightbox-overlay';
+  overlay.innerHTML = `<img src="${src}" class="lightbox-img" />`;
+  overlay.addEventListener('click', () => overlay.remove());
+  document.body.appendChild(overlay);
+}
+
 // --- Default brand values (must match GENERIC_BRAND in server.mjs) ---
 const DEFAULT_BRAND_COLORS = { primary: '#1A1A2E', accent: '#E94560', white: '#FFFFFF', secondary: '#16213E', cta: '#0F3460' };
 const DEFAULT_BACKGROUND = 'dark premium background with subtle grain';
@@ -913,6 +922,8 @@ function handleCreationEvent(event, data) {
         const section = document.getElementById('creation-section-icon');
         const img = document.getElementById('creation-icon-preview');
         img.src = data.url;
+        img.style.cursor = 'pointer';
+        img.onclick = () => openLightbox(data.url);
         img.onerror = () => { section.style.display = 'none'; };
         section.style.display = 'block';
       }
@@ -928,6 +939,8 @@ function handleCreationEvent(event, data) {
           const el = document.createElement('img');
           el.src = img.url;
           el.loading = 'lazy';
+          el.style.cursor = 'pointer';
+          el.onclick = () => openLightbox(img.url);
           el.onerror = () => el.remove();
           grid.appendChild(el);
         });
@@ -1278,7 +1291,7 @@ async function analyzeWebsite(url) {
         thumb.title = img.type || 'image';
         thumb.loading = 'lazy';
         thumb.onerror = () => thumb.remove();
-        thumb.addEventListener('click', () => selectBrandImage(thumb, img.url));
+        thumb.addEventListener('click', () => openLightbox(img.url));
         brandImagesGrid.appendChild(thumb);
       });
       brandImagesSection.style.display = 'block';
