@@ -3043,25 +3043,6 @@ app.get('/api/tiktok/post-status/:publishId', requireAuth, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
-// --- TEMPORARY: One-time brand migration (delete after use) ---
-// Accepts brand data in request body and writes it with a specific doc ID
-app.post('/api/migrate-brand/:id', requireAuth, async (req, res) => {
-  try {
-    if (!db) return res.status(500).json({ error: 'No Firestore' });
-    const { id } = req.params;
-    const config = req.body;
-    if (!config || !config.name) return res.status(400).json({ error: 'Missing brand config' });
-    console.log('[migrate] Writing brand:', id, 'for uid:', req.user.uid);
-    await db.collection('carousel_brands').doc(id).set({ ...config, createdBy: req.user.uid, createdAt: admin.firestore.FieldValue.serverTimestamp() });
-    console.log('[migrate] Done:', id);
-    res.json({ ok: true, id });
-  } catch (err) {
-    console.error('[migrate] Error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
 // Start server (only when run directly, not on Vercel)
 if (process.env.VERCEL !== '1') {
   app.listen(PORT, () => {
