@@ -797,12 +797,16 @@ async function startBrandGeneration(url) {
   brandCreationAbort = new AbortController();
 
   // Use fetch with streaming for SSE (EventSource doesn't support POST)
+  const _prefix = getKeyPrefix();
   try {
     const response = await fetch('/api/brands/full-setup', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+        ...(localStorage.getItem(_prefix + 'openai_key') ? { 'X-OpenAI-Key': localStorage.getItem(_prefix + 'openai_key') } : {}),
+        ...(localStorage.getItem(_prefix + 'anthropic_key') ? { 'X-Anthropic-Key': localStorage.getItem(_prefix + 'anthropic_key') } : {}),
+        ...(localStorage.getItem(_prefix + 'fal_key') ? { 'X-Fal-Key': localStorage.getItem(_prefix + 'fal_key') } : {}),
       },
       body: JSON.stringify({ url }),
       signal: brandCreationAbort.signal,
