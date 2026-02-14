@@ -5370,6 +5370,7 @@ document.getElementById('vault-backdrop')?.addEventListener('click', closeVault)
 
 let bgTopics = [];
 let bgPollTimer = null;
+let bgLastCompleted = 0;
 
 const bgLibraryOverlay = document.getElementById('bg-library-overlay');
 const bgLibraryClose = document.getElementById('bg-library-close');
@@ -5381,6 +5382,7 @@ const bgProgressFill = document.getElementById('bg-progress-fill');
 const bgProgressLabel = document.getElementById('bg-progress-label');
 const bgDownloadProgress = document.getElementById('bg-download-progress');
 const bgThumbnailGrid = document.getElementById('bg-thumbnail-grid');
+const bgDownloadThumbnails = document.getElementById('bg-download-thumbnails');
 const bgCategoryTabs = document.getElementById('bg-category-tabs');
 
 function openBgLibrary() {
@@ -5488,6 +5490,8 @@ document.getElementById('bg-download-all-btn').addEventListener('click', async (
   bgDownloadProgress.style.display = 'block';
   bgProgressFill.style.width = '0%';
   bgProgressLabel.textContent = 'Starting download...';
+  bgDownloadThumbnails.innerHTML = '';
+  bgLastCompleted = 0;
 
   try {
     const res = await authFetch('/api/backgrounds/download', {
@@ -5511,6 +5515,25 @@ document.getElementById('bg-download-all-btn').addEventListener('click', async (
         bgProgressLabel.textContent = status.currentTopic
           ? `Downloading: ${status.currentTopic} (${status.completed}/${status.total})`
           : `${status.completed}/${status.total} topics done`;
+
+        // Show new thumbnails as topics complete
+        if (status.completed > bgLastCompleted) {
+          bgLastCompleted = status.completed;
+          try {
+            const bgRes = await authFetch(`/api/backgrounds?brand=${encodeURIComponent(currentBrand)}`);
+            const bgData = await bgRes.json();
+            const allImages = Object.values(bgData.categories || {}).flatMap(c => c.images);
+            // Only append images we haven't shown yet
+            const shown = bgDownloadThumbnails.querySelectorAll('.bg-thumbnail').length;
+            allImages.slice(shown).forEach(imgUrl => {
+              const div = document.createElement('div');
+              div.className = 'bg-thumbnail';
+              div.innerHTML = `<img src="${imgUrl}" loading="lazy" alt="" />`;
+              div.querySelector('img').addEventListener('click', () => selectBackground(imgUrl));
+              bgDownloadThumbnails.appendChild(div);
+            });
+          } catch {}
+        }
 
         if (status.status === 'done') {
           clearInterval(bgPollTimer);
