@@ -2319,6 +2319,9 @@ async function generateMoreIdeas() {
 
 // --- Idea Selection ---
 function selectIdea(ideaId) {
+  // Don't reset state if already viewing this idea
+  if (selectedIdea && selectedIdea.id === ideaId) return;
+
   if (generateAbort) generateAbort.abort();
   loadingSpinner.classList.remove('active');
 
@@ -4517,32 +4520,10 @@ autoGenerateBtn.addEventListener('click', async () => {
   }
 });
 
-// --- Face Personalization (Full-Page View) ---
+// --- Face Studio (People + LoRA Training) ---
 // =============================================
 
-const FALLBACK_SCENARIOS = [
-  { id: 'professional-portrait', title: 'Professional Portrait', category: 'Business', setting: 'modern office with natural window light', action: 'looking confident at camera', mood: 'professional confidence' },
-  { id: 'urban-walk', title: 'Urban Walk', category: 'Lifestyle', setting: 'city sidewalk, golden hour', action: 'walking casually', mood: 'relaxed confidence' },
-  { id: 'creative-workspace', title: 'Creative Workspace', category: 'Work', setting: 'bright studio or desk setup', action: 'working on a project', mood: 'focused creativity' },
-  { id: 'coffee-meeting', title: 'Coffee Meeting', category: 'Social', setting: 'upscale cafe, warm lighting', action: 'having a conversation', mood: 'friendly engagement' },
-  { id: 'outdoor-portrait', title: 'Outdoor Portrait', category: 'Lifestyle', setting: 'park or garden, soft light', action: 'standing relaxed', mood: 'calm authenticity' },
-  { id: 'stage-presence', title: 'Stage Presence', category: 'Leadership', setting: 'conference stage or podium', action: 'speaking to an audience', mood: 'commanding authority' },
-  { id: 'team-moment', title: 'Team Moment', category: 'Social', setting: 'collaborative workspace', action: 'laughing with colleagues', mood: 'genuine connection' },
-  { id: 'morning-routine', title: 'Morning Routine', category: 'Lifestyle', setting: 'sunlit room, early morning', action: 'starting the day', mood: 'peaceful energy' },
-];
-
-let personalizedScenarios = [];
-const scenarioCache = new Map(); // client-side cache by brandId
-
-let selectedScenario = null;
-let personalizeResults = [];
-
 const personalizeView = document.getElementById('personalize-view');
-const scenarioGrid = document.getElementById('scenario-grid');
-const personalizeGenerateBtn = document.getElementById('personalize-generate-btn');
-const personalizeStatus = document.getElementById('personalize-status');
-const personalizeResultsSection = document.getElementById('personalize-results');
-const personalizeResultsGrid = document.getElementById('personalize-results-grid');
 
 // View navigation
 function openPersonalizeView() {
@@ -4550,13 +4531,8 @@ function openPersonalizeView() {
   editorArea.style.display = 'none';
   if (document.getElementById('meme-view')) document.getElementById('meme-view').style.display = 'none';
   personalizeView.style.display = 'block';
-  // Render person cards + detail
   renderFaceStudioPersons();
   renderFaceStudioPersonDetail();
-  // Load brand-specific scenarios if not already loaded
-  if (currentBrand && personalizedScenarios.length === 0 && !scenarioCache.has(currentBrand)) {
-    loadPersonalizeScenarios(currentBrand);
-  }
 }
 
 function closePersonalizeView() {
@@ -5204,6 +5180,10 @@ function restoreSession(rawSession) {
         loadSlideIntoForm(currentSlideIndex);
         updatePreviewMockup();
         updateGallery();
+        // Highlight the restored idea in the sidebar so re-clicking it won't clear state
+        sidebar.querySelectorAll('.idea-item').forEach(el => {
+          el.classList.toggle('active', el.dataset.ideaId === session.selectedIdeaId);
+        });
       }
     }
   } catch (err) { console.warn('[Session] Restore failed:', err); }
