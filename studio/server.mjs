@@ -3166,6 +3166,36 @@ Pick a DIFFERENT format each time. Do NOT default to two-panel approval.`,
       });
     }
 
+    // Video generation (Kling 3.0)
+    if (data.slideType === 'video') {
+      console.log(`[Generate] ${brand.name} | Video clip | ${data.duration || 5}s`);
+      const rawPrompt = buildVideoPrompt(data, brand);
+      const refinedPrompt = await refinePromptWithClaude(rawPrompt, 'video', data, brand, req);
+      const prompt = refinedPrompt || rawPrompt;
+
+      const videoUrl = await generateVideoSlide(prompt, {
+        duration: data.duration || 5,
+        aspectRatio: '9:16',
+        audio: data.audio || false,
+      });
+
+      const videoRes = await fetch(videoUrl);
+      if (!videoRes.ok) throw new Error('Failed to download video from Kling');
+      const videoBuffer = Buffer.from(await videoRes.arrayBuffer());
+
+      const slug = crypto.randomUUID().slice(0, 8);
+      const filename = `video_${brandId}_${Date.now()}_${slug}.mp4`;
+      const url = await uploadVideoToStorage(videoBuffer, filename);
+      saveImageRecord({ userId: req.user?.uid, brandId, filename, type: 'video' });
+
+      return res.json({
+        ok: true, filename, url, isVideo: true,
+        prompt: rawPrompt,
+        refinedPrompt: refinedPrompt || null,
+        usedRefined: Boolean(refinedPrompt),
+      });
+    }
+
     if (!openai) return res.status(503).json({ error: 'Add your OpenAI API key in Settings to generate images.' });
 
     // --- Hybrid photo generation: AI image (optionally with person) + Sharp text overlay ---

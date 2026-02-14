@@ -1945,7 +1945,7 @@ function renderSidebar() {
   if (hasAiIdeas) {
     const moreDiv = document.createElement('div');
     moreDiv.className = 'sidebar-generate-more';
-    moreDiv.innerHTML = `<button class="btn secondary sidebar-more-btn" id="sidebar-generate-more-btn">+ Generate 5 More</button><div class="sidebar-more-status" id="sidebar-more-status"></div>`;
+    moreDiv.innerHTML = `<button class="btn secondary sidebar-more-btn" id="sidebar-generate-more-btn">+ Generate Idea</button><div class="sidebar-more-status" id="sidebar-more-status"></div>`;
     sidebar.appendChild(moreDiv);
     document.getElementById('sidebar-generate-more-btn').addEventListener('click', generateMoreIdeas);
   }
@@ -1965,7 +1965,7 @@ async function generateMoreIdeas() {
     const startIndex = allIdeas.length;
     const res = await authFetch('/api/generate-content-ideas', {
       method: 'POST',
-      body: JSON.stringify({ brand: currentBrand, existingTitles, numIdeas: 5, startIndex }),
+      body: JSON.stringify({ brand: currentBrand, existingTitles, numIdeas: 1, startIndex }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Generation failed');
@@ -1995,7 +1995,7 @@ async function generateMoreIdeas() {
     if (status) status.textContent = `Error: ${err.message}`;
   } finally {
     btn.disabled = false;
-    btn.textContent = '+ Generate 5 More';
+    btn.textContent = '+ Generate Idea';
   }
 }
 
@@ -3468,11 +3468,17 @@ form.addEventListener('submit', async (e) => {
   const slide = slideEdits[slideIndex];
   const payload = buildSlidePayload(slide, slideIndex);
 
-  statusEl.textContent = `Generating slide ${slideIndex + 1}...`;
+  const isVideo = payload.slideType === 'video';
+  statusEl.textContent = isVideo
+    ? `Generating video ${slideIndex + 1} (this may take 1-7 min)...`
+    : `Generating slide ${slideIndex + 1}...`;
   previewImg.style.display = 'none';
+  previewVideo.style.display = 'none';
   downloadButtons.style.display = 'none';
   loadingSpinner.classList.add('active');
-  spinnerText.textContent = `Generating slide ${slideIndex + 1}...`;
+  spinnerText.textContent = isVideo
+    ? `Generating video... (up to 7 min)`
+    : `Generating slide ${slideIndex + 1}...`;
 
   try {
     const res = await authFetch('/api/generate', {
@@ -3484,12 +3490,19 @@ form.addEventListener('submit', async (e) => {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Generation failed');
 
-    generatedImages[slideIndex] = { url: data.url, filename: data.filename };
+    generatedImages[slideIndex] = { url: data.url, filename: data.filename, isVideo: data.isVideo || false };
 
     // Only update UI if still viewing this slide
     if (currentSlideIndex === slideIndex) {
-      previewImg.src = data.url;
-      previewImg.style.display = 'block';
+      if (data.isVideo) {
+        previewImg.style.display = 'none';
+        previewVideo.src = data.url;
+        previewVideo.style.display = 'block';
+      } else {
+        previewVideo.style.display = 'none';
+        previewImg.src = data.url;
+        previewImg.style.display = 'block';
+      }
       downloadButtons.style.display = 'flex';
       statusEl.textContent = data.usedRefined
         ? `Slide ${slideIndex + 1} done (Claude-refined).`
@@ -3519,7 +3532,9 @@ const applyEditBtn = document.getElementById('apply-edit-btn');
 
 function updateEditSection() {
   if (editSection) {
-    editSection.style.display = generatedImages[currentSlideIndex] ? 'block' : 'none';
+    const gen = generatedImages[currentSlideIndex];
+    // Hide edit bar for video slides (can't edit video with image API)
+    editSection.style.display = (gen && !gen.isVideo) ? 'block' : 'none';
   }
 }
 
@@ -3733,7 +3748,12 @@ function updateGallery() {
     const gen = generatedImages[i];
     if (gen) {
       html += `<div class="gallery-thumb ${i === currentSlideIndex ? 'active' : ''}" data-index="${i}">`;
-      html += `<img src="${gen.url}" alt="Slide ${i + 1}" />`;
+      if (gen.isVideo) {
+        html += `<video src="${gen.url}" muted style="width:100%;height:100%;object-fit:cover"></video>`;
+        html += `<span class="thumb-video-badge">&#9654;</span>`;
+      } else {
+        html += `<img src="${gen.url}" alt="Slide ${i + 1}" />`;
+      }
       html += `<span class="thumb-num">${i + 1}</span>`;
       html += `<button class="thumb-download" data-filename="${gen.filename}" title="Download">&#8681;</button>`;
       html += `</div>`;
