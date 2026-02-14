@@ -2831,31 +2831,14 @@ app.get('/api/tiktok/post-status/:publishId', requireAuth, async (req, res) => {
 });
 
 // --- TEMPORARY: One-time brand migration (delete after use) ---
-app.post('/api/migrate-brands', requireAuth, async (req, res) => {
+// Accepts brand data in request body and writes it with a specific doc ID
+app.post('/api/migrate-brand/:id', requireAuth, async (req, res) => {
   if (!db) return res.status(500).json({ error: 'No Firestore' });
-  const uid = req.user.uid;
-  const brandsToMigrate = {
-    'athlete-mindset': {
-      name: 'Athlete Mindset', website: 'athletemindset.app',
-      colors: { primary: '#072F57', accent: '#73A6D1', white: '#FFFFFF', secondary: '#D9D0C2', cta: '#43AA32' },
-      defaultMicroLabel: 'ATHLETE MINDSET', defaultBackground: 'dark premium navy/near-black with very subtle grain',
-      iconOverlayText: 'athletemindset.app',
-      systemPrompt: 'You are an expert visual designer and prompt engineer for Athlete Mindset, a premium AI-powered mental performance training app for athletes.\n\nAbout the app: Athlete Mindset helps athletes unlock peak performance through science-backed visualization, breathwork, and AI voice coaching. Think of it as a sports psychologist in your pocket — accessible, evidence-based, and built for the modern athlete.\n\nContent pillars for social media:\n1. Science-backed visualization benefits — research showing mental rehearsal improves performance\n2. Mental training as competitive edge — the mindset separates good from great\n3. Accessibility — an AI mental performance coach at a fraction of a sports psychologist\'s cost\n4. CTA slides — "Try free" / "athletemindset.app" / download nudge\n\nBrand palette (use these EXACT hex codes in prompts):\n- Navy: #072F57 (primary background)\n- Cyan: #73A6D1 (highlights, accents)\n- White: #FFFFFF (text)\n- Beige: #D9D0C2 (warm alternate backgrounds)\n- Green: #43AA32 (CTA buttons ONLY — never for general decoration)',
-    },
-    'trackspeed': {
-      name: 'TrackSpeed', website: 'trackspeed.app',
-      colors: { primary: '#191919', accent: '#5C8DB8', white: '#FDFDFD', secondary: '#2B2E32', cta: '#22C55E' },
-      defaultMicroLabel: 'TRACKSPEED', defaultBackground: 'deep charcoal #191919 with subtle noise texture',
-      iconOverlayText: 'trackspeed.app',
-      systemPrompt: 'You are an expert visual designer and prompt engineer for TrackSpeed, a professional sprint timing app that uses iPhone camera Photo Finish detection.\n\nAbout the app: TrackSpeed gives coaches and athletes timing gate accuracy using just their phone camera. 120fps Photo Finish detection with sub-frame interpolation — professional sprint timing without expensive equipment. Competitors: VALD SmartSpeed ($2,000+), OVR Sprint ($529), Freelap ($500+).\n\nContent pillars for social media:\n1. Speed Data & Science — sprint biomechanics, what times mean, acceleration vs top speed\n2. Equipment Disruption — $0 vs $529 vs $2,000 comparisons, setup speed, portability\n3. Coaching & Testing — how to run proper speed tests, warm-up protocols, testing day guides\n4. Training Protocols — sprint workouts, weekly splits, speed development tips\n5. Photo Finish Technology — how it works, 120fps detection, sub-frame interpolation\n\nBrand palette (use these EXACT hex codes in prompts):\n- Dark Background: #191919 (deep charcoal)\n- Surface: #2B2E32 (blue-gray elevated surface)\n- Accent Blue: #5C8DB8 (primary accent)\n- Accent Cyan: #73A6D1 (lighter highlight)\n- Success Green: #22C55E (PR/improvement callouts)\n- White: #FDFDFD (primary text on dark)\n- Muted: #9B9A97 (secondary text)\n\nTone: Technical but accessible, data-driven, provocative (challenge hand-timing culture), confident.\nTypography: Sprint times should be monospace, large, high contrast.',
-    },
-  };
-  const results = [];
-  for (const [id, config] of Object.entries(brandsToMigrate)) {
-    await db.collection('carousel_brands').doc(id).set({ ...config, createdBy: uid, createdAt: admin.firestore.FieldValue.serverTimestamp() });
-    results.push(id);
-  }
-  res.json({ ok: true, migrated: results, uid });
+  const { id } = req.params;
+  const config = req.body;
+  if (!config || !config.name) return res.status(400).json({ error: 'Missing brand config' });
+  await db.collection('carousel_brands').doc(id).set({ ...config, createdBy: req.user.uid, createdAt: admin.firestore.FieldValue.serverTimestamp() });
+  res.json({ ok: true, id });
 });
 
 // Start server (only when run directly, not on Vercel)
