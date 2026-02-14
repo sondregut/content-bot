@@ -4178,13 +4178,55 @@ app.post('/api/generate-content-ideas', requireAuth, async (req, res) => {
         .replace(/\{\{meta_description\}\}/g, metaDesc)
         .replace(/\{\{website_text\}\}/g, websiteText)
         .replace(/\{\{micro_label\}\}/g, microLabel);
+    } else if (format === 'video') {
+      userPrompt = `Based on this website content, generate ${count} short-form VIDEO content idea(s) for ${brand.name}'s social media (TikTok/Instagram Reels).
+
+Website: ${websiteUrl}
+Page title: ${pageTitle}
+Description: ${metaDesc}
+Website text: ${websiteText}
+
+Each idea must have EXACTLY 1 slide with type "video". This is NOT a carousel — it's a single AI-generated video clip (5-10 seconds) with text overlay.
+
+Return ONLY valid JSON (no markdown, no code fences) with this structure:
+{
+  "ideas": [
+    {
+      "title": "Short video title",
+      "caption": "Instagram/TikTok caption with hashtags (150-200 words, hook line first)",
+      "slides": [
+        {
+          "number": 1,
+          "label": "Video",
+          "type": "video",
+          "microLabel": "${microLabel}",
+          "headline": "Bold headline for text overlay (under 10 words)",
+          "body": "One supporting sentence",
+          "highlight": "key phrase to highlight",
+          "scene": "Vivid 1-2 sentence visual description with motion — what the viewer sees happening",
+          "videoMood": "energetic and dynamic, calm and serene, dramatic and intense, etc.",
+          "cameraMove": "slow tracking shot, smooth dolly-in, cinematic pan, handheld follow, drone aerial pullback, or static wide angle",
+          "duration": "5 or 10"
+        }
+      ]
+    }
+  ]
+}
+
+Rules:
+- EXACTLY 1 slide per idea with type "video" — never more
+- Scene: describe vivid motion and action, not static images. Think cinematic B-roll
+- Headline: punchy, under 10 words — this overlays the video
+- Body: 1 short sentence max
+- Caption: hook line first (under 125 chars), then value, then CTA, then 3-5 hashtags
+- Content must be based on REAL information from the website`;
     } else {
       userPrompt = buildContentIdeasPrompt({ brand, microLabel, websiteUrl, pageTitle, metaDesc, websiteText, numIdeas: count, slidesPerIdea });
     }
 
     // When generating more, tell Claude to avoid repeating existing topics
     if (existingTitles?.length) {
-      userPrompt += `\n\nIMPORTANT: The following carousel ideas already exist. Generate COMPLETELY DIFFERENT topics — do NOT repeat or rephrase any of these:\n${existingTitles.map(t => `- ${t}`).join('\n')}`;
+      userPrompt += `\n\nIMPORTANT: The following ideas already exist. Generate COMPLETELY DIFFERENT topics — do NOT repeat or rephrase any of these:\n${existingTitles.map(t => `- ${t}`).join('\n')}`;
     }
 
     // Inject persistent generation history for cross-session dedup
@@ -4196,11 +4238,6 @@ app.post('/api/generate-content-ideas', requireAuth, async (req, res) => {
     // Freeform user topic to guide idea generation
     if (userTopic?.trim()) {
       userPrompt += `\n\nUSER REQUEST: The user specifically wants this idea to be about: "${userTopic.trim()}". Generate content that directly addresses this topic using the brand's real information.`;
-    }
-
-    // Video format override
-    if (format === 'video') {
-      userPrompt += `\n\nFORMAT: Generate a VIDEO content idea (not a carousel). The idea should have exactly 1 slide with type "video". Include a compelling scene description, mood, and camera movement. The headline and body will be used as text overlay on the video.`;
     }
 
     const text = await generateText({
