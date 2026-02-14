@@ -1314,7 +1314,7 @@ app.get('/api/brands', requireAuth, async (req, res) => {
 // Create a new brand
 app.post('/api/brands', requireAuth, async (req, res) => {
   try {
-    const { name, website, colors, systemPrompt, defaultMicroLabel, defaultBackground, iconOverlayText, contentPillars } = req.body;
+    const { name, website, colors, systemPrompt, defaultMicroLabel, defaultBackground, iconOverlayText, contentPillars, contentIdeaPrompt } = req.body;
     if (!name || !colors) return res.status(400).json({ error: 'Name and colors are required' });
     const id = slugify(name) + '-' + crypto.randomUUID().slice(0, 6);
     const brand = {
@@ -1332,6 +1332,7 @@ app.post('/api/brands', requireAuth, async (req, res) => {
       defaultBackground: defaultBackground || GENERIC_BRAND.defaultBackground,
       iconOverlayText: iconOverlayText || website || '',
       contentPillars: contentPillars || [],
+      contentIdeaPrompt: contentIdeaPrompt || '',
       createdBy: req.user.uid,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     };
@@ -1352,7 +1353,7 @@ app.put('/api/brands/:id', requireAuth, async (req, res) => {
     if (!doc.exists) return res.status(404).json({ error: 'Brand not found' });
     if (doc.data().createdBy !== req.user.uid) return res.status(403).json({ error: 'Not your brand' });
     const updates = {};
-    for (const key of ['name', 'website', 'colors', 'systemPrompt', 'defaultMicroLabel', 'defaultBackground', 'iconOverlayText', 'contentPillars']) {
+    for (const key of ['name', 'website', 'colors', 'systemPrompt', 'defaultMicroLabel', 'defaultBackground', 'iconOverlayText', 'contentPillars', 'contentIdeaPrompt']) {
       if (req.body[key] !== undefined) updates[key] = req.body[key];
     }
     await db.collection('carousel_brands').doc(req.params.id).update(updates);
@@ -2248,13 +2249,18 @@ app.post('/api/generate-content-ideas', requireAuth, async (req, res) => {
       brand.contentPillars?.length ? `Content pillars: ${brand.contentPillars.join(', ')}` : '',
     ].filter(Boolean).join('\n');
 
-    const response = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 4096,
-      system: brandContext,
-      messages: [{
-        role: 'user',
-        content: `Based on this website content, generate 5 carousel content ideas for ${brand.name}'s social media (TikTok/Instagram).
+    const microLabel = brand.defaultMicroLabel || brand.name.toUpperCase();
+    let userPrompt;
+    if (brand.contentIdeaPrompt) {
+      userPrompt = brand.contentIdeaPrompt
+        .replace(/\{\{brand_name\}\}/g, brand.name)
+        .replace(/\{\{website_url\}\}/g, websiteUrl)
+        .replace(/\{\{page_title\}\}/g, pageTitle)
+        .replace(/\{\{meta_description\}\}/g, metaDesc)
+        .replace(/\{\{website_text\}\}/g, websiteText)
+        .replace(/\{\{micro_label\}\}/g, microLabel);
+    } else {
+      userPrompt = `Based on this website content, generate 5 carousel content ideas for ${brand.name}'s social media (TikTok/Instagram).
 
 Website: ${websiteUrl}
 Page title: ${pageTitle}
@@ -2274,7 +2280,7 @@ Return ONLY valid JSON (no markdown, no code fences) with this structure:
           "number": 1,
           "label": "Hook",
           "type": "photo, text, or mockup",
-          "microLabel": "${brand.defaultMicroLabel || brand.name.toUpperCase()}",
+          "microLabel": "${microLabel}",
           "headline": "Main headline text",
           "body": "Supporting body text (1-2 sentences)",
           "highlight": "key phrase to highlight"
@@ -2294,7 +2300,16 @@ Rules:
 - Headlines: punchy, under 15 words — avoid repeating similar phrasing across ideas
 - Body: 1-2 sentences max
 - Content should be based on REAL information from the website, not generic filler
-- Make each idea feel like a completely different post — vary the tone, angle, and structure`,
+- Make each idea feel like a completely different post — vary the tone, angle, and structure`;
+    }
+
+    const response = await anthropic.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 4096,
+      system: brandContext,
+      messages: [{
+        role: 'user',
+        content: userPrompt,
       }],
     });
 

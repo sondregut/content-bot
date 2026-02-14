@@ -206,6 +206,55 @@ const settingsSaveBtn = document.getElementById('settings-save-btn');
 const settingsStatus = document.getElementById('settings-status');
 const settingsOpenaiKey = document.getElementById('settings-openai-key');
 const settingsAnthropicKey = document.getElementById('settings-anthropic-key');
+const promptSettingsToggle = document.getElementById('prompt-settings-toggle');
+const promptSettingsSection = document.getElementById('prompt-settings-section');
+const settingsContentPrompt = document.getElementById('settings-content-prompt');
+const promptBrandName = document.getElementById('prompt-brand-name');
+const promptResetBtn = document.getElementById('prompt-reset-btn');
+const promptSaveBtn = document.getElementById('prompt-save-btn');
+const promptSaveStatus = document.getElementById('prompt-save-status');
+
+const DEFAULT_CONTENT_IDEA_PROMPT = `Based on this website content, generate 5 carousel content ideas for {{brand_name}}'s social media (TikTok/Instagram).
+
+Website: {{website_url}}
+Page title: {{page_title}}
+Description: {{meta_description}}
+Website text: {{website_text}}
+
+Generate exactly 5 carousel concepts. Each should have 6-7 slides and be based on real content/features/value props from the website.
+
+Return ONLY valid JSON (no markdown, no code fences) with this structure:
+{
+  "ideas": [
+    {
+      "title": "Short carousel title",
+      "caption": "Instagram/TikTok caption with hashtags",
+      "slides": [
+        {
+          "number": 1,
+          "label": "Hook",
+          "type": "photo, text, or mockup",
+          "microLabel": "{{micro_label}}",
+          "headline": "Main headline text",
+          "body": "Supporting body text (1-2 sentences)",
+          "highlight": "key phrase to highlight"
+        }
+      ]
+    }
+  ]
+}
+
+Rules:
+- Each idea MUST include a "caption" field: a ready-to-post Instagram/TikTok caption (2-3 engaging sentences + 5-8 relevant hashtags). Write in the brand's voice.
+- Each idea should cover a DISTINCTLY different angle — avoid repeating the same theme or structure across ideas. Use varied approaches: features, benefits, how-to, comparison, social proof, behind-the-scenes, myth-busting, user stories, etc.
+- First slide of each idea: strong hook (usually photo or text type) — each hook must be unique and attention-grabbing in a different way
+- Last slide: CTA with "{{brand_name}} — link in bio" or similar
+- Mix photo, text, and mockup types within each idea
+- Use mockup with text-statement layout for bold statement slides
+- Headlines: punchy, under 15 words — avoid repeating similar phrasing across ideas
+- Body: 1-2 sentences max
+- Content should be based on REAL information from the website, not generic filler
+- Make each idea feel like a completely different post — vary the tone, angle, and structure`;
 const iconPreviewImg = document.getElementById('icon-preview-img');
 const iconUploadBtn = document.getElementById('icon-upload-btn');
 const iconFileInput = document.getElementById('icon-file-input');
@@ -271,6 +320,7 @@ settingsBtn.addEventListener('click', () => {
     document.getElementById('settings-uid').textContent = user.uid;
     document.getElementById('settings-avatar').textContent = email.charAt(0).toUpperCase();
   }
+  populatePromptSettings();
 });
 
 settingsClose.addEventListener('click', () => {
@@ -316,6 +366,83 @@ settingsSaveBtn.addEventListener('click', async () => {
     settingsStatus.className = 'settings-status success';
   }
 });
+
+// --- AI Prompt Settings ---
+if (promptSettingsToggle) {
+  promptSettingsToggle.addEventListener('click', () => {
+    const section = promptSettingsSection;
+    const isOpen = section.style.display !== 'none';
+    section.style.display = isOpen ? 'none' : 'block';
+    promptSettingsToggle.classList.toggle('open', !isOpen);
+  });
+}
+
+function populatePromptSettings() {
+  const brand = brands.find((b) => b.id === currentBrand);
+  if (promptBrandName) promptBrandName.textContent = brand ? brand.name : '—';
+  if (settingsContentPrompt) {
+    settingsContentPrompt.value = (brand && brand.contentIdeaPrompt) || DEFAULT_CONTENT_IDEA_PROMPT;
+  }
+  if (promptSaveStatus) {
+    promptSaveStatus.textContent = '';
+    promptSaveStatus.className = 'settings-status';
+  }
+}
+
+if (promptSaveBtn) {
+  promptSaveBtn.addEventListener('click', async () => {
+    if (!currentBrand) return;
+    promptSaveStatus.textContent = 'Saving...';
+    promptSaveStatus.className = 'settings-status';
+    try {
+      const res = await authFetch(`/api/brands/${currentBrand}`, {
+        method: 'PUT',
+        body: JSON.stringify({ contentIdeaPrompt: settingsContentPrompt.value.trim() }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        const brand = brands.find((b) => b.id === currentBrand);
+        if (brand) brand.contentIdeaPrompt = settingsContentPrompt.value.trim();
+        promptSaveStatus.textContent = 'Prompt saved!';
+        promptSaveStatus.className = 'settings-status success';
+      } else {
+        promptSaveStatus.textContent = data.error || 'Failed to save';
+        promptSaveStatus.className = 'settings-status error';
+      }
+    } catch {
+      promptSaveStatus.textContent = 'Failed to save prompt.';
+      promptSaveStatus.className = 'settings-status error';
+    }
+  });
+}
+
+if (promptResetBtn) {
+  promptResetBtn.addEventListener('click', async () => {
+    settingsContentPrompt.value = DEFAULT_CONTENT_IDEA_PROMPT;
+    if (!currentBrand) return;
+    promptSaveStatus.textContent = 'Resetting...';
+    promptSaveStatus.className = 'settings-status';
+    try {
+      const res = await authFetch(`/api/brands/${currentBrand}`, {
+        method: 'PUT',
+        body: JSON.stringify({ contentIdeaPrompt: '' }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        const brand = brands.find((b) => b.id === currentBrand);
+        if (brand) brand.contentIdeaPrompt = '';
+        promptSaveStatus.textContent = 'Reset to default!';
+        promptSaveStatus.className = 'settings-status success';
+      } else {
+        promptSaveStatus.textContent = data.error || 'Failed to reset';
+        promptSaveStatus.className = 'settings-status error';
+      }
+    } catch {
+      promptSaveStatus.textContent = 'Failed to reset prompt.';
+      promptSaveStatus.className = 'settings-status error';
+    }
+  });
+}
 
 // --- Brand Selector ---
 function renderBrandSelector() {

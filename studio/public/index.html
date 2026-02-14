@@ -822,6 +822,24 @@
             <span class="field-hint">Used for Flux Kontext Pro face-consistent image generation. Get one at <a href="https://fal.ai/dashboard/keys" target="_blank" style="color:var(--cyan)">fal.ai/dashboard/keys</a></span>
           </div>
           <div class="settings-status" id="settings-status"></div>
+          <div class="settings-divider"></div>
+          <div class="settings-section-header" id="prompt-settings-toggle">
+            <span>AI Prompt Settings</span>
+            <span class="collapse-arrow">&#9660;</span>
+          </div>
+          <div class="prompt-settings-section" id="prompt-settings-section" style="display:none">
+            <p class="field-hint">Customize the prompt sent to Claude when generating content ideas. Applies to: <strong id="prompt-brand-name">&mdash;</strong></p>
+            <div class="form-group full">
+              <label class="label">Content Ideas Prompt</label>
+              <textarea id="settings-content-prompt" rows="14" placeholder="Loading default prompt..."></textarea>
+              <span class="field-hint">Use {{brand_name}}, {{website_url}}, {{page_title}}, {{meta_description}}, {{website_text}}, {{micro_label}} as placeholders for dynamic values.</span>
+            </div>
+            <div class="prompt-settings-actions">
+              <button class="btn small" id="prompt-reset-btn">Reset to Default</button>
+              <button class="btn primary small" id="prompt-save-btn">Save Prompt</button>
+            </div>
+            <div class="settings-status" id="prompt-save-status"></div>
+          </div>
         </div>
         <div class="modal-footer">
           <button class="btn primary" id="settings-save-btn">Save Keys</button>

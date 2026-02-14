@@ -1915,6 +1915,16 @@ input:focus, select:focus, textarea:focus {
 .settings-status.success { color: #43aa32; }
 .settings-status.error { color: var(--danger); }
 
+.settings-section-header {
+  display: flex; justify-content: space-between; align-items: center;
+  cursor: pointer; font-weight: 600; font-size: 0.9rem; padding: 8px 0;
+}
+.settings-section-header:hover { opacity: 0.8; }
+.settings-section-header .collapse-arrow { font-size: 0.7rem; transition: transform 0.2s; }
+.settings-section-header.open .collapse-arrow { transform: rotate(180deg); }
+.prompt-settings-section textarea { font-family: monospace; font-size: 0.8rem; line-height: 1.5; }
+.prompt-settings-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
+
 /* Brand Modal */
 .brand-modal-wide { width: 560px; max-width: 95vw; }
 .brand-modal-wide .modal-body { max-height: 70vh; overflow-y: auto; }
