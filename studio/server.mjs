@@ -1140,15 +1140,18 @@ function buildTextPrompt(data, brand) {
 
   const c = brand.colors;
   const safeMicro = microLabel || brand.defaultMicroLabel;
-  const safeHeadline = headline || 'Your Headline Here';
+  const safeHeadline = headline || '';
   const safeBody = body || '';
   const safeBackground = backgroundStyle || brand.defaultBackground;
   const safeLayout = layoutTemplate || 'Layout A - Classic Left Lane';
 
   const textBlocks = [
     `Micro-label (EXACT text):\n"${safeMicro}"`,
-    `Headline (EXACT, verbatim, include line breaks exactly as shown):\n"${safeHeadline}"`,
   ];
+
+  if (safeHeadline) {
+    textBlocks.push(`Headline (EXACT, verbatim, include line breaks exactly as shown):\n"${safeHeadline}"`);
+  }
 
   if (highlightPhrase) {
     textBlocks.push(`Highlight ONLY this phrase in accent color ${c.accent}: "${highlightPhrase}"`);
@@ -1202,7 +1205,7 @@ function buildPhotoPrompt(data, brand) {
   const safeOverlayStyle = overlayStyle || 'dark gradient';
   const safeOverlayPlacement = overlayPlacement || 'bottom third';
   const safeMicro = microLabel || brand.defaultMicroLabel;
-  const safeHeadline = headline || 'Your Headline Here';
+  const safeHeadline = headline || '';
   const safeBody = body || '';
 
   const trickyLine = buildTrickyWordsLine(trickyWords);
@@ -1216,7 +1219,7 @@ function buildPhotoPrompt(data, brand) {
     `Add a subtle ${safeOverlayStyle} behind text for readability; image stays dominant and uncluttered.`,
     'Overlay text (EXACT, verbatim):',
     `Micro-label: "${safeMicro}"`,
-    `Headline: "${safeHeadline}"`,
+    safeHeadline ? `Headline: "${safeHeadline}"` : null,
     highlightPhrase ? `Highlight ONLY: "${highlightPhrase}" in accent ${c.accent}` : null,
     safeBody ? `Body: "${safeBody}"` : null,
     `Typography: modern sans-serif like Inter/SF Pro, headline bold at approximately ${data.headlineFontSize || 82}pt, body regular at approximately ${data.bodyFontSize || 34}pt, clean kerning.`,

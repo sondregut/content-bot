@@ -7,6 +7,13 @@ function openLightbox(src) {
   document.body.appendChild(overlay);
 }
 
+// --- HTML escaping for safe innerHTML ---
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
 // --- Default brand values (must match GENERIC_BRAND in server.mjs) ---
 const DEFAULT_BRAND_COLORS = { primary: '#1A1A2E', accent: '#E94560', white: '#FFFFFF', secondary: '#16213E', cta: '#0F3460' };
 const DEFAULT_BACKGROUND = 'dark premium background with subtle grain';
@@ -174,7 +181,8 @@ document.getElementById('sign-out-btn').addEventListener('click', async () => {
 
 document.getElementById('delete-account-btn').addEventListener('click', async () => {
   if (!confirm('Are you sure you want to delete your account? This will permanently remove your account and all your brands. This cannot be undone.')) return;
-  if (!confirm('This is your last chance. Type OK to confirm you want to delete everything.')) return;
+  const deleteConfirm = prompt('Type DELETE to confirm you want to delete everything:');
+  if (deleteConfirm !== 'DELETE') return;
   try {
     const res = await authFetch('/api/account', { method: 'DELETE' });
     const data = await res.json();
@@ -635,7 +643,7 @@ function renderBrandSelector() {
     brandSelector.innerHTML = '<option value="" disabled selected>No brands yet</option>';
   } else {
     brandSelector.innerHTML = brands
-      .map((b) => `<option value="${b.id}" ${b.id === currentBrand ? 'selected' : ''}>${b.name}</option>`)
+      .map((b) => `<option value="${escapeHtml(b.id)}" ${b.id === currentBrand ? 'selected' : ''}>${escapeHtml(b.name)}</option>`)
       .join('');
   }
   const editBtn = document.getElementById('edit-brand-btn');
@@ -1125,7 +1133,7 @@ function handleCreationEvent(event, data) {
       const count = list.children.length + 1;
       const item = document.createElement('div');
       item.className = 'creation-idea-item';
-      item.innerHTML = `<span class="creation-idea-num">${count}</span><span class="creation-idea-title">${data.title}</span><span class="creation-idea-slides">${data.slides?.length || 0} slides</span>`;
+      item.innerHTML = `<span class="creation-idea-num">${count}</span><span class="creation-idea-title">${escapeHtml(data.title)}</span><span class="creation-idea-slides">${data.slides?.length || 0} slides</span>`;
       list.appendChild(item);
       break;
     }
@@ -1682,12 +1690,12 @@ function renderSidebar() {
 
   for (const cat of app.categories) {
     html += `<div class="category-group">`;
-    html += `<div class="category-header">${cat.name}</div>`;
+    html += `<div class="category-header">${escapeHtml(cat.name)}</div>`;
     for (const idea of cat.ideas) {
       totalIdeas++;
-      html += `<div class="idea-item" data-idea-id="${idea.id}">`;
-      html += `<span class="idea-id">${idea.id}</span>`;
-      html += `<span class="idea-name">${idea.title}</span>`;
+      html += `<div class="idea-item" data-idea-id="${escapeHtml(idea.id)}">`;
+      html += `<span class="idea-id">${escapeHtml(idea.id)}</span>`;
+      html += `<span class="idea-name">${escapeHtml(idea.title)}</span>`;
       html += `<span class="idea-slides-count">${idea.slides.length}s</span>`;
       html += `</div>`;
     }
@@ -3738,9 +3746,9 @@ downloadMemeBtn.addEventListener('click', () => {
 function renderScenarioGrid() {
   const scenarios = personalizedScenarios.length > 0 ? personalizedScenarios : FALLBACK_SCENARIOS;
   scenarioGrid.innerHTML = scenarios.map((s) =>
-    `<div class="scenario-card ${selectedScenario === s.id ? 'active' : ''}" data-id="${s.id}">
-      <div class="scenario-title">${s.title}</div>
-      <div class="scenario-category">${s.category}</div>
+    `<div class="scenario-card ${selectedScenario === s.id ? 'active' : ''}" data-id="${escapeHtml(s.id)}">
+      <div class="scenario-title">${escapeHtml(s.title)}</div>
+      <div class="scenario-category">${escapeHtml(s.category)}</div>
     </div>`
   ).join('');
 
@@ -3839,13 +3847,11 @@ function renderFacePhotos() {
 
 faceAddBtn.addEventListener('click', () => faceImageInput.click());
 
-faceImageInput.addEventListener('change', () => {
-  const files = Array.from(faceImageInput.files);
-  if (!files.length) return;
-
+function addFaceFiles(files) {
+  const imageFiles = files.filter(f => f.type.startsWith('image/'));
+  if (!imageFiles.length) return;
   const remaining = 5 - faceImageFiles.length;
-  const toAdd = files.slice(0, remaining);
-
+  const toAdd = imageFiles.slice(0, remaining);
   let loaded = 0;
   toAdd.forEach(file => {
     const reader = new FileReader();
@@ -3857,8 +3863,27 @@ faceImageInput.addEventListener('change', () => {
     };
     reader.readAsDataURL(file);
   });
+}
 
+faceImageInput.addEventListener('change', () => {
+  addFaceFiles(Array.from(faceImageInput.files));
   faceImageInput.value = '';
+});
+
+// Drag & drop for face photos grid
+facePhotosGrid.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  facePhotosGrid.classList.add('drag-over');
+});
+facePhotosGrid.addEventListener('dragleave', (e) => {
+  if (!facePhotosGrid.contains(e.relatedTarget)) {
+    facePhotosGrid.classList.remove('drag-over');
+  }
+});
+facePhotosGrid.addEventListener('drop', (e) => {
+  e.preventDefault();
+  facePhotosGrid.classList.remove('drag-over');
+  addFaceFiles(Array.from(e.dataTransfer.files));
 });
 
 // Generate personalized image(s)
