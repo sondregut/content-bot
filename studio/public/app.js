@@ -3409,6 +3409,8 @@ document.getElementById('generate-meme-btn').addEventListener('click', async () 
     memeFilename = data.filename;
     downloadMemeBtn.style.display = 'inline-block';
     memeStatus.textContent = '';
+    addToVault(data.url, data.filename);
+    updateVaultCount();
   } catch (err) {
     memeStatus.textContent = err.message || 'Generation failed';
   } finally {
