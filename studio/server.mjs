@@ -170,8 +170,8 @@ async function uploadToStorage(buffer, filename) {
   }
   const file = bucket.file(`carousel-studio/${filename}`);
   await file.save(buffer, { metadata: { contentType: 'image/png' } });
-  await file.makePublic();
-  return `https://storage.googleapis.com/${bucket.name}/carousel-studio/${filename}`;
+  const [url] = await file.getSignedUrl({ action: 'read', expires: Date.now() + 7 * 24 * 60 * 60 * 1000 });
+  return url;
 }
 
 app.use(express.json({ limit: '10mb' }));
@@ -2477,26 +2477,55 @@ app.post('/api/backgrounds/generate-topics', requireAuth, async (req, res) => {
 
   const brand = await getBrandAsync(brandId, req.user?.uid);
 
+  // Fetch website for product context (best-effort, don't fail if unavailable)
+  let productContext = '';
+  if (brand.website) {
+    try {
+      let url = brand.website.trim();
+      if (!/^https?:\/\//i.test(url)) url = `https://${url}`;
+      const resp = await fetch(url, {
+        signal: AbortSignal.timeout(8000),
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; CarouselStudio/1.0)' },
+        redirect: 'follow',
+      });
+      const html = await resp.text();
+      const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+      const pageTitle = titleMatch ? titleMatch[1].replace(/\s+/g, ' ').trim() : '';
+      const metaDescMatch = html.match(/<meta[^>]*(?:name|property)=["'](?:description|og:description)["'][^>]*content=["']([^"']*)["']/i)
+        || html.match(/<meta[^>]*content=["']([^"']*)["'][^>]*(?:name|property)=["'](?:description|og:description)["']/i);
+      const metaDesc = metaDescMatch ? metaDescMatch[1].trim() : '';
+      // Extract visible text (strip tags, collapse whitespace)
+      const visibleText = html.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<style[\s\S]*?<\/style>/gi, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 500);
+      const parts = [pageTitle, metaDesc, visibleText].filter(Boolean);
+      if (parts.length) productContext = parts.join(' | ');
+    } catch {
+      // Website fetch failed — proceed without context
+    }
+  }
+
   try {
     const msg = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 1024,
       messages: [{
         role: 'user',
-        content: `You are generating Pinterest search queries for finding slide background images.
+        content: `You are generating Pinterest search queries for finding carousel slide background images.
 
 Brand: ${brand.name}
-Website: ${brand.website || 'N/A'}
+Website: ${brand.website || 'N/A'}${productContext ? `\nProduct context: ${productContext}` : ''}
 Colors: ${JSON.stringify(brand.colors)}
 Brand brief: ${brand.systemPrompt || 'General brand'}
 
-Generate 12 Pinterest search queries that would find great background images for this brand's TikTok/Instagram carousel slides. Think about:
-- The brand's aesthetic and color palette
-- Textures, gradients, abstract patterns
-- Lifestyle/mood imagery that fits the brand
-- Dark/moody vs light/clean depending on brand colors
+Based on the brand's product, industry, and target audience, generate 12 Pinterest search queries that would find great background images for TikTok/Instagram carousel slides.
 
-Return ONLY a JSON array of strings, no other text. Example: ["dark marble texture", "neon gradient abstract"]`
+Guidelines:
+- 7-8 queries should be directly relevant to the product's domain, industry, and users (e.g. for a speed measurement app: "sprinter dark photography", "track and field cinematic", "motorsport close up")
+- 4-5 queries for aesthetic/mood backgrounds that match the brand's color palette and vibe
+- Use specific, descriptive terms — avoid generic queries like "cool background", "abstract texture", or "gradient wallpaper"
+- Include tone words like "dark", "moody", "cinematic", "dramatic" that match the brand colors
+- Each query should be 4-7 words for best Pinterest results
+
+Return ONLY a JSON array of 12 strings, no other text.`
       }]
     });
 
