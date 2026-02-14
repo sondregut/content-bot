@@ -4183,15 +4183,23 @@ app.delete('/api/backgrounds/:brandId/:category/:filename', requireAuth, async (
   }
 });
 
-// --- TikTok Integration ---
+// --- TikTok Integration (BYOK — users provide their own TikTok Developer App credentials) ---
 
-const TIKTOK_CLIENT_KEY = process.env.TIKTOK_CLIENT_KEY;
-const TIKTOK_CLIENT_SECRET = process.env.TIKTOK_CLIENT_SECRET;
-const tiktokEnabled = Boolean(TIKTOK_CLIENT_KEY && TIKTOK_CLIENT_SECRET);
-
-if (!tiktokEnabled) {
-  console.warn('Missing TIKTOK_CLIENT_KEY or TIKTOK_CLIENT_SECRET — TikTok posting disabled.');
+function getTikTokKeys(req) {
+  const clientKey = req.headers['x-tiktok-client-key'];
+  const clientSecret = req.headers['x-tiktok-client-secret'];
+  if (clientKey && clientSecret) return { clientKey, clientSecret };
+  return null;
 }
+
+// Cache TikTok keys during OAuth flow (callback has no auth headers)
+const tiktokOAuthPending = new Map();
+setInterval(() => {
+  const now = Date.now();
+  for (const [state, entry] of tiktokOAuthPending) {
+    if (now - entry.createdAt > 10 * 60 * 1000) tiktokOAuthPending.delete(state);
+  }
+}, 5 * 60 * 1000);
 
 function getTikTokRedirectUri(req) {
   const proto = req.headers['x-forwarded-proto'] || req.protocol;
@@ -4215,7 +4223,7 @@ async function deleteTikTokTokens(userId) {
   await db.collection('tiktok_tokens').doc(userId).delete();
 }
 
-async function refreshTikTokToken(userId) {
+async function refreshTikTokToken(userId, clientKey, clientSecret) {
   const tokens = await getTikTokTokens(userId);
   if (!tokens?.refresh_token) throw new Error('No refresh token available');
 
@@ -4223,8 +4231,8 @@ async function refreshTikTokToken(userId) {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
-      client_key: TIKTOK_CLIENT_KEY,
-      client_secret: TIKTOK_CLIENT_SECRET,
+      client_key: clientKey,
+      client_secret: clientSecret,
       grant_type: 'refresh_token',
       refresh_token: tokens.refresh_token,
     }),
@@ -4245,14 +4253,14 @@ async function refreshTikTokToken(userId) {
   return updated;
 }
 
-async function getValidTikTokToken(userId) {
+async function getValidTikTokToken(userId, clientKey, clientSecret) {
   let tokens = await getTikTokTokens(userId);
   if (!tokens) throw new Error('TikTok not connected');
 
   // Refresh if expired or expiring within 5 minutes
   if (tokens.expires_at && tokens.expires_at < Date.now() + 300000) {
     console.log('[TikTok] Token expired, refreshing...');
-    tokens = await refreshTikTokToken(userId);
+    tokens = await refreshTikTokToken(userId, clientKey, clientSecret);
   }
 
   return tokens;
@@ -4260,13 +4268,22 @@ async function getValidTikTokToken(userId) {
 
 // OAuth: Redirect to TikTok authorization
 app.get('/api/tiktok/auth', requireAuth, (req, res) => {
-  if (!tiktokEnabled) return res.status(500).json({ error: 'TikTok not configured' });
+  const keys = getTikTokKeys(req);
+  if (!keys) return res.status(400).json({ error: 'TikTok Client Key and Secret required. Add them in Settings.' });
 
   const csrfState = crypto.randomUUID();
   const redirectUri = getTikTokRedirectUri(req);
 
+  // Cache keys for the callback (which arrives as a redirect with no headers)
+  tiktokOAuthPending.set(csrfState, {
+    clientKey: keys.clientKey,
+    clientSecret: keys.clientSecret,
+    userId: req.user?.uid,
+    createdAt: Date.now(),
+  });
+
   const params = new URLSearchParams({
-    client_key: TIKTOK_CLIENT_KEY,
+    client_key: keys.clientKey,
     scope: 'user.info.basic,video.publish',
     response_type: 'code',
     redirect_uri: redirectUri,
@@ -4278,16 +4295,24 @@ app.get('/api/tiktok/auth', requireAuth, (req, res) => {
 
 // OAuth: Callback — exchange code for token
 app.get('/api/tiktok/callback', async (req, res) => {
-  if (!tiktokEnabled) return res.status(500).send('TikTok not configured');
-  const postMessageOrigin = process.env.FRONTEND_URL || `${req.protocol}://${req.get('host')}`;
+  const proto = req.headers['x-forwarded-proto'] || req.protocol;
+  const host = req.headers['x-forwarded-host'] || req.headers.host;
+  const postMessageOrigin = process.env.FRONTEND_URL || `${proto}://${host}`;
 
-  const { code, error, error_description } = req.query;
+  const { code, state, error, error_description } = req.query;
   if (error) {
+    if (state) tiktokOAuthPending.delete(state);
     return res.send(`<script>window.opener?.postMessage(${JSON.stringify({type:'tiktok-error',error: error_description || error})},${JSON.stringify(postMessageOrigin)});window.close();</script>`);
   }
-  if (!code) {
+  if (!code || !state) {
     return res.send(`<script>window.opener?.postMessage(${JSON.stringify({type:'tiktok-error',error:'No authorization code'})},${JSON.stringify(postMessageOrigin)});window.close();</script>`);
   }
+
+  const pending = tiktokOAuthPending.get(state);
+  if (!pending) {
+    return res.send(`<script>window.opener?.postMessage(${JSON.stringify({type:'tiktok-error',error:'OAuth session expired. Please try again.'})},${JSON.stringify(postMessageOrigin)});window.close();</script>`);
+  }
+  tiktokOAuthPending.delete(state);
 
   try {
     const redirectUri = getTikTokRedirectUri(req);
@@ -4295,8 +4320,8 @@ app.get('/api/tiktok/callback', async (req, res) => {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
-        client_key: TIKTOK_CLIENT_KEY,
-        client_secret: TIKTOK_CLIENT_SECRET,
+        client_key: pending.clientKey,
+        client_secret: pending.clientSecret,
         code,
         grant_type: 'authorization_code',
         redirect_uri: redirectUri,
@@ -4362,9 +4387,10 @@ app.post('/api/tiktok/save-tokens', requireAuth, async (req, res) => {
 app.get('/api/tiktok/status', requireAuth, async (req, res) => {
   try {
     const userId = req.user?.uid;
-    if (!userId) return res.json({ connected: false, enabled: tiktokEnabled });
+    const keys = getTikTokKeys(req);
+    if (!userId) return res.json({ connected: false, enabled: !!keys });
 
-    if (!tiktokEnabled) return res.json({ connected: false, enabled: false });
+    if (!keys) return res.json({ connected: false, enabled: false });
 
     const tokens = await getTikTokTokens(userId);
     if (!tokens?.access_token) return res.json({ connected: false, enabled: true });
@@ -4372,7 +4398,7 @@ app.get('/api/tiktok/status', requireAuth, async (req, res) => {
     // Try to get fresh user info
     let username = tokens.tiktok_username || '';
     try {
-      const validTokens = await getValidTikTokToken(userId);
+      const validTokens = await getValidTikTokToken(userId, keys.clientKey, keys.clientSecret);
       const userResp = await fetch('https://open.tiktokapis.com/v2/user/info/?fields=display_name,username', {
         headers: { Authorization: `Bearer ${validTokens.access_token}` },
       });
@@ -4387,7 +4413,7 @@ app.get('/api/tiktok/status', requireAuth, async (req, res) => {
     res.json({ connected: true, enabled: true, username });
   } catch (err) {
     console.error('[TikTok] Status error:', err);
-    res.json({ connected: false, enabled: tiktokEnabled });
+    res.json({ connected: false, enabled: !!getTikTokKeys(req) });
   }
 });
 
@@ -4407,7 +4433,8 @@ app.post('/api/tiktok/disconnect', requireAuth, async (req, res) => {
 
 // Post carousel to TikTok
 app.post('/api/tiktok/post', requireAuth, async (req, res) => {
-  if (!tiktokEnabled) return res.status(500).json({ error: 'TikTok not configured' });
+  const keys = getTikTokKeys(req);
+  if (!keys) return res.status(400).json({ error: 'TikTok Client Key and Secret required. Add them in Settings.' });
 
   try {
     const userId = req.user?.uid;
@@ -4422,7 +4449,7 @@ app.post('/api/tiktok/post', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'TikTok supports max 35 images per photo post' });
     }
 
-    const tokens = await getValidTikTokToken(userId);
+    const tokens = await getValidTikTokToken(userId, keys.clientKey, keys.clientSecret);
 
     // Convert PNG images to JPG
     console.log(`[TikTok] Converting ${imageUrls.length} images to JPG...`);
@@ -4520,13 +4547,14 @@ app.post('/api/tiktok/post', requireAuth, async (req, res) => {
 
 // Poll post status
 app.get('/api/tiktok/post-status/:publishId', requireAuth, async (req, res) => {
-  if (!tiktokEnabled) return res.status(500).json({ error: 'TikTok not configured' });
+  const keys = getTikTokKeys(req);
+  if (!keys) return res.status(400).json({ error: 'TikTok Client Key and Secret required. Add them in Settings.' });
 
   try {
     const userId = req.user?.uid;
     if (!userId) return res.status(401).json({ error: 'Not authenticated' });
 
-    const tokens = await getValidTikTokToken(userId);
+    const tokens = await getValidTikTokToken(userId, keys.clientKey, keys.clientSecret);
 
     const statusResp = await fetch('https://open.tiktokapis.com/v2/post/publish/status/fetch/', {
       method: 'POST',

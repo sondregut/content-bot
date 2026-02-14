@@ -35,9 +35,13 @@ async function authFetch(url, opts = {}) {
   const openaiKey = localStorage.getItem(_prefix + 'openai_key');
   const anthropicKey = localStorage.getItem(_prefix + 'anthropic_key');
   const falKey = localStorage.getItem(_prefix + 'fal_key');
+  const tiktokClientKey = localStorage.getItem(_prefix + 'tiktok_client_key');
+  const tiktokClientSecret = localStorage.getItem(_prefix + 'tiktok_client_secret');
   if (openaiKey) opts.headers['X-OpenAI-Key'] = openaiKey;
   if (anthropicKey) opts.headers['X-Anthropic-Key'] = anthropicKey;
   if (falKey) opts.headers['X-Fal-Key'] = falKey;
+  if (tiktokClientKey) opts.headers['X-TikTok-Client-Key'] = tiktokClientKey;
+  if (tiktokClientSecret) opts.headers['X-TikTok-Client-Secret'] = tiktokClientSecret;
   return fetch(url, opts);
 }
 
@@ -155,6 +159,8 @@ document.getElementById('sign-out-btn').addEventListener('click', async () => {
   settingsOpenaiKey.value = '';
   settingsAnthropicKey.value = '';
   if (settingsFalKey) settingsFalKey.value = '';
+  if (settingsTiktokClientKey) settingsTiktokClientKey.value = '';
+  if (settingsTiktokClientSecret) settingsTiktokClientSecret.value = '';
   // Close settings modal
   document.getElementById('settings-modal').style.display = 'none';
   if (firebase.apps.length) {
@@ -437,6 +443,8 @@ let selectedElement = 'headline'; // which element is selected for dragging
 
 // --- API Key Settings ---
 const settingsFalKey = document.getElementById('settings-fal-key');
+const settingsTiktokClientKey = document.getElementById('settings-tiktok-client-key');
+const settingsTiktokClientSecret = document.getElementById('settings-tiktok-client-secret');
 
 function getKeyPrefix() {
   const user = firebase.apps.length ? firebase.auth().currentUser : null;
@@ -465,9 +473,13 @@ function loadApiKeysFromStorage() {
   const openai = localStorage.getItem(prefix + 'openai_key') || '';
   const anthropic = localStorage.getItem(prefix + 'anthropic_key') || '';
   const fal = localStorage.getItem(prefix + 'fal_key') || '';
+  const tiktokKey = localStorage.getItem(prefix + 'tiktok_client_key') || '';
+  const tiktokSecret = localStorage.getItem(prefix + 'tiktok_client_secret') || '';
   settingsOpenaiKey.value = openai;
   settingsAnthropicKey.value = anthropic;
   if (settingsFalKey) settingsFalKey.value = fal;
+  if (settingsTiktokClientKey) settingsTiktokClientKey.value = tiktokKey;
+  if (settingsTiktokClientSecret) settingsTiktokClientSecret.value = tiktokSecret;
 }
 
 // API key show/hide toggles
@@ -523,10 +535,20 @@ settingsSaveBtn.addEventListener('click', async () => {
   if (falKey) localStorage.setItem(prefix + 'fal_key', falKey);
   else localStorage.removeItem(prefix + 'fal_key');
 
+  const tiktokKey = settingsTiktokClientKey ? settingsTiktokClientKey.value.trim() : '';
+  const tiktokSecret = settingsTiktokClientSecret ? settingsTiktokClientSecret.value.trim() : '';
+  if (tiktokKey) localStorage.setItem(prefix + 'tiktok_client_key', tiktokKey);
+  else localStorage.removeItem(prefix + 'tiktok_client_key');
+  if (tiktokSecret) localStorage.setItem(prefix + 'tiktok_client_secret', tiktokSecret);
+  else localStorage.removeItem(prefix + 'tiktok_client_secret');
+
   // Keys are stored in browser only — sent via headers on each API request
   settingsStatus.textContent = 'Keys saved! They will be used for all AI requests.';
   settingsStatus.className = 'settings-status success';
   setTimeout(() => { settingsModal.style.display = 'none'; }, 1200);
+
+  // Re-check TikTok status with new keys
+  checkTikTokStatus();
 });
 
 // --- AI Prompt Settings ---
