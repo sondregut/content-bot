@@ -132,6 +132,27 @@ document.getElementById('sign-out-btn').addEventListener('click', async () => {
   document.getElementById('app-shell').style.display = 'none';
 });
 
+document.getElementById('delete-account-btn').addEventListener('click', async () => {
+  if (!confirm('Are you sure you want to delete your account? This will permanently remove your account and all your brands. This cannot be undone.')) return;
+  if (!confirm('This is your last chance. Type OK to confirm you want to delete everything.')) return;
+  try {
+    const res = await authFetch('/api/account', { method: 'DELETE' });
+    const data = await res.json();
+    if (data.ok) {
+      clearSession();
+      if (firebase.apps.length) await firebase.auth().signOut();
+      document.getElementById('settings-modal').style.display = 'none';
+      document.getElementById('login-overlay').classList.add('visible');
+      document.getElementById('app-shell').style.display = 'none';
+      alert('Your account has been deleted.');
+    } else {
+      alert(data.error || 'Failed to delete account');
+    }
+  } catch (err) {
+    alert('Error deleting account: ' + err.message);
+  }
+});
+
 // --- State ---
 let brands = [];
 let currentBrand = null;
@@ -318,7 +339,7 @@ settingsBtn.addEventListener('click', () => {
   settingsModal.style.display = 'flex';
   settingsStatus.textContent = '';
   settingsStatus.className = 'settings-status';
-  const user = firebase.auth().currentUser;
+  const user = firebase.apps.length ? firebase.auth().currentUser : null;
   if (user) {
     const email = user.email || '';
     document.getElementById('settings-email').textContent = email;
@@ -2246,7 +2267,7 @@ downloadAllBtn.addEventListener('click', async () => {
 });
 
 // --- Generate All Slides (batch) ---
-generateAllBtn.addEventListener('click', async () => {
+async function startBatchGeneration() {
   if (!selectedIdea || slideEdits.length === 0) return;
   saveCurrentSlideEdits();
 
@@ -2281,7 +2302,9 @@ generateAllBtn.addEventListener('click', async () => {
     generateAllBtn.disabled = false;
     progressSection.style.display = 'none';
   }
-});
+}
+
+generateAllBtn.addEventListener('click', () => startBatchGeneration());
 
 function startPolling() {
   if (pollTimer) clearInterval(pollTimer);
@@ -2564,6 +2587,10 @@ autoGenerateBtn.addEventListener('click', async () => {
     document.getElementById('content-plan-subtitle').textContent =
       `${data.ideas.length} carousel ideas for ${brandName}`;
     renderContentPlanGrid(category.ideas, brandObj);
+
+    // Auto-generate images for the first idea
+    selectIdea('AI-1');
+    startBatchGeneration();
   } catch (err) {
     autoGenerateStatus.textContent = `Error: ${err.message}`;
   } finally {
