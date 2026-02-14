@@ -14,6 +14,15 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
+// --- Hex to RGB for highlight bars ---
+function hexToRgb(hex) {
+  const c = hex.replace('#', '');
+  const r = parseInt(c.substring(0, 2), 16);
+  const g = parseInt(c.substring(2, 4), 16);
+  const b = parseInt(c.substring(4, 6), 16);
+  return `${r}, ${g}, ${b}`;
+}
+
 // --- Default brand values (must match GENERIC_BRAND in server.mjs) ---
 const DEFAULT_BRAND_COLORS = { primary: '#1A1A2E', accent: '#E94560', white: '#FFFFFF', secondary: '#16213E', cta: '#0F3460' };
 const DEFAULT_BACKGROUND = 'dark premium background with subtle grain';
@@ -2080,10 +2089,17 @@ form.elements.includeOwl.addEventListener('change', updatePreviewMockup);
 // Font size sliders
 document.getElementById('headlineFontSize').addEventListener('input', () => {
   document.getElementById('headlineFontSizeValue').textContent = document.getElementById('headlineFontSize').value;
+  updatePreviewMockup();
 });
 document.getElementById('bodyFontSize').addEventListener('input', () => {
   document.getElementById('bodyFontSizeValue').textContent = document.getElementById('bodyFontSize').value;
+  updatePreviewMockup();
 });
+
+// Layout/highlight/overlay controls trigger preview update
+if (form.elements.highlightStyle) form.elements.highlightStyle.addEventListener('change', updatePreviewMockup);
+if (form.elements.layoutTemplate) form.elements.layoutTemplate.addEventListener('change', updatePreviewMockup);
+if (form.elements.overlayPlacement) form.elements.overlayPlacement.addEventListener('change', updatePreviewMockup);
 
 // Expand preview toggle
 const previewExpandBtn = document.getElementById('preview-expand-btn');
@@ -2142,8 +2158,8 @@ function updatePreviewMockup() {
     const isBackground = usage === 'background';
     const isAiBg = usage === 'ai-background';
     if (isBackground && screenshotImageFilename) {
-      const opacity = form.elements.bgOverlayOpacity?.value || '0.55';
-      previewMockup.style.background = `linear-gradient(rgba(0,0,0,${opacity}), rgba(0,0,0,${opacity})), url('/uploads/${screenshotImageFilename}') center/cover no-repeat`;
+      const o = parseFloat(form.elements.bgOverlayOpacity?.value) || 0.55;
+      previewMockup.style.background = `linear-gradient(to bottom, rgba(0,0,0,0) 0%, rgba(0,0,0,${o*0.3}) 40%, rgba(0,0,0,${o*0.7}) 70%, rgba(0,0,0,${o}) 100%), url('/uploads/${screenshotImageFilename}') center/cover no-repeat`;
       mockupPhotoPlaceholder.style.display = 'none';
     } else if (isAiBg) {
       previewMockup.style.background = `linear-gradient(135deg, #0f172a 0%, #1e3a5f 50%, #0f172a 100%)`;
@@ -2172,6 +2188,43 @@ function updatePreviewMockup() {
   if (phoneFrame) phoneFrame.style.display = 'none';
   if (figureImg) figureImg.style.display = 'none';
   if (mockupTextGroupEl) { mockupTextGroupEl.style.maxWidth = ''; mockupTextGroupEl.style.textAlign = ''; }
+
+  // Text-statement layout: center text vertically and horizontally
+  if (isMockup && mockupLayoutSelect.value === 'text-statement') {
+    previewMockup.style.justifyContent = 'center';
+    if (mockupTextGroupEl) mockupTextGroupEl.style.textAlign = 'center';
+  } else if (isPhoto) {
+    // Photo slide overlay placement
+    const placement = form.elements.overlayPlacement?.value || 'bottom third';
+    if (placement === 'left side') {
+      previewMockup.style.justifyContent = 'flex-end';
+      if (mockupTextGroupEl) { mockupTextGroupEl.style.maxWidth = '65%'; mockupTextGroupEl.style.textAlign = 'left'; }
+    } else if (placement === 'lower-left') {
+      previewMockup.style.justifyContent = 'flex-end';
+      if (mockupTextGroupEl) mockupTextGroupEl.style.textAlign = 'left';
+    } else {
+      previewMockup.style.justifyContent = 'flex-end';
+    }
+  } else if (!isMockup) {
+    // Text slide layout templates
+    const layoutTpl = form.elements.layoutTemplate?.value || '';
+    if (layoutTpl.includes('Layout B') || layoutTpl.includes('High Hook')) {
+      previewMockup.style.justifyContent = 'flex-start';
+      previewMockup.style.paddingTop = '36px';
+    } else if (layoutTpl.includes('Layout C') || layoutTpl.includes('Center')) {
+      previewMockup.style.justifyContent = 'center';
+      if (mockupTextGroupEl) mockupTextGroupEl.style.textAlign = 'center';
+    } else if (layoutTpl.includes('Layout D') || layoutTpl.includes('Bottom Emphasis')) {
+      previewMockup.style.justifyContent = 'flex-end';
+      if (mockupTextGroupEl) mockupTextGroupEl.style.textAlign = 'center';
+    } else {
+      previewMockup.style.justifyContent = 'flex-end';
+      previewMockup.style.paddingTop = '';
+    }
+  } else {
+    previewMockup.style.justifyContent = 'flex-end';
+    previewMockup.style.paddingTop = '';
+  }
 
   if (isMockup && screenshotImageFilename) {
     const usage = imageUsageSelect.value;
@@ -2225,11 +2278,22 @@ function updatePreviewMockup() {
   // Text color override
   const textColor = textColorEnabled ? (form.elements.mockupTextColor?.value || '#FFFFFF') : '';
 
+  // Font size scaling (server renders at 1080px; preview is 216px = 1/5 ratio)
+  const scaleRatio = 216 / 1080;
+  const headlineFontPx = (parseInt(form.elements.headlineFontSize?.value) || 82) * scaleRatio;
+  const bodyFontPx = (parseInt(form.elements.bodyFontSize?.value) || 34) * scaleRatio;
+  mockupHeadline.style.fontSize = headlineFontPx + 'px';
+  mockupBody.style.fontSize = bodyFontPx + 'px';
+
   // Update text content
   mockupMicro.textContent = microLabel;
   mockupMicro.style.color = accentColor;
 
-  // Headline with highlight (safe DOM construction)
+  // Highlight style
+  const highlightStyle = form.elements.highlightStyle?.value || 'subtle';
+  const highlightOpacity = highlightStyle === 'bold' ? 0.5 : 0.3;
+
+  // Headline with highlight bars (safe DOM construction)
   if (highlight && headline.includes(highlight)) {
     const parts = headline.split(highlight);
     mockupHeadline.textContent = '';
@@ -2237,6 +2301,9 @@ function updatePreviewMockup() {
     const span = document.createElement('span');
     span.className = 'highlight';
     span.style.color = accentColor;
+    span.style.background = `rgba(${hexToRgb(accentColor)}, ${highlightOpacity})`;
+    span.style.padding = '0 2px';
+    span.style.borderRadius = '2px';
     span.textContent = highlight;
     mockupHeadline.appendChild(span);
     if (parts[1]) mockupHeadline.appendChild(document.createTextNode(parts[1]));
@@ -2266,13 +2333,11 @@ function updatePreviewMockup() {
     darkenEl.style.display = 'none';
   }
 
-  // Font preview
+  // Font preview (apply to all slide types, not just mockup)
   const fontFamily = form.elements.mockupFont?.value || 'Helvetica';
-  if (isMockup) {
-    mockupHeadline.style.fontFamily = fontFamily + ', sans-serif';
-    mockupBody.style.fontFamily = fontFamily + ', sans-serif';
-    mockupMicro.style.fontFamily = fontFamily + ', sans-serif';
-  }
+  mockupHeadline.style.fontFamily = fontFamily + ', sans-serif';
+  mockupBody.style.fontFamily = fontFamily + ', sans-serif';
+  mockupMicro.style.fontFamily = fontFamily + ', sans-serif';
 
   // Icon position & visibility
   const mockupIcon = document.getElementById('mockup-icon');
