@@ -218,6 +218,26 @@ async function uploadToStorage(buffer, filename) {
   return url;
 }
 
+// --- Save image record to Firestore for vault ---
+async function saveImageRecord({ userId, brandId, filename, type }) {
+  if (!db) return null;
+  try {
+    const doc = db.collection('generated_images').doc();
+    await doc.set({
+      userId,
+      brandId: brandId || null,
+      filename,
+      storagePath: `carousel-studio/${filename}`,
+      type, // 'slide' | 'meme' | 'carousel' | 'edit' | 'personalized'
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    return doc.id;
+  } catch (err) {
+    console.warn('[saveImageRecord] Failed:', err.message);
+    return null;
+  }
+}
+
 app.use(express.json({ limit: '10mb' }));
 
 // --- Rate limiting for expensive generation routes ---
@@ -2178,6 +2198,7 @@ Rules:
               const slug = crypto.randomUUID().slice(0, 8);
               const filename = `carousel_${brandId}_setup_s${i + 1}_${slug}.png`;
               const slideUrl = await uploadToStorage(buffer, filename);
+              saveImageRecord({ userId: req.user.uid, brandId, filename, type: 'carousel' });
               sendSSE('slide', { index: i, imageUrl: slideUrl, type: 'ai' });
             }
           } else {
@@ -2198,6 +2219,7 @@ Rules:
             const slug = crypto.randomUUID().slice(0, 8);
             const filename = `carousel_${brandId}_setup_s${i + 1}_${slug}.png`;
             const slideUrl = await uploadToStorage(mockupBuffer, filename);
+            saveImageRecord({ userId: req.user.uid, brandId, filename, type: 'carousel' });
             sendSSE('slide', { index: i, imageUrl: slideUrl, type: 'mockup' });
           }
         } catch (slideErr) {
@@ -2663,6 +2685,7 @@ app.post('/api/generate', requireAuth, generationLimiter, async (req, res) => {
           const slug = crypto.randomUUID().slice(0, 8);
           const filename = `slide_${brandId}_mockup_${Date.now()}_${slug}.png`;
           const url = await uploadToStorage(buffer, filename);
+          saveImageRecord({ userId: req.user?.uid, brandId, filename, type: 'slide' });
           return res.json({ ok: true, filename, url, prompt: bgPrompt, refinedPrompt: refinedBgPrompt, usedRefined: Boolean(refinedBgPrompt) });
         } finally {
           // Clean up temp AI background file
@@ -2674,6 +2697,7 @@ app.post('/api/generate', requireAuth, generationLimiter, async (req, res) => {
       const slug = crypto.randomUUID().slice(0, 8);
       const filename = `slide_${brandId}_mockup_${Date.now()}_${slug}.png`;
       const url = await uploadToStorage(buffer, filename);
+      saveImageRecord({ userId: req.user?.uid, brandId, filename, type: 'slide' });
       return res.json({ ok: true, filename, url, prompt: null, refinedPrompt: null, usedRefined: false });
     }
 
@@ -2801,6 +2825,7 @@ Pick a DIFFERENT format each time. Do NOT default to two-panel approval.`,
       const slug = crypto.randomUUID().slice(0, 8);
       const filename = `meme_${brandId}_${Date.now()}_${slug}.png`;
       const url = await uploadToStorage(buffer, filename);
+      saveImageRecord({ userId: req.user?.uid, brandId, filename, type: 'meme' });
 
       return res.json({
         ok: true, filename, url,
@@ -2882,6 +2907,7 @@ Pick a DIFFERENT format each time. Do NOT default to two-panel approval.`,
     const filename = `slide_${brandId}_${data.slideType}_${Date.now()}_${slug}.png`;
 
     const url = await uploadToStorage(buffer, filename);
+    saveImageRecord({ userId: req.user?.uid, brandId, filename, type: 'slide' });
 
     res.json({
       ok: true,
@@ -2936,6 +2962,7 @@ app.post('/api/edit-slide', requireAuth, async (req, res) => {
     const slug = crypto.randomUUID().slice(0, 8);
     const filename = `edit_${brandId}_${Date.now()}_${slug}.png`;
     const url = await uploadToStorage(buffer, filename);
+    saveImageRecord({ userId: req.user?.uid, brandId, filename, type: 'edit' });
 
     res.json({ ok: true, filename, url });
   } catch (error) {
@@ -3005,6 +3032,7 @@ app.post('/api/generate-carousel', requireAuth, generationLimiter, async (req, r
               const slug = crypto.randomUUID().slice(0, 8);
               const filename = `carousel_${brand.id}_${jobId}_s${i + 1}_${slug}.png`;
               const slideUrl = await uploadToStorage(mockupBuffer, filename);
+              saveImageRecord({ userId: req.user?.uid, brandId: brand.id, filename, type: 'carousel' });
               job.slides.push({ slideNumber: i + 1, url: slideUrl, filename, ok: true });
             } finally {
               await fs.unlink(tempPath).catch(() => {});
@@ -3015,6 +3043,7 @@ app.post('/api/generate-carousel', requireAuth, generationLimiter, async (req, r
             const slug = crypto.randomUUID().slice(0, 8);
             const filename = `carousel_${brand.id}_${jobId}_s${i + 1}_${slug}.png`;
             const slideUrl = await uploadToStorage(mockupBuffer, filename);
+            saveImageRecord({ userId: req.user?.uid, brandId: brand.id, filename, type: 'carousel' });
             job.slides.push({ slideNumber: i + 1, url: slideUrl, filename, ok: true });
           }
           job.completed = i + 1;
@@ -3091,6 +3120,7 @@ app.post('/api/generate-carousel', requireAuth, generationLimiter, async (req, r
         const slug = crypto.randomUUID().slice(0, 8);
         const filename = `carousel_${brand.id}_${jobId}_s${i + 1}_${slug}.png`;
         const slideUrl = await uploadToStorage(buffer, filename);
+        saveImageRecord({ userId: req.user?.uid, brandId: brand.id, filename, type: 'carousel' });
 
         job.slides.push({
           slideNumber: i + 1,
@@ -3485,6 +3515,7 @@ app.post('/api/generate-personalized', requireAuth, upload.array('faceImages', 5
     const slug = crypto.randomUUID().slice(0, 8);
     const filename = `personalized_${brandId}_${Date.now()}_${slug}.png`;
     const url = await uploadToStorage(buffer, filename);
+    saveImageRecord({ userId: req.user?.uid, brandId, filename, type: 'personalized' });
 
     res.json({ ok: true, url, filename, model: model === 'flux' && isFalEnabled() ? 'flux' : 'gpt' });
   } catch (error) {
@@ -3552,6 +3583,7 @@ app.post('/api/generate-personalized-carousel', requireAuth, upload.array('faceI
         const slug = crypto.randomUUID().slice(0, 8);
         const filename = `personalized_${brand.id}_${jobId}_s${i + 1}_${slug}.png`;
         const url = await uploadToStorage(buffer, filename);
+        saveImageRecord({ userId: req.user?.uid, brandId: brand.id, filename, type: 'personalized' });
         job.slides.push({ slideNumber: i + 1, url, filename, ok: true });
         job.completed = i + 1;
       } catch (err) {
@@ -3658,6 +3690,201 @@ app.get('/brands/:brandId/assets/app-icon.png', async (req, res, next) => {
 
 // Serve brand assets
 app.use('/brands', express.static(path.join(rootDir, 'brands')));
+
+// --- Image Vault API ---
+
+// List user's images with fresh signed URLs
+app.get('/api/images', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user.uid;
+
+    // Local dev fallback — list files from outputDir
+    if (!db) {
+      const files = await fs.readdir(outputDir).catch(() => []);
+      const pngs = files.filter(f => f.endsWith('.png')).sort().reverse();
+      const images = pngs.slice(0, 50).map(f => ({
+        id: f,
+        filename: f,
+        url: `/output/${f}`,
+        type: f.startsWith('meme_') ? 'meme' : f.startsWith('edit_') ? 'edit' : f.startsWith('personalized_') ? 'personalized' : f.startsWith('carousel_') ? 'carousel' : 'slide',
+        createdAt: null,
+      }));
+      return res.json({ images, hasMore: false, nextCursor: null });
+    }
+
+    const limit = Math.min(parseInt(req.query.limit) || 50, 100);
+    let query = db.collection('generated_images')
+      .where('userId', '==', userId)
+      .orderBy('createdAt', 'desc')
+      .limit(limit + 1);
+
+    if (req.query.brand) {
+      query = db.collection('generated_images')
+        .where('userId', '==', userId)
+        .where('brandId', '==', req.query.brand)
+        .orderBy('createdAt', 'desc')
+        .limit(limit + 1);
+    }
+
+    if (req.query.startAfter) {
+      const cursorDoc = await db.collection('generated_images').doc(req.query.startAfter).get();
+      if (cursorDoc.exists) {
+        query = query.startAfter(cursorDoc);
+      }
+    }
+
+    const snapshot = await query.get();
+    const docs = snapshot.docs.slice(0, limit);
+    const hasMore = snapshot.docs.length > limit;
+
+    // Generate fresh signed URLs in parallel
+    const images = await Promise.all(docs.map(async (doc) => {
+      const data = doc.data();
+      try {
+        const file = bucket.file(data.storagePath);
+        const [exists] = await file.exists();
+        if (!exists) return null;
+        const [url] = await file.getSignedUrl({ action: 'read', expires: Date.now() + 2 * 60 * 60 * 1000 });
+        return {
+          id: doc.id,
+          filename: data.filename,
+          url,
+          brandId: data.brandId,
+          type: data.type,
+          createdAt: data.createdAt?.toDate?.()?.toISOString() || null,
+        };
+      } catch {
+        return null;
+      }
+    }));
+
+    const filtered = images.filter(Boolean);
+    res.json({
+      images: filtered,
+      hasMore,
+      nextCursor: hasMore && docs.length > 0 ? docs[docs.length - 1].id : null,
+    });
+  } catch (err) {
+    console.error('[Images List]', err);
+    res.status(500).json({ error: safeErrorMessage(err) });
+  }
+});
+
+// Count user's images (single Firestore read)
+app.get('/api/images/count', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user.uid;
+
+    if (!db) {
+      const files = await fs.readdir(outputDir).catch(() => []);
+      return res.json({ count: files.filter(f => f.endsWith('.png')).length });
+    }
+
+    const snapshot = await db.collection('generated_images')
+      .where('userId', '==', userId)
+      .count()
+      .get();
+    res.json({ count: snapshot.data().count });
+  } catch (err) {
+    console.error('[Images Count]', err);
+    res.status(500).json({ error: safeErrorMessage(err) });
+  }
+});
+
+// Delete an image from vault
+app.delete('/api/images/:id', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user.uid;
+    const docId = req.params.id;
+
+    if (!db) {
+      // Local dev fallback — delete file from outputDir
+      const filepath = path.join(outputDir, path.basename(docId));
+      await fs.unlink(filepath).catch(() => {});
+      return res.json({ ok: true });
+    }
+
+    const docRef = db.collection('generated_images').doc(docId);
+    const doc = await docRef.get();
+    if (!doc.exists) return res.status(404).json({ error: 'Image not found' });
+    if (doc.data().userId !== userId) return res.status(403).json({ error: 'Not authorized' });
+
+    // Delete from Storage
+    const storagePath = doc.data().storagePath;
+    if (storagePath && bucket) {
+      try {
+        await bucket.file(storagePath).delete();
+      } catch { /* file may already be deleted */ }
+    }
+
+    // Delete Firestore record
+    await docRef.delete();
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[Images Delete]', err);
+    res.status(500).json({ error: safeErrorMessage(err) });
+  }
+});
+
+// Migrate old localStorage vault entries to Firestore
+app.post('/api/images/migrate', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user.uid;
+    const { filenames } = req.body || {};
+
+    if (!db || !bucket) return res.json({ migrated: 0 });
+    if (!Array.isArray(filenames) || filenames.length === 0) return res.json({ migrated: 0 });
+
+    // Cap at 200 items
+    const toMigrate = filenames.slice(0, 200);
+    let migrated = 0;
+
+    for (const filename of toMigrate) {
+      const sanitized = path.basename(filename);
+      const storagePath = `carousel-studio/${sanitized}`;
+
+      // Check if file exists in Storage
+      try {
+        const [exists] = await bucket.file(storagePath).exists();
+        if (!exists) continue;
+      } catch { continue; }
+
+      // Check if record already exists
+      const existing = await db.collection('generated_images')
+        .where('userId', '==', userId)
+        .where('filename', '==', sanitized)
+        .limit(1)
+        .get();
+      if (!existing.empty) continue;
+
+      // Infer type from filename
+      let type = 'slide';
+      if (sanitized.startsWith('meme_')) type = 'meme';
+      else if (sanitized.startsWith('edit_')) type = 'edit';
+      else if (sanitized.startsWith('personalized_')) type = 'personalized';
+      else if (sanitized.startsWith('carousel_')) type = 'carousel';
+
+      // Extract brandId from filename (pattern: type_brandId_...)
+      const parts = sanitized.split('_');
+      const brandId = parts.length >= 2 ? parts[1] : null;
+
+      await db.collection('generated_images').doc().set({
+        userId,
+        brandId,
+        filename: sanitized,
+        storagePath,
+        type,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      migrated++;
+    }
+
+    res.json({ migrated });
+  } catch (err) {
+    console.error('[Images Migrate]', err);
+    res.status(500).json({ error: safeErrorMessage(err) });
+  }
+});
 
 // Download single image
 app.get('/api/download/:filename', requireAuth, async (req, res) => {

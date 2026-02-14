@@ -199,6 +199,12 @@ function resetAppState() {
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
   if (generateAbort) { generateAbort.abort(); generateAbort = null; }
 
+  // Vault state
+  vaultImages = [];
+  vaultHasMore = false;
+  vaultNextCursor = null;
+  vaultLoading = false;
+
   // Reference images
   referenceImageFilename = null;
   screenshotImageFilename = null;
@@ -4035,76 +4041,154 @@ function clearSession() {
   localStorage.removeItem(SESSION_KEY);
 }
 
-// --- Photo Vault (localStorage) ---
+// --- Photo Vault (Firestore-backed) ---
 // =============================================
 
-function vaultKey() {
-  const uid = firebase.auth?.()?.currentUser?.uid;
-  return uid ? `carousel-studio-vault-${uid}` : 'carousel-studio-vault';
+let vaultImages = [];
+let vaultHasMore = false;
+let vaultNextCursor = null;
+let vaultLoading = false;
+
+async function fetchVaultImages(reset = false) {
+  if (vaultLoading) return;
+  vaultLoading = true;
+  try {
+    if (reset) {
+      vaultImages = [];
+      vaultHasMore = false;
+      vaultNextCursor = null;
+    }
+    let url = '/api/images?limit=50';
+    if (vaultNextCursor && !reset) url += `&startAfter=${vaultNextCursor}`;
+    const res = await authFetch(url);
+    if (!res.ok) throw new Error('Failed to load images');
+    const data = await res.json();
+    if (reset) {
+      vaultImages = data.images;
+    } else {
+      vaultImages = vaultImages.concat(data.images);
+    }
+    vaultHasMore = data.hasMore;
+    vaultNextCursor = data.nextCursor;
+  } catch (err) {
+    console.error('Failed to fetch vault images:', err);
+  } finally {
+    vaultLoading = false;
+  }
 }
 
-function loadVault() {
-  try { return JSON.parse(localStorage.getItem(vaultKey()) || '[]'); }
-  catch { return []; }
+async function fetchVaultCount() {
+  try {
+    const res = await authFetch('/api/images/count');
+    if (!res.ok) return;
+    const data = await res.json();
+    const el = document.getElementById('vault-count');
+    if (el) el.textContent = data.count || 0;
+  } catch { /* ignore */ }
 }
 
-function saveVault(vault) {
-  try { localStorage.setItem(vaultKey(), JSON.stringify(vault)); }
-  catch { /* quota exceeded */ }
-}
-
-function addToVault(url, filename) {
-  if (!url) return;
-  const vault = loadVault();
-  if (vault.some(v => v.url === url)) return;
-  vault.unshift({ url, filename, addedAt: Date.now() });
-  saveVault(vault);
-  updateVaultCount();
+// Images are auto-saved server-side now; just refresh the count
+function addToVault(_url, _filename) {
+  fetchVaultCount();
 }
 
 function updateVaultCount() {
-  const el = document.getElementById('vault-count');
-  if (el) el.textContent = loadVault().length;
+  fetchVaultCount();
 }
 
 function renderVault() {
   const grid = document.getElementById('vault-grid');
   if (!grid) return;
-  const vault = loadVault();
-  if (vault.length === 0) {
+  if (vaultLoading && vaultImages.length === 0) {
+    grid.innerHTML = '<div style="padding:24px;text-align:center;color:#9ca3af;font-size:0.9rem;">Loading...</div>';
+    return;
+  }
+  if (vaultImages.length === 0) {
     grid.innerHTML = '<div style="padding:24px;text-align:center;color:#9ca3af;font-size:0.9rem;">No images yet. Generate slides to fill your vault.</div>';
     return;
   }
-  grid.innerHTML = vault.map((v, i) =>
+  let html = vaultImages.map(v =>
     `<div class="vault-item">
       <img src="${v.url}" alt="${v.filename || 'image'}" loading="lazy" />
       <div class="vault-item-actions">
         <a href="${v.url}" download="${v.filename || 'image.png'}" class="vault-dl-btn" title="Download">&#8681;</a>
-        <button class="vault-rm-btn" data-index="${i}" title="Remove">&times;</button>
+        <button class="vault-rm-btn" data-id="${v.id}" title="Remove">&times;</button>
       </div>
     </div>`
   ).join('');
 
+  if (vaultHasMore) {
+    html += `<div style="grid-column: 1/-1; text-align:center; padding:12px;">
+      <button id="vault-load-more" style="padding:8px 24px;border:1px solid #374151;background:#1f2937;color:#d1d5db;border-radius:6px;cursor:pointer;">Load more</button>
+    </div>`;
+  }
+  grid.innerHTML = html;
+
   grid.querySelectorAll('.vault-rm-btn').forEach(btn => {
-    btn.addEventListener('click', (e) => {
+    btn.addEventListener('click', async (e) => {
       e.stopPropagation();
-      const idx = parseInt(btn.dataset.index);
-      const vault = loadVault();
-      vault.splice(idx, 1);
-      saveVault(vault);
-      updateVaultCount();
-      renderVault();
+      const id = btn.dataset.id;
+      btn.disabled = true;
+      btn.textContent = '...';
+      try {
+        const res = await authFetch(`/api/images/${id}`, { method: 'DELETE' });
+        if (res.ok) {
+          vaultImages = vaultImages.filter(v => v.id !== id);
+          fetchVaultCount();
+          renderVault();
+        }
+      } catch (err) {
+        console.error('Delete failed:', err);
+      }
     });
   });
 
   grid.querySelectorAll('.vault-item img').forEach(img => {
     img.addEventListener('click', () => window.open(img.src, '_blank'));
   });
+
+  document.getElementById('vault-load-more')?.addEventListener('click', async () => {
+    await fetchVaultImages(false);
+    renderVault();
+  });
 }
 
-function openVault() {
+async function migrateLocalVault() {
+  const uid = firebase.auth?.()?.currentUser?.uid;
+  if (!uid) return;
+  const migrationKey = `vault-migrated-${uid}`;
+  if (localStorage.getItem(migrationKey)) return;
+
+  // Read old localStorage vault
+  const oldKey = `carousel-studio-vault-${uid}`;
+  let oldVault = [];
+  try { oldVault = JSON.parse(localStorage.getItem(oldKey) || '[]'); } catch { /* ignore */ }
+
+  if (oldVault.length > 0) {
+    const filenames = oldVault.map(v => v.filename).filter(Boolean);
+    if (filenames.length > 0) {
+      try {
+        await authFetch('/api/images/migrate', {
+          method: 'POST',
+          body: JSON.stringify({ filenames }),
+        });
+      } catch { /* migration is best-effort */ }
+    }
+  }
+
+  localStorage.setItem(migrationKey, '1');
+  // Clean up old key
+  try { localStorage.removeItem(oldKey); } catch { /* ignore */ }
+}
+
+async function openVault() {
   document.getElementById('vault-panel').classList.add('open');
   document.getElementById('vault-backdrop').classList.add('open');
+  // Run one-time migration
+  await migrateLocalVault();
+  // Fetch fresh data (with fresh signed URLs) every time
+  renderVault(); // show loading state
+  await fetchVaultImages(true);
   renderVault();
 }
 
