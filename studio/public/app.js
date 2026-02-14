@@ -854,6 +854,29 @@ function renderFaceStudioPersonDetail() {
       p.url ? `<div class="face-photo-thumb"><img src="${p.url}" alt="Photo" /><button class="face-photo-remove" data-idx="${idx}" title="Remove">&times;</button></div>` : ''
     ).join('');
 
+    // Shared upload helper
+    async function uploadPhotosForPerson(files) {
+      const images = Array.from(files).filter(f => f.type.startsWith('image/'));
+      if (!images.length) return;
+      const fd = new FormData();
+      for (const f of images) fd.append('photos', f);
+      const countEl = document.getElementById('face-studio-photo-count');
+      if (countEl) countEl.textContent = `Uploading ${images.length}...`;
+      try {
+        const res = await authFetch(`/api/persons/${person.id}/photos`, { method: 'POST', body: fd });
+        const data = await res.json();
+        if (data.ok) {
+          person.photos = data.photos;
+          renderFaceStudioPersons();
+          renderFaceStudioPersonDetail();
+        } else {
+          alert(data.error || 'Upload failed');
+        }
+      } catch (err) {
+        alert('Upload failed: ' + err.message);
+      }
+    }
+
     if (photoCount < 20) {
       const addBtn = document.createElement('button');
       addBtn.type = 'button';
@@ -865,30 +888,26 @@ function renderFaceStudioPersonDetail() {
         input.type = 'file';
         input.accept = 'image/*';
         input.multiple = true;
-        input.addEventListener('change', async () => {
-          if (!input.files?.length) return;
-          const fd = new FormData();
-          for (const f of input.files) fd.append('photos', f);
-          addBtn.textContent = '...';
-          addBtn.disabled = true;
-          try {
-            const res = await authFetch(`/api/persons/${person.id}/photos`, { method: 'POST', body: fd });
-            const data = await res.json();
-            if (data.ok) {
-              person.photos = data.photos;
-              renderFaceStudioPersons();
-              renderFaceStudioPersonDetail();
-            } else {
-              alert(data.error || 'Upload failed');
-            }
-          } catch (err) {
-            alert('Upload failed: ' + err.message);
-          }
-        });
+        input.addEventListener('change', () => uploadPhotosForPerson(input.files));
         input.click();
       });
       photoGrid.appendChild(addBtn);
     }
+
+    // Drag & drop
+    photoGrid.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      photoGrid.classList.add('drag-over');
+    });
+    photoGrid.addEventListener('dragleave', (e) => {
+      if (!photoGrid.contains(e.relatedTarget)) photoGrid.classList.remove('drag-over');
+    });
+    photoGrid.addEventListener('drop', (e) => {
+      e.preventDefault();
+      photoGrid.classList.remove('drag-over');
+      if (photoCount >= 20) return;
+      uploadPhotosForPerson(e.dataTransfer.files);
+    });
 
     // Photo count
     const countEl = document.getElementById('face-studio-photo-count');
