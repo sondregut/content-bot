@@ -213,6 +213,13 @@
             <div class="personalize-layout">
               <!-- Left column: Photos + Scenario + Generate -->
               <div class="personalize-controls-col">
+                <div class="form-group full" style="margin-bottom:12px">
+                  <label class="label">Person</label>
+                  <select id="personalize-person-select">
+                    <option value="">Use uploaded photos below</option>
+                  </select>
+                  <span class="field-hint">Or select a saved person from Settings</span>
+                </div>
                 <label class="label">Your Photos <span class="face-photo-count" id="face-photo-count">0 / 5</span></label>
                 <p class="freeform-hint" style="margin:0 0 8px">Multiple angles give better face consistency.</p>
                 <div class="face-photos-grid" id="face-photos-grid">
@@ -314,12 +321,6 @@
 
             <div class="slide-tabs" id="slide-tabs"></div>
 
-            <!-- Post Caption -->
-            <div class="caption-editor" id="caption-editor" style="display:none">
-              <label for="caption-textarea" class="form-label" style="font-size:0.8rem;color:var(--muted);margin-bottom:4px;">Post Caption</label>
-              <textarea id="caption-textarea" rows="2" placeholder="Caption for this carousel post..." style="width:100%;font-family:inherit;font-size:0.85rem;padding:8px 10px;border:1px solid var(--border);border-radius:8px;resize:vertical;background:var(--white);color:var(--ink);"></textarea>
-            </div>
-
             <!-- Slide Preview (HTML mockup) -->
             <div class="editor-columns">
             <div class="editor-left-col">
@@ -385,6 +386,15 @@
               </button>
 
               <div class="form-section" id="photo-fields" style="display:none">
+                <div class="form-row">
+                  <div class="form-group full">
+                    <label class="label" for="person-select">Person (face reference)</label>
+                    <select id="person-select" name="personId">
+                      <option value="">None (AI generates everything)</option>
+                    </select>
+                    <span class="field-hint">Select a person for hybrid rendering: AI photo + Sharp text overlay</span>
+                  </div>
+                </div>
                 <div class="form-row">
                   <div class="form-group">
                     <label class="label" for="field-sport">Sport</label>
@@ -776,6 +786,11 @@
               </div>
             </div>
 
+            <!-- Post Caption (Instagram-style, below preview) -->
+            <div class="caption-editor" id="caption-editor" style="display:none">
+              <textarea id="caption-textarea" rows="2" placeholder="Write a caption..."></textarea>
+            </div>
+
             <div class="gallery-section" id="gallery-section" style="display:none">
               <div class="gallery-header">
                 <h3>Generated Slides</h3>
@@ -1057,6 +1072,16 @@
             </div>
           </div>
           <div class="settings-status" id="settings-status"></div>
+          <div class="settings-divider"></div>
+          <div class="settings-section-header" id="persons-settings-toggle">
+            <span>People (Face Photos)</span>
+            <span class="collapse-arrow">&#9660;</span>
+          </div>
+          <div class="persons-settings-section" id="persons-settings-section" style="display:none">
+            <p class="field-hint">Manage people for face-consistent photo generation. Photos are shared across all your brands.</p>
+            <div id="persons-list"></div>
+            <button type="button" class="btn primary small" id="add-person-btn">+ Add Person</button>
+          </div>
           <div class="settings-divider"></div>
           <div class="settings-section-header" id="prompt-settings-toggle">
             <span>AI Prompt Settings</span>

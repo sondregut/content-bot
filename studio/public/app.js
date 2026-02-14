@@ -132,6 +132,7 @@ async function authFetch(url, opts = {}) {
     updateIconPreview();
     checkTikTokStatus();
     updateVaultCount();
+    loadUserPersons();
   } else {
     resetAppState();
     overlay.classList.add('visible');
@@ -249,6 +250,7 @@ let referenceImageFilename = null;
 let screenshotImageFilename = null;
 let slideReferenceImages = {}; // { slideIndex: { filename, displayName } }
 let generateAbort = null; // AbortController for in-flight single-slide generation
+let userPersons = []; // User-level persons for face-consistent photo generation
 
 function resetAppState() {
   // Core brand/content state
@@ -274,6 +276,9 @@ function resetAppState() {
   vaultLoading = false;
   const vaultCountEl = document.getElementById('vault-count');
   if (vaultCountEl) vaultCountEl.textContent = '0';
+
+  // Persons
+  userPersons = [];
 
   // Reference images
   referenceImageFilename = null;
@@ -2534,6 +2539,8 @@ function updateAspectRatioPreview() {
   previewMockup.classList.remove('aspect-4-5', 'aspect-1-1');
   if (ratio === '4:5') previewMockup.classList.add('aspect-4-5');
   else if (ratio === '1:1') previewMockup.classList.add('aspect-1-1');
+  const previewFrame = document.getElementById('preview-frame');
+  if (previewFrame) previewFrame.dataset.ratio = ratio;
 }
 
 mockupTextReset.addEventListener('click', resetTextOffset);

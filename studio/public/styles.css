@@ -1454,11 +1454,11 @@ input:focus, select:focus, textarea:focus {
 
 /* Preview */
 
-.preview-section { margin-bottom: 20px; }
+.preview-section { margin-bottom: 0; }
 
 .preview-frame {
   background: var(--ink);
-  border-radius: var(--radius);
+  border-radius: var(--radius) var(--radius) 0 0;
   padding: 12px;
   min-height: 200px;
   display: flex;
@@ -1467,11 +1467,39 @@ input:focus, select:focus, textarea:focus {
   position: relative;
 }
 
+.preview-frame[data-ratio="9:16"] { aspect-ratio: 9/16; max-height: 70vh; }
+.preview-frame[data-ratio="4:5"]  { aspect-ratio: 4/5; }
+.preview-frame[data-ratio="1:1"]  { aspect-ratio: 1/1; }
+
 .preview-frame img {
   max-width: 100%;
-  max-height: 700px;
+  max-height: 100%;
   border-radius: 10px;
   display: none;
+  object-fit: contain;
+}
+
+/* Caption editor — Instagram-style below preview */
+.caption-editor {
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-top: none;
+  border-radius: 0 0 var(--radius) var(--radius);
+  padding: 10px 12px;
+  margin-bottom: 20px;
+}
+
+.caption-editor textarea {
+  width: 100%;
+  font-family: inherit;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  padding: 6px 0;
+  border: none;
+  outline: none;
+  resize: vertical;
+  background: transparent;
+  color: var(--ink);
 }
 
 /* Expand Preview Button */
@@ -1512,6 +1540,8 @@ input:focus, select:focus, textarea:focus {
   border-radius: 0;
   padding: 24px;
   min-height: 100vh;
+  aspect-ratio: auto;
+  max-height: none;
 }
 
 .preview-frame.expanded img {
@@ -1949,6 +1979,54 @@ input:focus, select:focus, textarea:focus {
   border-color: var(--cyan);
   color: var(--cyan);
   background: rgba(115,166,209,0.06);
+}
+
+/* Person cards in Settings */
+.person-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 10px;
+}
+.person-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.person-card-header input {
+  flex: 1;
+  font-size: 0.9rem;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--white);
+}
+.person-card-header .person-delete-btn {
+  background: none;
+  border: none;
+  color: var(--danger);
+  cursor: pointer;
+  font-size: 0.8rem;
+  padding: 4px 8px;
+  border-radius: 6px;
+  opacity: 0.6;
+  transition: opacity 0.15s;
+}
+.person-card-header .person-delete-btn:hover {
+  opacity: 1;
+  background: rgba(220,38,38,0.08);
+}
+.person-photos-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 64px);
+  gap: 6px;
+}
+.person-photo-count {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-top: 4px;
 }
 
 .personalize-controls-col {
