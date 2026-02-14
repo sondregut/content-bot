@@ -2266,14 +2266,12 @@ async function generateMoreIdeas() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Generation failed');
     if (!data.ideas || data.ideas.length === 0) throw new Error('No new ideas generated.');
-    console.log(`[generateMoreIdeas] RAW SERVER RESPONSE: format=${format}, ideas[0].slides.length=${data.ideas[0]?.slides?.length}, ideas[0].slides[0].type=${data.ideas[0]?.slides?.[0]?.type}`);
     const newIdeas = data.ideas.map((idea, i) => ({
       id: `AI-${startIndex + i + 1}`,
       title: idea.title,
       caption: idea.caption || '',
       slides: (idea.slides || []).map((s, si) => ({ ...s, number: s.number || si + 1, type: s.type || 'text' })),
     }));
-    console.log(`[generateMoreIdeas] MAPPED: id=${newIdeas[0]?.id} slides=${newIdeas[0]?.slides.length} type=${newIdeas[0]?.slides[0]?.type}`);
     let aiCat = app.categories.find(c => c.name === 'AI-Generated Ideas');
     if (aiCat) {
       aiCat.ideas.push(...newIdeas);
@@ -2305,6 +2303,7 @@ async function generateMoreIdeas() {
       renderContentPlanGrid(allUpdatedIdeas, brandObj);
     }
   } catch (err) {
+    console.error('[generateMoreIdeas] FAILED:', err.message);
     if (status) status.textContent = `Error: ${err.message}`;
   } finally {
     btn.disabled = false;
@@ -2668,7 +2667,6 @@ function saveCurrentSlideEdits() {
 
 function applyVideoMode() {
   const isVideo = slideEdits.length === 1 && slideEdits[0].type === 'video';
-  console.log('[applyVideoMode] slides:', slideEdits.length, 'type:', slideEdits[0]?.type, 'isVideo:', isVideo);
   editorArea.classList.toggle('video-mode', isVideo);
 
   // Slide tabs
@@ -4986,6 +4984,7 @@ function restoreSession(rawSession) {
         if (session.currentSlideIndex != null) currentSlideIndex = session.currentSlideIndex;
         renderSlideTabs();
         loadSlideIntoForm(currentSlideIndex);
+        applyVideoMode();
         updatePreviewMockup();
         updateGallery();
         // Highlight the restored idea in the sidebar so re-clicking it won't clear state

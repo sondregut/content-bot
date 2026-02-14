@@ -551,19 +551,27 @@ async function downloadPersonPhotosToTemp(person) {
   return tmpPaths;
 }
 
-// --- Save image record to Firestore for vault ---
-async function saveImageRecord({ userId, brandId, filename, type }) {
+// --- Save image record to Firestore for media library ---
+async function saveImageRecord({ userId, brandId, filename, type, prompt, refinedPrompt, model, brandName, width, height }) {
   if (!db) return null;
   try {
     const doc = db.collection('generated_images').doc();
-    await doc.set({
+    const record = {
       userId,
       brandId: brandId || null,
       filename,
       storagePath: `carousel-studio/${filename}`,
-      type, // 'slide' | 'meme' | 'carousel' | 'edit' | 'personalized'
+      type, // 'slide' | 'meme' | 'carousel' | 'edit' | 'personalized' | 'video' | 'carousel-video'
+      liked: false,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
+    };
+    if (prompt) record.prompt = prompt;
+    if (refinedPrompt) record.refinedPrompt = refinedPrompt;
+    if (model) record.model = model;
+    if (brandName) record.brandName = brandName;
+    if (width) record.width = width;
+    if (height) record.height = height;
+    await doc.set(record);
     return doc.id;
   } catch (err) {
     console.warn('[saveImageRecord] Failed:', err.message);
@@ -2888,7 +2896,7 @@ app.post('/api/brands/full-setup', requireAuth, async (req, res) => {
               const slug = crypto.randomUUID().slice(0, 8);
               const filename = `carousel_${brandId}_setup_s${i + 1}_${slug}.png`;
               const slideUrl = await uploadToStorage(buffer, filename);
-              saveImageRecord({ userId: req.user.uid, brandId, filename, type: 'carousel' });
+              saveImageRecord({ userId: req.user.uid, brandId, filename, type: 'carousel', prompt: rawPrompt, refinedPrompt, model: req.body?.imageModel, brandName: brand.name, width: 1080, height: 1920 });
               sendSSE('slide', { index: i, imageUrl: slideUrl, type: 'ai' });
             } catch (imgErr) {
               console.warn(`[Full Setup] Slide ${i + 1} image failed:`, imgErr.message);
@@ -2911,7 +2919,7 @@ app.post('/api/brands/full-setup', requireAuth, async (req, res) => {
             const slug = crypto.randomUUID().slice(0, 8);
             const filename = `carousel_${brandId}_setup_s${i + 1}_${slug}.png`;
             const slideUrl = await uploadToStorage(mockupBuffer, filename);
-            saveImageRecord({ userId: req.user.uid, brandId, filename, type: 'carousel' });
+            saveImageRecord({ userId: req.user.uid, brandId, filename, type: 'carousel', brandName: brand.name, width: 1080, height: 1920 });
             sendSSE('slide', { index: i, imageUrl: slideUrl, type: 'mockup' });
           }
         } catch (slideErr) {
@@ -3337,7 +3345,7 @@ app.post('/api/generate', requireAuth, generationLimiter, async (req, res) => {
           const slug = crypto.randomUUID().slice(0, 8);
           const filename = `slide_${brandId}_mockup_${Date.now()}_${slug}.png`;
           const url = await uploadToStorage(buffer, filename);
-          saveImageRecord({ userId: req.user?.uid, brandId, filename, type: 'slide' });
+          saveImageRecord({ userId: req.user?.uid, brandId, filename, type: 'slide', prompt: bgPrompt, refinedPrompt: refinedBgPrompt, model: data.imageModel, brandName: brand.name, width: 1080, height: 1920 });
           return res.json({ ok: true, filename, url, prompt: bgPrompt, refinedPrompt: refinedBgPrompt, usedRefined: Boolean(refinedBgPrompt) });
         } finally {
           // Clean up temp AI background file
@@ -3349,7 +3357,7 @@ app.post('/api/generate', requireAuth, generationLimiter, async (req, res) => {
       const slug = crypto.randomUUID().slice(0, 8);
       const filename = `slide_${brandId}_mockup_${Date.now()}_${slug}.png`;
       const url = await uploadToStorage(buffer, filename);
-      saveImageRecord({ userId: req.user?.uid, brandId, filename, type: 'slide' });
+      saveImageRecord({ userId: req.user?.uid, brandId, filename, type: 'slide', brandName: brand.name, width: 1080, height: 1920 });
       return res.json({ ok: true, filename, url, prompt: null, refinedPrompt: null, usedRefined: false });
     }
 
@@ -3471,7 +3479,7 @@ Pick a DIFFERENT format each time. Do NOT default to two-panel approval.`,
       const slug = crypto.randomUUID().slice(0, 8);
       const filename = `meme_${brandId}_${Date.now()}_${slug}.png`;
       const url = await uploadToStorage(buffer, filename);
-      saveImageRecord({ userId: req.user?.uid, brandId, filename, type: 'meme' });
+      saveImageRecord({ userId: req.user?.uid, brandId, filename, type: 'meme', prompt: rawPrompt, refinedPrompt, model: data.imageModel, brandName: brand.name });
 
       return res.json({
         ok: true, filename, url,
@@ -3518,7 +3526,7 @@ Pick a DIFFERENT format each time. Do NOT default to two-panel approval.`,
       const slug = crypto.randomUUID().slice(0, 8);
       const filename = `video_${brandId}_${Date.now()}_${slug}.mp4`;
       const url = await uploadVideoToStorage(videoBuffer, filename);
-      saveImageRecord({ userId: req.user?.uid, brandId, filename, type: 'video' });
+      saveImageRecord({ userId: req.user?.uid, brandId, filename, type: 'video', prompt: rawPrompt, refinedPrompt, model: 'kling-3.0', brandName: brand.name });
 
       return res.json({
         ok: true, filename, url, isVideo: true,
@@ -3589,7 +3597,7 @@ Pick a DIFFERENT format each time. Do NOT default to two-panel approval.`,
         const slug = crypto.randomUUID().slice(0, 8);
         const filename = `slide_${brandId}_photo_${Date.now()}_${slug}.png`;
         const url = await uploadToStorage(buffer, filename);
-        saveImageRecord({ userId: req.user?.uid, brandId, filename, type: 'slide' });
+        saveImageRecord({ userId: req.user?.uid, brandId, filename, type: 'slide', prompt: rawPrompt, refinedPrompt, model: data.imageModel, brandName: brand.name, width: 1080, height: 1920 });
 
         return res.json({
           ok: true, filename, url,
@@ -3659,7 +3667,7 @@ Pick a DIFFERENT format each time. Do NOT default to two-panel approval.`,
     const filename = `slide_${brandId}_${data.slideType}_${Date.now()}_${slug}.png`;
 
     const url = await uploadToStorage(buffer, filename);
-    saveImageRecord({ userId: req.user?.uid, brandId, filename, type: 'slide' });
+    saveImageRecord({ userId: req.user?.uid, brandId, filename, type: 'slide', prompt: rawPrompt, refinedPrompt, model: data.imageModel, brandName: brand.name, width: 1080, height: 1920 });
 
     res.json({
       ok: true,
@@ -3719,7 +3727,7 @@ app.post('/api/edit-slide', requireAuth, async (req, res) => {
     const slug = crypto.randomUUID().slice(0, 8);
     const filename = `edit_${brandId}_${Date.now()}_${slug}.png`;
     const url = await uploadToStorage(buffer, filename);
-    saveImageRecord({ userId: req.user?.uid, brandId, filename, type: 'edit' });
+    saveImageRecord({ userId: req.user?.uid, brandId, filename, type: 'edit', prompt: editPrompt, model: imageModel, brandName: brand.name, width: 1080, height: 1920 });
 
     res.json({ ok: true, filename, url });
   } catch (error) {
@@ -3787,7 +3795,7 @@ app.post('/api/generate-carousel', requireAuth, generationLimiter, async (req, r
               const slug = crypto.randomUUID().slice(0, 8);
               const filename = `carousel_${brand.id}_${jobId}_s${i + 1}_${slug}.png`;
               const slideUrl = await uploadToStorage(mockupBuffer, filename);
-              saveImageRecord({ userId: req.user?.uid, brandId: brand.id, filename, type: 'carousel' });
+              saveImageRecord({ userId: req.user?.uid, brandId: brand.id, filename, type: 'carousel', prompt: bgPrompt, refinedPrompt: refined, model: slideData.imageModel, brandName: brand.name, width: 1080, height: 1920 });
               job.slides.push({ slideNumber: i + 1, url: slideUrl, filename, ok: true });
             } finally {
               await fs.unlink(tempPath).catch(() => {});
@@ -3798,7 +3806,7 @@ app.post('/api/generate-carousel', requireAuth, generationLimiter, async (req, r
             const slug = crypto.randomUUID().slice(0, 8);
             const filename = `carousel_${brand.id}_${jobId}_s${i + 1}_${slug}.png`;
             const slideUrl = await uploadToStorage(mockupBuffer, filename);
-            saveImageRecord({ userId: req.user?.uid, brandId: brand.id, filename, type: 'carousel' });
+            saveImageRecord({ userId: req.user?.uid, brandId: brand.id, filename, type: 'carousel', brandName: brand.name, width: 1080, height: 1920 });
             job.slides.push({ slideNumber: i + 1, url: slideUrl, filename, ok: true });
           }
           job.completed = i + 1;
@@ -3843,7 +3851,7 @@ app.post('/api/generate-carousel', requireAuth, generationLimiter, async (req, r
           const slug = crypto.randomUUID().slice(0, 8);
           const filename = `carousel_${brand.id}_${jobId}_s${i + 1}_${slug}.mp4`;
           const slideUrl = await uploadVideoToStorage(videoBuffer, filename);
-          saveImageRecord({ userId: req.user?.uid, brandId: brand.id, filename, type: 'carousel-video' });
+          saveImageRecord({ userId: req.user?.uid, brandId: brand.id, filename, type: 'carousel-video', prompt: rawPrompt, refinedPrompt: refined, model: 'kling-3.0', brandName: brand.name });
 
           job.slides.push({ slideNumber: i + 1, url: slideUrl, filename, ok: true, isVideo: true });
           job.completed = i + 1;
@@ -3903,7 +3911,7 @@ app.post('/api/generate-carousel', requireAuth, generationLimiter, async (req, r
               const slug = crypto.randomUUID().slice(0, 8);
               const filename = `carousel_${brand.id}_${jobId}_s${i + 1}_${slug}.png`;
               const slideUrl = await uploadToStorage(buffer, filename);
-              saveImageRecord({ userId: req.user?.uid, brandId: brand.id, filename, type: 'carousel' });
+              saveImageRecord({ userId: req.user?.uid, brandId: brand.id, filename, type: 'carousel', prompt: rawPrompt, refinedPrompt: refined, model: slideData.imageModel, brandName: brand.name, width: 1080, height: 1920 });
               job.slides.push({ slideNumber: i + 1, url: slideUrl, filename, ok: true });
               job.completed = i + 1;
               continue;
@@ -3965,7 +3973,7 @@ app.post('/api/generate-carousel', requireAuth, generationLimiter, async (req, r
         const slug = crypto.randomUUID().slice(0, 8);
         const filename = `carousel_${brand.id}_${jobId}_s${i + 1}_${slug}.png`;
         const slideUrl = await uploadToStorage(buffer, filename);
-        saveImageRecord({ userId: req.user?.uid, brandId: brand.id, filename, type: 'carousel' });
+        saveImageRecord({ userId: req.user?.uid, brandId: brand.id, filename, type: 'carousel', prompt: rawPrompt, refinedPrompt, model: imageModel, brandName: brand.name, width: 1080, height: 1920 });
 
         job.slides.push({
           slideNumber: i + 1,
@@ -4240,6 +4248,7 @@ Rules:
       userPrompt += `\n\nUSER REQUEST: The user specifically wants this idea to be about: "${userTopic.trim()}". Generate content that directly addresses this topic using the brand's real information.`;
     }
 
+    console.log(`[Content Ideas] Starting generation: format=${format || 'carousel'}, count=${count}, brand=${brand.name}`);
     const text = await generateText({
       model: req.body?.textModel,
       system: brandContext,
@@ -4247,9 +4256,10 @@ Rules:
         role: 'user',
         content: userPrompt,
       }],
-      maxTokens: 4096,
+      maxTokens: format === 'video' ? 1500 : 4096,
       req,
     });
+    console.log(`[Content Ideas] AI returned ${text?.length || 0} chars`);
 
     if (!text) throw new Error('No response from AI');
 
@@ -4272,33 +4282,37 @@ Rules:
     }
     console.log(`[Content Ideas] ${brand.name} | after enforce: ${ideas.length} ideas | first idea slides: ${ideas[0]?.slides?.length} type: ${ideas[0]?.slides?.[0]?.type}`);
 
-    // Persist so ideas survive refresh/brand-switch
-    const idStart = startIndex || 0;
-    if (brandId) {
-      const formatted = ideas.map((idea, i) => ({
-        id: `AI-${idStart + i + 1}`,
-        title: idea.title,
-        caption: idea.caption || '',
-        slides: (idea.slides || []).map((s, si) => ({ ...s, number: s.number || si + 1, type: s.type || 'text' })),
-      }));
+    // Persist so ideas survive refresh/brand-switch — but don't fail the response
+    try {
+      const idStart = startIndex || 0;
+      if (brandId) {
+        const formatted = ideas.map((idea, i) => ({
+          id: `AI-${idStart + i + 1}`,
+          title: idea.title,
+          caption: idea.caption || '',
+          slides: (idea.slides || []).map((s, si) => ({ ...s, number: s.number || si + 1, type: s.type || 'text' })),
+        }));
 
-      // Build generation history entries from new ideas
-      const newHistoryEntries = ideas.map(idea => ({
-        type: 'idea',
-        title: idea.title,
-        headlines: (idea.slides || []).map(s => s.headline).filter(Boolean),
-        ts: Date.now(),
-      }));
-      const updatedHistory = trimGenerationHistory([...(brand.generationHistory || []), ...newHistoryEntries]);
+        // Build generation history entries from new ideas
+        const newHistoryEntries = ideas.map(idea => ({
+          type: 'idea',
+          title: idea.title,
+          headlines: (idea.slides || []).map(s => s.headline).filter(Boolean),
+          ts: Date.now(),
+        }));
+        const updatedHistory = trimGenerationHistory([...(brand.generationHistory || []), ...newHistoryEntries]);
 
-      if (idStart > 0) {
-        // Append to existing ideas
-        const freshBrand = await getBrandAsync(brandId, req.user?.uid);
-        const existing = freshBrand.contentIdeas || [];
-        await updateBrandFields(brandId, { contentIdeas: [...existing, ...formatted], generationHistory: updatedHistory });
-      } else {
-        await updateBrandFields(brandId, { contentIdeas: formatted, generationHistory: updatedHistory });
+        if (idStart > 0) {
+          // Append to existing ideas
+          const freshBrand = await getBrandAsync(brandId, req.user?.uid);
+          const existing = freshBrand.contentIdeas || [];
+          await updateBrandFields(brandId, { contentIdeas: [...existing, ...formatted], generationHistory: updatedHistory });
+        } else {
+          await updateBrandFields(brandId, { contentIdeas: formatted, generationHistory: updatedHistory });
+        }
       }
+    } catch (persistErr) {
+      console.error('[Content Ideas] Persistence failed:', persistErr.message);
     }
 
     res.json({ ok: true, ideas });
@@ -4444,7 +4458,7 @@ app.post('/api/generate-personalized', requireAuth, upload.array('faceImages', 5
     const slug = crypto.randomUUID().slice(0, 8);
     const filename = `personalized_${brandId}_${Date.now()}_${slug}.png`;
     const url = await uploadToStorage(buffer, filename);
-    saveImageRecord({ userId: req.user?.uid, brandId, filename, type: 'personalized' });
+    saveImageRecord({ userId: req.user?.uid, brandId, filename, type: 'personalized', prompt: scenarioPrompt, refinedPrompt: refined, model: data.imageModel, brandName: brand.name, width: 1024, height: 1536 });
 
     if (downloadedTempFiles.length > 0) await cleanupTempFiles(downloadedTempFiles);
     res.json({ ok: true, url, filename, model: loraUsed ? 'lora' : model === 'flux' && isFalEnabled(req) ? 'flux' : 'gpt' });
@@ -4539,7 +4553,7 @@ app.post('/api/generate-personalized-carousel', requireAuth, upload.array('faceI
         const slug = crypto.randomUUID().slice(0, 8);
         const filename = `personalized_${brand.id}_${jobId}_s${i + 1}_${slug}.png`;
         const url = await uploadToStorage(buffer, filename);
-        saveImageRecord({ userId: req.user?.uid, brandId: brand.id, filename, type: 'personalized' });
+        saveImageRecord({ userId: req.user?.uid, brandId: brand.id, filename, type: 'personalized', prompt: scenarioPrompt, refinedPrompt: refined, model, brandName: brand.name, width: 1024, height: 1536 });
         job.slides.push({ slideNumber: i + 1, url, filename, ok: true });
         job.completed = i + 1;
       } catch (err) {
