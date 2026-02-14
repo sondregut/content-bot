@@ -502,6 +502,21 @@ async function getBrandAsync(brandId, userId) {
   return GENERIC_BRAND;
 }
 
+function trimGenerationHistory(history, max = 50) {
+  if (!Array.isArray(history)) return [];
+  return history.sort((a, b) => (b.ts || 0) - (a.ts || 0)).slice(0, max);
+}
+
+function buildHistoryPromptSection(history, maxInject = 30) {
+  if (!Array.isArray(history) || history.length === 0) return '';
+  const recent = history.sort((a, b) => (b.ts || 0) - (a.ts || 0)).slice(0, maxInject);
+  const lines = recent.map(entry => {
+    const headlines = (entry.headlines || []).slice(0, 5).join(' | ');
+    return `- "${entry.title}"${headlines ? ` (covered: ${headlines})` : ''}`;
+  });
+  return `\nPREVIOUSLY GENERATED CONTENT (avoid repeating these topics and angles):\n${lines.join('\n')}`;
+}
+
 function slugify(name) {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40);
 }
@@ -2530,7 +2545,14 @@ app.post('/api/brands/full-setup', requireAuth, async (req, res) => {
       sendSSE('content-ideas', formattedIdeas);
 
       // Persist so ideas survive refresh/brand-switch (Firestore in prod, local JSON in dev)
-      await updateBrandFields(brandId, { contentIdeas: formattedIdeas });
+      // Also seed generation history from initial ideas
+      const initialHistory = contentIdeas.map(idea => ({
+        type: 'idea',
+        title: idea.title,
+        headlines: (idea.slides || []).map(s => s.headline).filter(Boolean),
+        ts: Date.now(),
+      }));
+      await updateBrandFields(brandId, { contentIdeas: formattedIdeas, generationHistory: trimGenerationHistory(initialHistory) });
     }
 
     // Step 9: Generate first carousel slides (slide 1 = AI, rest = mockup)
@@ -3773,10 +3795,14 @@ Rules:
 - For photo slides, include sport/setting/action/mood fields
 - Content should match the brand's tone and content pillars`;
 
+    // Inject generation history for cross-session dedup
+    const historySection = buildHistoryPromptSection(brand.generationHistory);
+    const systemWithHistory = historySection ? freeformSystemPrompt + '\n' + historySection : freeformSystemPrompt;
+
     const response = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 2048,
-      system: freeformSystemPrompt,
+      system: systemWithHistory,
       messages: [
         { role: 'user', content: userPrompt },
       ],
@@ -3794,6 +3820,18 @@ Rules:
       parsed = JSON.parse(jsonMatch ? jsonMatch[0] : text);
     } catch {
       throw new Error('Failed to parse Claude response as JSON');
+    }
+
+    // Record in generation history for cross-session dedup
+    if (brandId && parsed.title) {
+      const entry = {
+        type: 'freeform',
+        title: parsed.title,
+        headlines: (parsed.slides || []).map(s => s.headline).filter(Boolean),
+        ts: Date.now(),
+      };
+      const updatedHistory = trimGenerationHistory([...(brand.generationHistory || []), entry]);
+      await updateBrandFields(brandId, { generationHistory: updatedHistory });
     }
 
     console.log(`[Freeform] ${brand.name} | Generated ${parsed.slides?.length || 0} slides`);
@@ -3882,6 +3920,12 @@ app.post('/api/generate-content-ideas', requireAuth, async (req, res) => {
       userPrompt += `\n\nIMPORTANT: The following carousel ideas already exist. Generate COMPLETELY DIFFERENT topics — do NOT repeat or rephrase any of these:\n${existingTitles.map(t => `- ${t}`).join('\n')}`;
     }
 
+    // Inject persistent generation history for cross-session dedup
+    const historySection = buildHistoryPromptSection(brand.generationHistory);
+    if (historySection) {
+      userPrompt += '\n' + historySection;
+    }
+
     // Freeform user topic to guide idea generation
     if (userTopic?.trim()) {
       userPrompt += `\n\nUSER REQUEST: The user specifically wants this idea to be about: "${userTopic.trim()}". Generate content that directly addresses this topic using the brand's real information.`;
@@ -3920,13 +3964,23 @@ app.post('/api/generate-content-ideas', requireAuth, async (req, res) => {
         caption: idea.caption || '',
         slides: (idea.slides || []).map((s, si) => ({ ...s, number: s.number || si + 1, type: s.type || 'text' })),
       }));
+
+      // Build generation history entries from new ideas
+      const newHistoryEntries = ideas.map(idea => ({
+        type: 'idea',
+        title: idea.title,
+        headlines: (idea.slides || []).map(s => s.headline).filter(Boolean),
+        ts: Date.now(),
+      }));
+      const updatedHistory = trimGenerationHistory([...(brand.generationHistory || []), ...newHistoryEntries]);
+
       if (idStart > 0) {
         // Append to existing ideas
         const freshBrand = await getBrandAsync(brandId, req.user?.uid);
         const existing = freshBrand.contentIdeas || [];
-        await updateBrandFields(brandId, { contentIdeas: [...existing, ...formatted] });
+        await updateBrandFields(brandId, { contentIdeas: [...existing, ...formatted], generationHistory: updatedHistory });
       } else {
-        await updateBrandFields(brandId, { contentIdeas: formatted });
+        await updateBrandFields(brandId, { contentIdeas: formatted, generationHistory: updatedHistory });
       }
     }
 
