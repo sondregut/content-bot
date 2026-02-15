@@ -4735,6 +4735,7 @@ document.getElementById('personalize-back-btn').addEventListener('click', closeP
 const memeView = document.getElementById('meme-view');
 const memeDescription = document.getElementById('meme-description');
 const memeAspectRatio = document.getElementById('meme-aspect-ratio');
+const memeModelSelect = document.getElementById('meme-model');
 const memeStatus = document.getElementById('meme-status');
 const memePreviewImg = document.getElementById('meme-preview-img');
 const memePlaceholder = document.querySelector('.meme-placeholder');
@@ -4784,7 +4785,7 @@ document.getElementById('generate-meme-btn').addEventListener('click', async () 
         description,
         aspectRatio: memeAspectRatio.value,
         brand: currentBrand,
-        imageModel: getSelectedImageModel(),
+        imageModel: memeModelSelect ? memeModelSelect.value : getSelectedImageModel(),
         textModel: getSelectedTextModel(),
         includeOwl: true,
         owlPosition: 'bottom-right',
