@@ -279,6 +279,7 @@ function buildVideoPrompt(data, brand) {
     `Brand: ${brand.name}.`,
     brand.imageStyle ? `Visual style: ${brand.imageStyle}.` : null,
     brand.defaultBackground ? `Brand aesthetic: ${brand.defaultBackground}.` : null,
+    brand.productKnowledge ? `Product: ${brand.productKnowledge.slice(0, 300)}` : null,
     `Scene: ${scene}.`,
     `Mood: ${mood}.`,
     `Camera: ${cameraMove}.`,
@@ -2358,7 +2359,11 @@ async function refinePromptWithClaude(rawPrompt, slideType, formData, brand, req
       : slideType === 'video'
         ? VIDEO_REFINEMENT_INSTRUCTIONS
         : BASE_REFINEMENT_INSTRUCTIONS;
-    const systemPrompt = `${brand.systemPrompt}\n\n${refinementInstructions}`;
+    const brandContext = [
+      brand.systemPrompt,
+      brand.productKnowledge ? `Product knowledge: ${brand.productKnowledge}` : '',
+    ].filter(Boolean).join('\n\n');
+    const systemPrompt = `${brandContext}\n\n${refinementInstructions}`;
     let context;
     if (slideType === 'meme') {
       context = `This is a MEME for ${brand.name}. It must look like a genuine internet meme — informal, humorous, culturally aware. Do NOT apply carousel rules (no safe zones, no TikTok composition, no professional typography). Preserve the meme format and humor. Only refine for text legibility and spelling accuracy. Keep the raw, authentic meme aesthetic. CRITICAL: If the user prompt mentions real people by name (Drake, celebrities, public figures), replace them with generic characters — OpenAI will reject prompts depicting real people.`;
@@ -2551,11 +2556,12 @@ app.put('/api/brands/:id', requireAuth, async (req, res) => {
   try {
     if (req.body.name && req.body.name.length > 100) return res.status(400).json({ error: 'Name too long (max 100 chars)' });
     if (req.body.systemPrompt && req.body.systemPrompt.length > 5000) return res.status(400).json({ error: 'System prompt too long (max 5000 chars)' });
+    if (req.body.productKnowledge && req.body.productKnowledge.length > 5000) return res.status(400).json({ error: 'Product knowledge too long (max 5000 chars)' });
     if (req.body.website && req.body.website.length > 200) return res.status(400).json({ error: 'Website too long (max 200 chars)' });
     if (req.body.defaultMicroLabel && req.body.defaultMicroLabel.length > 500) return res.status(400).json({ error: 'Micro label too long (max 500 chars)' });
     if (req.body.defaultBackground && req.body.defaultBackground.length > 500) return res.status(400).json({ error: 'Background description too long (max 500 chars)' });
     if (req.body.iconOverlayText && req.body.iconOverlayText.length > 500) return res.status(400).json({ error: 'Icon overlay text too long (max 500 chars)' });
-    const allowedKeys = ['name', 'website', 'colors', 'systemPrompt', 'defaultMicroLabel', 'defaultBackground', 'iconOverlayText', 'contentPillars', 'contentIdeaPrompt'];
+    const allowedKeys = ['name', 'website', 'colors', 'systemPrompt', 'defaultMicroLabel', 'defaultBackground', 'iconOverlayText', 'contentPillars', 'contentIdeaPrompt', 'productKnowledge'];
     if (db) {
       const doc = await db.collection('carousel_brands').doc(req.params.id).get();
       if (!doc.exists) return res.status(404).json({ error: 'Brand not found' });
@@ -2706,7 +2712,8 @@ Return ONLY valid JSON (no markdown, no code fences) with:
 - name: brand name (short, clean)
 - description: 1-2 sentence brand description
 - colors: { primary, accent, white, secondary, cta } — hex codes
-- systemPrompt: 150-200 word brand brief for AI content generation describing tone, audience, content pillars, visual style
+- systemPrompt: 400-600 word brand brief for AI content generation. Cover: brand voice and tone (how they speak, what language they use), target audience (demographics, psychographics, pain points), content pillars and themes, visual style direction, brand personality traits, what makes them unique, the emotional connection they aim for, and content do's/don'ts
+- productKnowledge: 300-500 word structured breakdown of the product/service. Cover: what the product does (clear description), key features (bullet-style list), target audience specifics, value propositions, competitive differentiators, common use cases, and any pricing/plans mentioned. This should be factual and specific — extract real details from the website, not generic descriptions
 - defaultBackground: one-line visual description for slide backgrounds matching the brand aesthetic
 - imageStyle: 2-4 sentence visual/photography direction for AI image generation (lighting, composition, mood, camera feel — NOT colors)
 - tone: 2-3 word tone description (e.g. "bold, energetic")
@@ -2838,7 +2845,7 @@ app.post('/api/brands/ai-setup', requireAuth, async (req, res) => {
         role: 'user',
         content: buildBrandConfigPrompt({ name, description, textContent: websiteContent }),
       }],
-      maxTokens: 1024,
+      maxTokens: 2048,
       req,
     });
 
@@ -3108,7 +3115,7 @@ app.post('/api/brands/full-setup', requireAuth, async (req, res) => {
           role: 'user',
           content: buildBrandConfigPrompt({ url: finalUrl, pageTitle, metaDesc, ogSiteName, ogImage, themeColor, extractedColors, textContent }),
         }],
-        maxTokens: 1024,
+        maxTokens: 2048,
         req,
       });
     } catch (e) {
@@ -3144,6 +3151,7 @@ app.post('/api/brands/full-setup', requireAuth, async (req, res) => {
       defaultBackground: brandConfig.defaultBackground || GENERIC_BRAND.defaultBackground,
       iconOverlayText: brandConfig.watermarkText || new URL(finalUrl).hostname.replace(/^www\./, ''),
       contentPillars: brandConfig.contentPillars || [],
+      productKnowledge: brandConfig.productKnowledge || '',
       createdBy: req.user.uid,
     };
 
@@ -3591,7 +3599,7 @@ app.post('/api/brands/analyze-website', requireAuth, async (req, res) => {
         role: 'user',
         content: buildBrandConfigPrompt({ url: finalUrl, pageTitle, metaDesc, ogSiteName, ogImage, themeColor, extractedColors, textContent }),
       }],
-      maxTokens: 1024,
+      maxTokens: 2048,
       req,
     });
     let brand;
@@ -4624,6 +4632,7 @@ app.post('/api/generate-freeform', requireAuth, generationLimiter, async (req, r
     const numSlides = Math.min(Math.max(parseInt(slideCount) || 7, 1), 20);
 
     const freeformSystemPrompt = `${brand.systemPrompt}
+${brand.productKnowledge ? `\nProduct knowledge:\n${brand.productKnowledge}` : ''}
 
 You are generating carousel slide content for ${brand.name} social media (TikTok/Instagram).
 
@@ -4764,6 +4773,7 @@ app.post('/api/generate-content-ideas', requireAuth, async (req, res) => {
 
     const brandContext = [
       brand.systemPrompt || '',
+      brand.productKnowledge ? `Product knowledge: ${brand.productKnowledge}` : '',
       `Brand: ${brand.name}`,
       brand.website ? `Website: ${brand.website}` : '',
       brand.contentPillars?.length ? `Content pillars: ${brand.contentPillars.join(', ')}` : '',

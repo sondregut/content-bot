@@ -1256,6 +1256,7 @@ function openBrandModal(brand = null) {
   brandWebsiteInput.value = brand?.website || '';
   brandDescInput.value = '';
   document.getElementById('brand-system-prompt').value = brand?.systemPrompt || '';
+  document.getElementById('brand-product-knowledge').value = brand?.productKnowledge || '';
   document.getElementById('brand-image-style').value = brand?.imageStyle || '';
   document.getElementById('brand-micro-label').value = brand?.defaultMicroLabel || '';
   document.getElementById('brand-watermark').value = brand?.iconOverlayText || '';
@@ -2095,6 +2096,7 @@ brandAiBtn.addEventListener('click', async () => {
       }
     }
     if (s.systemPrompt) document.getElementById('brand-system-prompt').value = s.systemPrompt;
+    if (s.productKnowledge) document.getElementById('brand-product-knowledge').value = s.productKnowledge;
     if (s.imageStyle) document.getElementById('brand-image-style').value = s.imageStyle;
     if (s.defaultBackground) document.getElementById('brand-bg-desc').value = s.defaultBackground;
     if (!document.getElementById('brand-micro-label').value) {
@@ -2120,6 +2122,7 @@ brandSaveBtn.addEventListener('click', async () => {
     website: brandWebsiteInput.value.trim(),
     colors,
     systemPrompt: document.getElementById('brand-system-prompt').value.trim(),
+    productKnowledge: document.getElementById('brand-product-knowledge').value.trim(),
     imageStyle: document.getElementById('brand-image-style').value.trim(),
     defaultMicroLabel: document.getElementById('brand-micro-label').value.trim() || name.toUpperCase(),
     defaultBackground: document.getElementById('brand-bg-desc').value.trim() || DEFAULT_BACKGROUND,
