@@ -1922,6 +1922,23 @@ input:focus, select:focus, textarea:focus {
   color: rgba(255,255,255,0.6);
 }
 
+.spinner-cancel-btn {
+  margin-top: 4px;
+  padding: 6px 20px;
+  background: rgba(255,255,255,0.1);
+  color: rgba(255,255,255,0.7);
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 6px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.spinner-cancel-btn:hover {
+  background: rgba(233,69,96,0.3);
+  border-color: rgba(233,69,96,0.5);
+  color: #fff;
+}
+
 /* Gallery */
 
 .gallery-section { margin-bottom: 20px; }

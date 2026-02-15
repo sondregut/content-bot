@@ -583,6 +583,32 @@ function getSelectedVideoModel() {
   return videoModelSelect ? videoModelSelect.value : 'kling-v3-standard';
 }
 
+// Persist model preferences in localStorage
+const MODEL_PREF_KEY = 'carousel-studio-model-prefs';
+function saveModelPrefs() {
+  try {
+    localStorage.setItem(MODEL_PREF_KEY, JSON.stringify({
+      image: imageModelSelect?.value,
+      text: textModelSelect?.value,
+      video: videoModelSelect?.value,
+    }));
+  } catch { /* ignore */ }
+}
+function restoreModelPrefs() {
+  try {
+    const raw = localStorage.getItem(MODEL_PREF_KEY);
+    if (!raw) return;
+    const prefs = JSON.parse(raw);
+    if (prefs.image && imageModelSelect) imageModelSelect.value = prefs.image;
+    if (prefs.text && textModelSelect) textModelSelect.value = prefs.text;
+    if (prefs.video && videoModelSelect) videoModelSelect.value = prefs.video;
+  } catch { /* ignore */ }
+}
+restoreModelPrefs();
+if (imageModelSelect) imageModelSelect.addEventListener('change', saveModelPrefs);
+if (textModelSelect) textModelSelect.addEventListener('change', saveModelPrefs);
+if (videoModelSelect) videoModelSelect.addEventListener('change', saveModelPrefs);
+
 // Show/hide video person selector based on Veo 3.1
 function updateVideoPersonRowVisibility() {
   const row = document.getElementById('video-person-row');
@@ -591,11 +617,15 @@ function updateVideoPersonRowVisibility() {
 }
 if (videoModelSelect) {
   videoModelSelect.addEventListener('change', updateVideoPersonRowVisibility);
+  updateVideoPersonRowVisibility(); // apply on load after restoring prefs
 }
 
 // Loading spinner refs
 const loadingSpinner = document.getElementById('loading-spinner');
 const spinnerText = document.getElementById('spinner-text');
+document.getElementById('spinner-cancel-btn').addEventListener('click', () => {
+  if (generateAbort) { generateAbort.abort(); generateAbort = null; }
+});
 
 // Preview mockup refs
 const previewMockup = document.getElementById('preview-mockup');
@@ -4695,6 +4725,11 @@ form.addEventListener('submit', async (e) => {
   const payload = buildSlidePayload(slide, slideIndex);
   const isVideo = payload.slideType === 'video';
 
+  // Set up abort controller for cancellation
+  if (generateAbort) generateAbort.abort();
+  generateAbort = new AbortController();
+  const signal = generateAbort.signal;
+
   // Mark this slide as generating
   generatingSlides.add(slideIndex);
   renderSlideTabs();
@@ -4732,6 +4767,7 @@ form.addEventListener('submit', async (e) => {
     const res = await authFetch('/api/generate', {
       method: 'POST',
       body: JSON.stringify(payload),
+      signal,
     });
 
     const data = await res.json();
@@ -4742,8 +4778,10 @@ form.addEventListener('submit', async (e) => {
       const jobId = data.videoJobId;
       let elapsed = 0;
       while (true) {
+        if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
         await new Promise(r => setTimeout(r, 3000));
         elapsed += 3;
+        if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
         if (currentSlideIndex === slideIndex) {
           spinnerText.textContent = `Generating video... (${elapsed}s)`;
         }
@@ -4806,7 +4844,16 @@ form.addEventListener('submit', async (e) => {
       onGenerationDone(slideIndex, `Slide ${slideIndex + 1} ready`);
     }
   } catch (err) {
-    if (err.name === 'AbortError') return;
+    if (err.name === 'AbortError') {
+      generatingSlides.delete(slideIndex);
+      renderSlideTabs();
+      if (currentSlideIndex === slideIndex) {
+        loadingSpinner.classList.remove('active');
+        statusEl.textContent = 'Generation cancelled.';
+        setPreviewMode('live');
+      }
+      return;
+    }
     generatingSlides.delete(slideIndex);
     renderSlideTabs();
     if (currentSlideIndex === slideIndex) {
