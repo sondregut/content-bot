@@ -223,6 +223,7 @@ async function authFetch(url, opts = {}) {
     }
     if (statusEl) statusEl.textContent = '';
     updateIconPreview();
+    updateMockupAvailability();
     checkTikTokStatus();
     fetchMLCounts();
     loadUserPersons();
@@ -433,6 +434,21 @@ const ideaTitle = document.getElementById('idea-title');
 const slideTabs = document.getElementById('slide-tabs');
 const form = document.getElementById('slide-form');
 const slideTypeSelect = document.getElementById('slideType');
+
+function updateMockupAvailability() {
+  const brand = brands.find(b => b.id === currentBrand);
+  const hasScreenshots = brand?.screenshots?.length > 0;
+  const mockupOption = slideTypeSelect.querySelector('option[value="mockup"]');
+  if (mockupOption) {
+    mockupOption.style.display = hasScreenshots ? '' : 'none';
+    mockupOption.disabled = !hasScreenshots;
+  }
+  if (slideTypeSelect.value === 'mockup' && !hasScreenshots) {
+    slideTypeSelect.value = 'text';
+    slideTypeSelect.dispatchEvent(new Event('change'));
+  }
+}
+
 const photoFields = document.getElementById('photo-fields');
 const textFields = document.getElementById('text-fields');
 const mockupFields = document.getElementById('mockup-fields');
@@ -1318,6 +1334,7 @@ brandSelector.addEventListener('change', async () => {
   renderBrandSelector(); // update edit button visibility
   await loadContentIdeas();
   updateIconPreview();
+  updateMockupAvailability();
 });
 
 // --- Brand Creation / Edit Modal ---
@@ -1558,6 +1575,9 @@ function renderBrandScreenshots(screenshots) {
         if (!res.ok) throw new Error(data.error || 'Delete failed');
         brandScreenshots = data.screenshots || [];
         renderBrandScreenshots(brandScreenshots);
+        const brandObj = brands.find(b => b.id === editingBrandId);
+        if (brandObj) brandObj.screenshots = brandScreenshots;
+        updateMockupAvailability();
         status.textContent = 'Screenshot removed.';
         setTimeout(() => { if (status.textContent === 'Screenshot removed.') status.textContent = ''; }, 2000);
       } catch (err) {
@@ -1620,6 +1640,9 @@ document.getElementById('brand-screenshot-input').addEventListener('change', asy
     if (!res.ok) throw new Error(data.error || 'Upload failed');
     brandScreenshots = data.screenshots || [];
     renderBrandScreenshots(brandScreenshots);
+    const brandObj = brands.find(b => b.id === editingBrandId);
+    if (brandObj) brandObj.screenshots = brandScreenshots;
+    updateMockupAvailability();
     status.textContent = 'Screenshots analyzed & saved!';
     setTimeout(() => { if (status.textContent === 'Screenshots analyzed & saved!') status.textContent = ''; }, 2000);
   } catch (err) {
@@ -1708,6 +1731,7 @@ document.getElementById('brand-creation-continue').addEventListener('click', asy
         await loadContentIdeas();
       }
       updateIconPreview();
+      updateMockupAvailability();
     }
   } catch (err) {
     console.error('Failed to refresh brands:', err);
@@ -2058,6 +2082,7 @@ function handleCreationEvent(event, data) {
             // (including imageUrls persisted after slide generation)
             await loadContentIdeas();
             updateIconPreview();
+            updateMockupAvailability();
           }
         } catch (err) {
           console.error('Failed to refresh brands:', err);
@@ -2273,6 +2298,10 @@ async function analyzeWebsite(url) {
     if (brand.microLabel) document.getElementById('brand-micro-label').value = brand.microLabel;
     if (brand.watermarkText) document.getElementById('brand-watermark').value = brand.watermarkText;
 
+    // Fill font family
+    const brandFontSelect = document.getElementById('brand-font-family');
+    if (brandFontSelect && brand.fontFamily) brandFontSelect.value = brand.fontFamily;
+
     if (brand.tone) brandAiStatus.textContent = `Tone: ${brand.tone}`;
 
     // Store content pillars for saving with the brand
@@ -2403,6 +2432,10 @@ brandAiBtn.addEventListener('click', async () => {
     if (s.productKnowledge) document.getElementById('brand-product-knowledge').value = s.productKnowledge;
     if (s.imageStyle) document.getElementById('brand-image-style').value = s.imageStyle;
     if (s.defaultBackground) document.getElementById('brand-bg-desc').value = s.defaultBackground;
+    if (s.fontFamily) {
+      const brandFontSelect = document.getElementById('brand-font-family');
+      if (brandFontSelect) brandFontSelect.value = s.fontFamily;
+    }
     if (!document.getElementById('brand-micro-label').value) {
       document.getElementById('brand-micro-label').value = name.toUpperCase();
     }
@@ -2451,6 +2484,7 @@ brandSaveBtn.addEventListener('click', async () => {
     renderBrandSelector();
     await loadContentIdeas();
     updateIconPreview();
+    updateMockupAvailability();
     const wasNewBrand = !editingBrandId;
     closeBrandModal();
     // Auto-set icon from website favicon for new brands
@@ -2514,6 +2548,7 @@ brandDeleteBtn.addEventListener('click', async () => {
     renderBrandSelector();
     await loadContentIdeas();
     updateIconPreview();
+    updateMockupAvailability();
   } catch (err) {
     brandModalStatus.textContent = err.message;
     brandModalStatus.className = 'brand-modal-status error';
@@ -3017,7 +3052,9 @@ function loadSlideIntoForm(index) {
   const slide = slideEdits[index];
   if (!slide) return;
 
-  slideTypeSelect.value = slide.type || 'text';
+  const desiredType = slide.type || 'text';
+  const opt = slideTypeSelect.querySelector(`option[value="${desiredType}"]`);
+  slideTypeSelect.value = (opt && !opt.disabled) ? desiredType : 'text';
   form.elements.slideLabel.value = slide.label || '';
   form.elements.microLabel.value = slide.microLabel || '';
   form.elements.headline.value = slide.headline || '';
