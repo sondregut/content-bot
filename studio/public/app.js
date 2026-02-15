@@ -4718,6 +4718,12 @@ form.addEventListener('submit', async (e) => {
     if (currentSlideIndex === slideIdx) {
       loadingSpinner.classList.remove('active');
     } else {
+      // Auto-navigate to the completed slide
+      saveCurrentSlideEdits();
+      currentSlideIndex = slideIdx;
+      renderSlideTabs();
+      loadSlideIntoForm(slideIdx);
+      updatePreviewMockup();
       showToast(label);
     }
   }
@@ -5094,6 +5100,18 @@ async function pollBatchStatus() {
       }
 
       setTimeout(() => { progressSection.style.display = 'none'; }, 5000);
+
+      // Navigate to first generated slide
+      if (succeeded > 0) {
+        const firstDone = job.slides.findIndex(s => s.ok);
+        if (firstDone >= 0) {
+          saveCurrentSlideEdits();
+          currentSlideIndex = firstDone;
+          renderSlideTabs();
+          loadSlideIntoForm(firstDone);
+          updatePreviewMockup();
+        }
+      }
     }
   } catch (err) {
     console.error('Poll error:', err);
