@@ -3324,9 +3324,10 @@ app.post('/api/brands/full-setup', requireAuth, async (req, res) => {
       sendSSE('content-ideas-error', { message: 'Could not generate content ideas — you can generate them from the sidebar.' });
     }
 
+    let formattedIdeas = [];
     if (contentIdeas.length > 0) {
       // Send ideas individually so they appear progressively in the UI
-      const formattedIdeas = contentIdeas.map((idea, i) => ({
+      formattedIdeas = contentIdeas.map((idea, i) => ({
         id: `AI-${i + 1}`,
         title: idea.title,
         caption: idea.caption || '',
@@ -3353,7 +3354,7 @@ app.post('/api/brands/full-setup', requireAuth, async (req, res) => {
       await updateBrandFields(brandId, { contentIdeas: formattedIdeas, generationHistory: trimGenerationHistory(initialHistory) });
     }
 
-    // Step 9: Generate first carousel slides (slide 1 = AI, rest = mockup)
+    // Step 9: Generate first carousel slides (photo = AI, text/mockup = Sharp)
     sendSSE('status', { step: 'carousel', message: 'Generating first carousel...' });
 
     const brand = { id: brandId, ...brandData };
@@ -3365,8 +3366,8 @@ app.post('/api/brands/full-setup', requireAuth, async (req, res) => {
       for (let i = 0; i < Math.min(slides.length, 5); i++) {
         const slide = slides[i];
         try {
-          if (i === 0 && slide.type === 'photo') {
-            // AI-generated first slide
+          if (slide.type === 'photo') {
+            // AI-generated photo slide
             const rawPrompt = buildPhotoPrompt({
               sport: '', setting: '', action: '', mood: '',
               microLabel: slide.microLabel || brandData.defaultMicroLabel,
@@ -3426,7 +3427,7 @@ app.post('/api/brands/full-setup', requireAuth, async (req, res) => {
     }
 
     // Persist generated image URLs back into content ideas so they survive refresh
-    if (Object.keys(slideImages).length > 0) {
+    if (Object.keys(slideImages).length > 0 && formattedIdeas.length > 0) {
       for (const [idx, url] of Object.entries(slideImages)) {
         if (formattedIdeas[0] && formattedIdeas[0].slides[idx]) {
           formattedIdeas[0].slides[idx].imageUrl = url;
