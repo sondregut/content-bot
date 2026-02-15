@@ -2892,6 +2892,7 @@ Return ONLY valid JSON (no markdown, no code fences) with this structure:
           "mockupLayout": "for mockup - phone-right, phone-left, or text-statement",
           "mockupTheme": "for mockup - dark or light",
           "imageUsage": "for mockup - phone, ai-background, or none",
+          "screenshotLabel": "for mockup with imageUsage phone - which app screenshot to show",
           "aiBgSetting": "for mockup with ai-background - scene description",
           "aiBgMood": "for mockup with ai-background - mood/tone",
           "scene": "for video - describe what happens visually",
@@ -2926,14 +2927,18 @@ Rules:
 - Strategically choose slide types based on content purpose:
   * HOOK slides (slide 1): Use "photo" for visual impact — choose a compelling subject, setting, and action
   * INFORMATION slides: Use "text" for data/stats/lists, "photo" when emotion matters more than text
-  * APP SHOWCASE / CTA slides (usually last): Use "mockup" with imageUsage "phone" to show the app, or "ai-background" for a premium feel
+${brand.screenshots && brand.screenshots.length > 0
+  ? `  * APP SHOWCASE / CTA slides (usually last): Use "mockup" with imageUsage "phone" to show the app. Available screenshot labels: ${brand.screenshots.map(s => `"${s.label}"`).join(', ')}. Pick the most relevant label for each phone mockup slide and include it as "screenshotLabel".
   * BOLD STATEMENT slides: Use "mockup" with layout "text-statement" and imageUsage "none"
+  * You may also use "ai-background" for a premium feel on mockup slides`
+  : `  * APP SHOWCASE / CTA slides: Use "mockup" with layout "text-statement" and imageUsage "none" or "ai-background" for a premium feel. Do NOT use imageUsage "phone" — no app screenshots are available.
+  * BOLD STATEMENT slides: Use "mockup" with layout "text-statement" and imageUsage "none"`}
 - For photo slides: ALWAYS include sport, setting, action, mood, overlayStyle, overlayPlacement
 - For text slides: ALWAYS include backgroundStyle (a vivid 1-line visual description matching the brand's mood)
-- For mockup slides: ALWAYS include mockupLayout, mockupTheme, imageUsage. If imageUsage is "ai-background", also include aiBgSetting and aiBgMood
+- For mockup slides: ALWAYS include mockupLayout, mockupTheme, imageUsage. If imageUsage is "ai-background", also include aiBgSetting and aiBgMood${brand.screenshots && brand.screenshots.length > 0 ? '. If imageUsage is "phone", also include screenshotLabel (pick from the available labels listed above)' : ''}
 - For video slides: ALWAYS include scene (vivid 1-2 sentence visual description with motion), videoMood, cameraMove, duration. Video slides work best for: hooks, emotional moments, product demos, before/after reveals. A video idea typically has just 1 slide.
 - Video ideas should have 1 slide (the video clip) with headline/body for optional text overlay
-- NOT every slide needs an AI-generated image — text slides and mockup slides with imageUsage "none" or "phone" are fast and effective
+- NOT every slide needs an AI-generated image — text slides and mockup slides with imageUsage "none"${brand.screenshots && brand.screenshots.length > 0 ? ' or "phone"' : ''} are fast and effective
 - Vary the mix: a typical 7-slide carousel might be photo → text → text → mockup → photo → text → mockup(CTA)
 - Headlines: punchy, under 15 words — avoid repeating similar phrasing across ideas
 - Body: 1-2 sentences max
