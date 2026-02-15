@@ -2270,6 +2270,24 @@ function renderSidebar() {
     el.addEventListener('click', () => selectIdea(el.dataset.ideaId));
   });
 
+  // Always show "Create Your Own" section
+  const createDiv = document.createElement('div');
+  createDiv.className = 'sidebar-create-own';
+  createDiv.innerHTML = `<label>Create Your Own</label><div class="sidebar-fmt-group"><button class="sidebar-fmt-btn active" data-fmt="carousel">Carousel</button><button class="sidebar-fmt-btn" data-fmt="video">Video</button><button class="sidebar-fmt-btn" data-fmt="combo">Combo</button></div><div class="sidebar-create-row"><input type="number" class="sidebar-slides-input" id="sidebar-create-slides" min="2" max="12" value="5" title="Number of slides" /><button class="btn secondary sidebar-create-btn" id="sidebar-create-btn">Create</button></div>`;
+  sidebar.appendChild(createDiv);
+
+  let createFormat = 'carousel';
+  createDiv.querySelectorAll('.sidebar-fmt-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      createDiv.querySelectorAll('.sidebar-fmt-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      createFormat = btn.dataset.fmt;
+      const slidesInput = document.getElementById('sidebar-create-slides');
+      if (slidesInput) slidesInput.style.display = createFormat === 'video' ? 'none' : '';
+    });
+  });
+  document.getElementById('sidebar-create-btn').addEventListener('click', () => createBlankIdea(createFormat));
+
   // Add "Generate More" button for AI-generated ideas
   const hasAiIdeas = app.categories.some(c => c.ideas.some(i => i.id?.startsWith('AI-')));
   if (hasAiIdeas) {
@@ -2399,7 +2417,7 @@ function selectIdea(ideaId) {
   document.getElementById('content-plan-view').style.display = 'none';
   editorArea.style.display = 'block';
 
-  ideaBadge.textContent = idea.id;
+  ideaBadge.textContent = idea.id?.startsWith('CUSTOM-') ? 'NEW' : idea.id;
   ideaTitle.textContent = idea.title;
 
   // Populate caption editor
@@ -2477,6 +2495,108 @@ function loadFreeformContent(data) {
   saveSession();
 }
 
+// --- Create Blank Idea ---
+function createBlankIdea(format) {
+  const slidesInput = document.getElementById('sidebar-create-slides');
+  const count = format === 'video' ? 1 : Math.max(2, Math.min(12, parseInt(slidesInput?.value) || 5));
+  let slides = [];
+
+  if (format === 'video') {
+    slides = [{ number: 1, type: 'video', label: 'Video', headline: '', body: '', microLabel: '', highlight: '', videoMethod: 'ai' }];
+  } else {
+    for (let i = 0; i < count; i++) {
+      const isFirst = i === 0;
+      const isLast = i === count - 1;
+      slides.push({
+        number: i + 1,
+        type: isFirst ? 'photo' : 'text',
+        label: isFirst ? 'Hook' : isLast ? 'CTA' : `Slide ${i + 1}`,
+        headline: '',
+        body: '',
+        microLabel: '',
+        highlight: '',
+      });
+    }
+  }
+
+  const id = `CUSTOM-${Date.now()}`;
+  const data = { title: format === 'video' ? 'Custom Video' : 'Custom Carousel', caption: '', slides };
+
+  // Add to sidebar under "Your Creations" category
+  const app = contentData?.apps?.[0];
+  if (app) {
+    let customCat = app.categories.find(c => c.name === 'Your Creations');
+    if (!customCat) {
+      customCat = { name: 'Your Creations', ideas: [] };
+      app.categories.push(customCat);
+    }
+    customCat.ideas.push({ id, title: data.title, caption: '', slides });
+    renderSidebar();
+  }
+
+  // Load into editor
+  loadFreeformContent({ ...data, id });
+  ideaBadge.textContent = 'NEW';
+  selectedIdea.id = id;
+  saveSession();
+}
+
+// --- Slide Add/Remove ---
+function addSlide() {
+  saveCurrentSlideEdits();
+  const newNum = slideEdits.length + 1;
+  slideEdits.push({
+    number: newNum,
+    type: 'text',
+    label: `Slide ${newNum}`,
+    headline: '',
+    body: '',
+    microLabel: '',
+    highlight: '',
+  });
+  currentSlideIndex = slideEdits.length - 1;
+  // Update selectedIdea slides
+  if (selectedIdea) selectedIdea.slides = slideEdits.map(s => ({ ...s }));
+  renderSlideTabs();
+  loadSlideIntoForm(currentSlideIndex);
+  updatePreviewMockup();
+  saveSession();
+}
+
+function removeSlide(index) {
+  if (slideEdits.length <= 1) return;
+  saveCurrentSlideEdits();
+  slideEdits.splice(index, 1);
+  // Renumber
+  slideEdits.forEach((s, i) => s.number = i + 1);
+  // Shift generated images
+  const newGen = {};
+  Object.keys(generatedImages).forEach(k => {
+    const ki = parseInt(k);
+    if (ki < index) newGen[ki] = generatedImages[ki];
+    else if (ki > index) newGen[ki - 1] = generatedImages[ki];
+  });
+  generatedImages = newGen;
+  // Shift reference images
+  const newRef = {};
+  Object.keys(slideReferenceImages).forEach(k => {
+    const ki = parseInt(k);
+    if (ki < index) newRef[ki] = slideReferenceImages[ki];
+    else if (ki > index) newRef[ki - 1] = slideReferenceImages[ki];
+  });
+  slideReferenceImages = newRef;
+  // Adjust current index
+  if (currentSlideIndex >= slideEdits.length) currentSlideIndex = slideEdits.length - 1;
+  else if (currentSlideIndex > index) currentSlideIndex--;
+  // Update selectedIdea slides
+  if (selectedIdea) selectedIdea.slides = slideEdits.map(s => ({ ...s }));
+  renderSlideTabs();
+  loadSlideIntoForm(currentSlideIndex);
+  updatePreviewMockup();
+  updateGallery();
+  saveSession();
+}
+
 // --- Slide Tabs ---
 function renderSlideTabs() {
   // Video mode: no tabs needed for single video idea
@@ -2484,6 +2604,9 @@ function renderSlideTabs() {
     slideTabs.innerHTML = '';
     return;
   }
+
+  const isEditable = selectedIdea && (selectedIdea.id?.startsWith('CUSTOM-') || selectedIdea.id?.startsWith('AI'));
+  const canDelete = isEditable && slideEdits.length > 1;
 
   let html = '';
   for (let i = 0; i < slideEdits.length; i++) {
@@ -2493,16 +2616,21 @@ function renderSlideTabs() {
     const typeIcon = s.type === 'video' ? 'V' : s.type === 'photo' ? 'P' : s.type === 'mockup' ? 'M' : 'T';
     const hasSlideRef = slideReferenceImages[i] ? 'has-ref' : '';
     html += `<button class="slide-tab ${active} ${generated} ${hasSlideRef}" data-index="${i}">`;
+    if (canDelete) html += `<span class="tab-delete" data-del="${i}">&times;</span>`;
     html += `<span class="tab-num">${s.number}</span>`;
     html += `<span class="tab-type">${typeIcon}</span>`;
     html += `<span class="tab-label">${s.label || ''}</span>`;
     if (slideReferenceImages[i]) html += `<span class="tab-ref-dot" title="Has slide image">&#128247;</span>`;
     html += `</button>`;
   }
+  if (isEditable) {
+    html += `<button class="slide-tab-add" title="Add slide">+</button>`;
+  }
   slideTabs.innerHTML = html;
 
   slideTabs.querySelectorAll('.slide-tab').forEach((tab) => {
-    tab.addEventListener('click', () => {
+    tab.addEventListener('click', (e) => {
+      if (e.target.classList.contains('tab-delete')) return;
       saveCurrentSlideEdits();
       const idx = parseInt(tab.dataset.index);
       currentSlideIndex = idx;
@@ -2511,6 +2639,18 @@ function renderSlideTabs() {
       updatePreviewMockup();
     });
   });
+
+  // Delete buttons
+  slideTabs.querySelectorAll('.tab-delete').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      removeSlide(parseInt(btn.dataset.del));
+    });
+  });
+
+  // Add button
+  const addBtn = slideTabs.querySelector('.slide-tab-add');
+  if (addBtn) addBtn.addEventListener('click', addSlide);
 }
 
 // --- Form <-> Slide Data ---
@@ -5461,7 +5601,7 @@ function restoreSession(rawSession) {
         if (document.getElementById('meme-view')) document.getElementById('meme-view').style.display = 'none';
   if (document.getElementById('media-library-view')) document.getElementById('media-library-view').style.display = 'none';
         editorArea.style.display = 'block';
-        ideaBadge.textContent = session.selectedIdeaId;
+        ideaBadge.textContent = session.selectedIdeaId?.startsWith('CUSTOM-') ? 'NEW' : session.selectedIdeaId;
         ideaTitle.textContent = session.selectedIdeaTitle || 'Restored Session';
         if (session.currentSlideIndex != null) currentSlideIndex = session.currentSlideIndex;
         renderSlideTabs();

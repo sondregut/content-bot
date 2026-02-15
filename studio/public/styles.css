@@ -543,6 +543,106 @@ body {
   text-align: center;
 }
 
+/* Create Your Own */
+.sidebar-create-own {
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+}
+.sidebar-create-own label {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+.sidebar-fmt-group {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.sidebar-fmt-btn {
+  flex: 1;
+  padding: 6px 8px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--slate);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.sidebar-fmt-btn:hover {
+  border-color: var(--cyan);
+}
+.sidebar-fmt-btn.active {
+  background: var(--navy);
+  color: var(--white);
+  border-color: var(--navy);
+}
+.sidebar-create-row {
+  display: flex;
+  gap: 6px;
+}
+.sidebar-create-row .sidebar-slides-input {
+  width: 64px;
+  flex-shrink: 0;
+}
+.sidebar-create-btn {
+  flex: 1;
+  font-size: 0.8rem;
+  padding: 8px 12px;
+}
+
+/* Slide tab add/delete controls */
+.slide-tab-add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 2px dashed var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 1.1rem;
+  cursor: pointer;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+.slide-tab-add:hover {
+  border-color: var(--cyan);
+  color: var(--navy);
+  background: #f0f7ff;
+}
+.slide-tab {
+  position: relative;
+}
+.tab-delete {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: none;
+  background: var(--danger);
+  color: white;
+  font-size: 11px;
+  line-height: 18px;
+  text-align: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+  padding: 0;
+  z-index: 1;
+}
+.slide-tab:hover .tab-delete {
+  opacity: 1;
+}
+
 /* Main */
 
 .main-area {
