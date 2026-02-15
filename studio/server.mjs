@@ -364,7 +364,7 @@ async function generateVideoSlide(prompt, options = {}) {
     const deadline = Date.now() + 600_000;
     while (!op.done && Date.now() < deadline) {
       await new Promise(r => setTimeout(r, 5000));
-      op = await gemini.operations.get({ operation: op });
+      op = await gemini.operations.getVideosOperation({ operation: op });
     }
     if (!op.done) throw new Error(`${modelLabel} video generation timed out`);
     // Check for safety filter rejection
@@ -377,14 +377,12 @@ async function generateVideoSlide(prompt, options = {}) {
     if (!generatedVideo?.video) throw new Error(`${modelLabel} returned no video`);
     console.log(`[Veo] Video URI: ${generatedVideo.video.uri?.slice(0, 120)}...`);
     // Download using SDK's files.download method
+    const tmpFilename = `veo_${crypto.randomUUID().slice(0, 8)}.mp4`;
+    const tmpPath = path.join(outputDir, tmpFilename);
     try {
-      const downloadResult = await gemini.files.download({ file: generatedVideo.video });
-      // Save to temp file and return local path as URL
-      const tmpFilename = `veo_${crypto.randomUUID().slice(0, 8)}.mp4`;
-      const tmpPath = path.join(outputDir, tmpFilename);
-      const arrayBuf = await downloadResult.arrayBuffer();
-      await fs.writeFile(tmpPath, Buffer.from(arrayBuf));
-      console.log(`[Veo] Downloaded ${(arrayBuf.byteLength / 1024 / 1024).toFixed(1)}MB to ${tmpPath}`);
+      await gemini.files.download({ file: generatedVideo.video, downloadPath: tmpPath });
+      const stat = await fs.stat(tmpPath);
+      console.log(`[Veo] Downloaded ${(stat.size / 1024 / 1024).toFixed(1)}MB to ${tmpPath}`);
       return tmpPath;
     } catch (sdkErr) {
       console.log(`[Veo] SDK download failed: ${sdkErr.message}, trying direct fetch...`);
@@ -392,13 +390,13 @@ async function generateVideoSlide(prompt, options = {}) {
       const apiKey = options.geminiKey;
       const uri = generatedVideo.video.uri;
       const dlRes = await fetch(uri, { headers: { 'x-goog-api-key': apiKey } });
-      if (!dlRes.ok) {
-        // Try without auth
-        const dlRes2 = await fetch(uri);
-        if (!dlRes2.ok) throw new Error(`Failed to download ${modelLabel} video (${dlRes.status}, ${dlRes2.status})`);
-        return uri;
+      if (dlRes.ok) {
+        const buf = Buffer.from(await dlRes.arrayBuffer());
+        await fs.writeFile(tmpPath, buf);
+        console.log(`[Veo] Fallback download ${(buf.length / 1024 / 1024).toFixed(1)}MB to ${tmpPath}`);
+        return tmpPath;
       }
-      return uri;
+      throw new Error(`Failed to download ${modelLabel} video (SDK: ${sdkErr.message}, fetch: ${dlRes.status})`);
     }
   }
 
