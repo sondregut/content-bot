@@ -599,6 +599,50 @@ async function downloadFacePhotosToTemp(brand) {
   return tmpPaths;
 }
 
+// --- Screenshot Helpers ---
+async function getScreenshotUrls(screenshots) {
+  if (!screenshots || screenshots.length === 0) return [];
+  if (!bucket) {
+    return screenshots.map(s => ({ ...s, url: `/output/${path.basename(s.storagePath)}` }));
+  }
+  return Promise.all(screenshots.map(async (ss) => {
+    try {
+      const file = bucket.file(ss.storagePath);
+      const [url] = await file.getSignedUrl({ action: 'read', expires: Date.now() + 3600000 });
+      return { ...ss, url };
+    } catch (err) {
+      console.warn('[getScreenshotUrls] Failed for', ss.storagePath, err.message);
+      return { ...ss, url: null };
+    }
+  }));
+}
+
+async function downloadScreenshotToTemp(brand, label) {
+  const screenshots = brand.screenshots;
+  if (!screenshots || screenshots.length === 0) return null;
+
+  // Find by label (case-insensitive), fall back to first screenshot
+  let match = screenshots.find(s => s.label && s.label.toLowerCase() === (label || '').toLowerCase());
+  if (!match) match = screenshots[0];
+
+  const tmpPath = path.join(uploadsDir, `ss_${crypto.randomUUID().slice(0, 8)}.png`);
+  try {
+    if (bucket) {
+      const file = bucket.file(match.storagePath);
+      const [buffer] = await file.download();
+      await fs.writeFile(tmpPath, buffer);
+    } else {
+      const src = path.join(outputDir, path.basename(match.storagePath));
+      await fs.copyFile(src, tmpPath);
+    }
+    return tmpPath;
+  } catch (err) {
+    console.warn('[downloadScreenshotToTemp] Failed:', err.message);
+    await fs.unlink(tmpPath).catch(() => {});
+    return null;
+  }
+}
+
 async function cleanupTempFiles(paths) {
   for (const p of paths) {
     await fs.unlink(p).catch(() => {});
@@ -5491,6 +5535,196 @@ app.delete('/api/brands/:id/face-photos/:photoIndex', requireAuth, async (req, r
     res.json({ ok: true, facePhotos: withUrls });
   } catch (error) {
     console.error('[Face Photo Delete]', error);
+    res.status(500).json({ error: safeErrorMessage(error) });
+  }
+});
+
+// --- Screenshot Management ---
+
+// Upload screenshots to brand profile
+app.post('/api/brands/:id/screenshots', requireAuth, upload.array('screenshots', 8), async (req, res) => {
+  try {
+    const brandId = req.params.id;
+
+    let brand;
+    if (db) {
+      const doc = await db.collection('carousel_brands').doc(brandId).get();
+      if (!doc.exists) return res.status(404).json({ error: 'Brand not found' });
+      if (doc.data().createdBy !== req.user.uid) return res.status(403).json({ error: 'Not your brand' });
+      brand = { id: brandId, ...doc.data() };
+    } else {
+      const brands = await readLocalBrands();
+      if (!brands[brandId]) return res.status(404).json({ error: 'Brand not found' });
+      if (brands[brandId].createdBy !== req.user.uid) return res.status(403).json({ error: 'Not your brand' });
+      brand = { id: brandId, ...brands[brandId] };
+    }
+
+    if (!req.files || req.files.length === 0) return res.status(400).json({ error: 'No screenshots uploaded' });
+
+    const existing = brand.screenshots || [];
+    if (existing.length + req.files.length > 8) {
+      for (const f of req.files) await fs.unlink(f.path).catch(() => {});
+      return res.status(400).json({ error: `Too many screenshots. You have ${existing.length}, max is 8.` });
+    }
+
+    const newScreenshots = [];
+    for (const file of req.files) {
+      try {
+        await validateImageFile(file);
+      } catch {
+        await fs.unlink(file.path).catch(() => {});
+        continue;
+      }
+
+      const uuid = crypto.randomUUID().slice(0, 12);
+      const storagePath = `brands/${brandId}/screenshots/${uuid}.png`;
+
+      // Resize to fit iPhone screen dimensions (preserve aspect ratio)
+      const processed = await sharp(file.path)
+        .resize(1290, 2796, { fit: 'inside' })
+        .png()
+        .toBuffer();
+
+      if (bucket) {
+        const storageFile = bucket.file(storagePath);
+        await storageFile.save(processed, { metadata: { contentType: 'image/png' } });
+      } else {
+        await fs.writeFile(path.join(outputDir, `${uuid}.png`), processed);
+      }
+
+      // Derive label from filename (strip extension, replace separators with spaces)
+      const label = file.originalname.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').trim() || 'Screenshot';
+
+      newScreenshots.push({
+        storagePath,
+        label,
+        filename: file.originalname,
+        uploadedAt: new Date().toISOString(),
+      });
+
+      await fs.unlink(file.path).catch(() => {});
+    }
+
+    const allScreenshots = [...existing, ...newScreenshots];
+
+    if (db) {
+      await db.collection('carousel_brands').doc(brandId).update({ screenshots: allScreenshots });
+    } else {
+      const brands = await readLocalBrands();
+      brands[brandId].screenshots = allScreenshots;
+      await writeLocalBrands(brands);
+    }
+
+    const withUrls = await getScreenshotUrls(allScreenshots);
+    res.json({ ok: true, screenshots: withUrls });
+  } catch (error) {
+    if (req.files) for (const f of req.files) await fs.unlink(f.path).catch(() => {});
+    console.error('[Screenshot Upload]', error);
+    res.status(500).json({ error: safeErrorMessage(error) });
+  }
+});
+
+// List screenshots with fresh signed URLs
+app.get('/api/brands/:id/screenshots', requireAuth, async (req, res) => {
+  try {
+    const brandId = req.params.id;
+    const brand = await getBrandAsync(brandId, req.user.uid);
+    if (!brand || brand.id === 'generic') return res.status(404).json({ error: 'Brand not found' });
+
+    const withUrls = await getScreenshotUrls(brand.screenshots || []);
+    res.json({ screenshots: withUrls });
+  } catch (error) {
+    console.error('[Screenshot List]', error);
+    res.status(500).json({ error: safeErrorMessage(error) });
+  }
+});
+
+// Delete a screenshot by index
+app.delete('/api/brands/:id/screenshots/:ssIndex', requireAuth, async (req, res) => {
+  try {
+    const brandId = req.params.id;
+    const ssIndex = parseInt(req.params.ssIndex);
+
+    let brand;
+    if (db) {
+      const doc = await db.collection('carousel_brands').doc(brandId).get();
+      if (!doc.exists) return res.status(404).json({ error: 'Brand not found' });
+      if (doc.data().createdBy !== req.user.uid) return res.status(403).json({ error: 'Not your brand' });
+      brand = { id: brandId, ...doc.data() };
+    } else {
+      const brands = await readLocalBrands();
+      if (!brands[brandId]) return res.status(404).json({ error: 'Brand not found' });
+      if (brands[brandId].createdBy !== req.user.uid) return res.status(403).json({ error: 'Not your brand' });
+      brand = { id: brandId, ...brands[brandId] };
+    }
+
+    const screenshots = brand.screenshots || [];
+    if (ssIndex < 0 || ssIndex >= screenshots.length) return res.status(400).json({ error: 'Invalid screenshot index' });
+
+    const removed = screenshots[ssIndex];
+
+    if (bucket) {
+      try { await bucket.file(removed.storagePath).delete(); } catch (e) { console.warn('[Screenshot Delete] Storage:', e.message); }
+    } else {
+      await fs.unlink(path.join(outputDir, path.basename(removed.storagePath))).catch(() => {});
+    }
+
+    screenshots.splice(ssIndex, 1);
+
+    if (db) {
+      await db.collection('carousel_brands').doc(brandId).update({ screenshots });
+    } else {
+      const brands = await readLocalBrands();
+      brands[brandId].screenshots = screenshots;
+      await writeLocalBrands(brands);
+    }
+
+    const withUrls = await getScreenshotUrls(screenshots);
+    res.json({ ok: true, screenshots: withUrls });
+  } catch (error) {
+    console.error('[Screenshot Delete]', error);
+    res.status(500).json({ error: safeErrorMessage(error) });
+  }
+});
+
+// Update screenshot label
+app.put('/api/brands/:id/screenshots/:ssIndex/label', requireAuth, async (req, res) => {
+  try {
+    const brandId = req.params.id;
+    const ssIndex = parseInt(req.params.ssIndex);
+    const { label } = req.body;
+
+    if (!label || !label.trim()) return res.status(400).json({ error: 'Label is required' });
+
+    let brand;
+    if (db) {
+      const doc = await db.collection('carousel_brands').doc(brandId).get();
+      if (!doc.exists) return res.status(404).json({ error: 'Brand not found' });
+      if (doc.data().createdBy !== req.user.uid) return res.status(403).json({ error: 'Not your brand' });
+      brand = { id: brandId, ...doc.data() };
+    } else {
+      const brands = await readLocalBrands();
+      if (!brands[brandId]) return res.status(404).json({ error: 'Brand not found' });
+      if (brands[brandId].createdBy !== req.user.uid) return res.status(403).json({ error: 'Not your brand' });
+      brand = { id: brandId, ...brands[brandId] };
+    }
+
+    const screenshots = brand.screenshots || [];
+    if (ssIndex < 0 || ssIndex >= screenshots.length) return res.status(400).json({ error: 'Invalid screenshot index' });
+
+    screenshots[ssIndex].label = label.trim();
+
+    if (db) {
+      await db.collection('carousel_brands').doc(brandId).update({ screenshots });
+    } else {
+      const brands = await readLocalBrands();
+      brands[brandId].screenshots = screenshots;
+      await writeLocalBrands(brands);
+    }
+
+    res.json({ ok: true, screenshots });
+  } catch (error) {
+    console.error('[Screenshot Label Update]', error);
     res.status(500).json({ error: safeErrorMessage(error) });
   }
 });
