@@ -3787,6 +3787,9 @@ app.put('/api/content-ideas/:ideaId/slides/:slideIndex/image', requireAuth, asyn
     if (!brandId) return res.status(400).json({ error: 'brand is required' });
     const { imageUrl } = req.body || {};
     if (!imageUrl) return res.status(400).json({ error: 'imageUrl is required' });
+    if (!imageUrl.startsWith('https://') && !imageUrl.startsWith('/output/')) {
+      return res.status(400).json({ error: 'Invalid image URL' });
+    }
     const brand = await getBrandAsync(brandId, req.user?.uid);
     if (brand.id === 'generic') return res.status(403).json({ error: 'Cannot modify generic brand' });
     const stored = brand.contentIdeas || [];
