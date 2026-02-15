@@ -608,15 +608,18 @@
               </div>
 
               <div class="form-section" id="video-fields" style="display:none">
-                <div class="form-row">
-                  <div class="form-group">
-                    <label class="label" for="video-method">Video Method</label>
-                    <select name="videoMethod" id="video-method">
-                      <option value="ai">AI Video (Kling/Veo)</option>
-                      <option value="ken-burns">Ken Burns (image + zoom) — free</option>
-                    </select>
-                  </div>
+                <label class="label" style="display:block;margin-bottom:12px">Video Method</label>
+                <div class="video-method-selector">
+                  <button type="button" class="video-method-btn" data-method="ai" title="Click to select">
+                    <span class="checkmark" id="checkmark-ai">✓</span>
+                    <span class="method-name">AI Video (Kling/Veo)</span>
+                  </button>
+                  <button type="button" class="video-method-btn" data-method="ken-burns" title="Click to select">
+                    <span class="checkmark" id="checkmark-ken-burns"></span>
+                    <span class="method-name">Ken Burns (image + zoom) — free</span>
+                  </button>
                 </div>
+                <input type="hidden" id="video-method" value="ai" />
                 <div id="ai-video-fields">
                 <div class="form-row">
                   <div class="form-group full">

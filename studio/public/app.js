@@ -2878,7 +2878,30 @@ slideTypeSelect.addEventListener('change', () => {
   updatePreviewMockup();
 });
 
+// Video method selector buttons
+document.querySelectorAll('.video-method-btn').forEach(btn => {
+  btn.addEventListener('click', (e) => {
+    e.preventDefault();
+    const method = btn.dataset.method;
+    document.getElementById('video-method').value = method;
+    document.getElementById('video-method').dispatchEvent(new Event('change'));
+    updateVideoMethodButtons();
+  });
+});
+
+function updateVideoMethodButtons() {
+  const selectedMethod = document.getElementById('video-method').value;
+  document.querySelectorAll('.video-method-btn').forEach(btn => {
+    const isActive = btn.dataset.method === selectedMethod;
+    btn.classList.toggle('active', isActive);
+    btn.querySelector('.checkmark').textContent = isActive ? '✓' : '';
+  });
+}
+
+updateVideoMethodButtons();
+
 document.getElementById('video-method')?.addEventListener('change', () => {
+  updateVideoMethodButtons();
   toggleTypeFields();
 });
 

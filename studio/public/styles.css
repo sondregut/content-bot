@@ -1297,6 +1297,58 @@ input:focus, select:focus, textarea:focus {
   box-shadow: 0 0 0 3px rgba(115, 166, 209, 0.15);
 }
 
+.video-method-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.video-method-btn {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 2px solid transparent;
+  border-radius: 10px;
+  background: var(--white);
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--ink);
+  transition: all 0.2s ease;
+}
+
+.video-method-btn:hover {
+  background: #fafaf8;
+  border-color: var(--cyan);
+}
+
+.video-method-btn.active {
+  background: #4a90e2;
+  color: white;
+  border-color: #4a90e2;
+}
+
+.video-method-btn.active .checkmark {
+  color: white;
+}
+
+.video-method-btn .checkmark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  font-size: 14px;
+  font-weight: 700;
+  color: transparent;
+}
+
+.video-method-btn .method-name {
+  flex: 1;
+}
+
 .controls-row {
   padding-top: 8px;
   border-top: 1px solid var(--border);
