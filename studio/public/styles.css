@@ -4005,13 +4005,16 @@ button.brand-edit-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 300px;
   overflow: hidden;
+  aspect-ratio: 1 / 1;
+  max-height: 500px;
+  transition: aspect-ratio 0.3s ease;
 }
 
 .meme-preview-container img {
   width: 100%;
-  height: auto;
+  height: 100%;
+  object-fit: contain;
   display: block;
   border-radius: 10px;
 }

@@ -829,7 +829,7 @@ function renderFaceStudioPersonDetail() {
   const nameInput = document.getElementById('face-studio-person-name');
   if (nameInput) {
     nameInput.value = person.name;
-    nameInput.onblur = async () => {
+    const saveName = async () => {
       const newName = nameInput.value.trim();
       if (!newName || newName === person.name) return;
       try {
@@ -840,7 +840,13 @@ function renderFaceStudioPersonDetail() {
         person.name = newName;
         renderFaceStudioPersons();
         populatePersonSelectors();
+        nameInput.style.outline = '2px solid #4CAF50';
+        setTimeout(() => { nameInput.style.outline = ''; }, 800);
       } catch { /* ignore */ }
+    };
+    nameInput.onblur = saveName;
+    nameInput.onkeydown = (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); nameInput.blur(); }
     };
   }
 
@@ -848,7 +854,8 @@ function renderFaceStudioPersonDetail() {
   const deleteBtn = document.getElementById('face-studio-person-delete');
   if (deleteBtn) {
     deleteBtn.onclick = async () => {
-      if (!confirm('Delete this person and all their photos?')) return;
+      const loraWarning = person.loraStatus === 'ready' ? ', and trained LoRA model' : '';
+      if (!confirm(`Delete this person, their photos${loraWarning}?`)) return;
       try {
         await authFetch(`/api/persons/${person.id}`, { method: 'DELETE' });
         userPersons = userPersons.filter(p => p.id !== person.id);
@@ -4804,6 +4811,12 @@ let memeFilename = null;
 memeIncludeIcon.addEventListener('change', () => {
   memeIconPositionGroup.style.opacity = memeIncludeIcon.checked ? '1' : '0.4';
   memeIconPosition.disabled = !memeIncludeIcon.checked;
+});
+
+const memePreviewContainer = document.getElementById('meme-preview-container');
+const MEME_ASPECT_RATIOS = { '1:1': '1 / 1', '4:5': '4 / 5', '9:16': '9 / 16', '16:9': '16 / 9' };
+memeAspectRatio.addEventListener('change', () => {
+  memePreviewContainer.style.aspectRatio = MEME_ASPECT_RATIOS[memeAspectRatio.value] || '1 / 1';
 });
 
 function openMemeView() {

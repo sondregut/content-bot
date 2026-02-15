@@ -554,8 +554,7 @@ async function getFacePhotoUrls(facePhotos) {
   return Promise.all(facePhotos.map(async (photo) => {
     try {
       const file = bucket.file(photo.storagePath);
-      await file.makePublic();
-      const url = `https://storage.googleapis.com/${bucket.name}/${photo.storagePath}`;
+      const [url] = await file.getSignedUrl({ action: 'read', expires: Date.now() + 3600000 });
       return { ...photo, url };
     } catch (err) {
       console.warn('[getFacePhotoUrls] Failed for', photo.storagePath, err.message);
@@ -593,6 +592,8 @@ async function cleanupTempFiles(paths) {
 // --- Person Helpers ---
 async function getPersonById(personId, userId) {
   if (!db) return null;
+  // Defense-in-depth: reject path traversal characters
+  if (!personId || /[\/\\.]/.test(personId)) return null;
   const doc = await db.collection('carousel_persons').doc(personId).get();
   if (!doc.exists) return null;
   const data = doc.data();
@@ -2027,7 +2028,8 @@ function buildMemePrompt(data, brand) {
 
   const dimensions = {
     '1:1': { w: 1080, h: 1080, label: 'square' },
-    '9:16': { w: 1080, h: 1920, label: 'vertical (Stories/TikTok)' },
+    '4:5': { w: 1080, h: 1350, label: 'portrait (Instagram)' },
+    '9:16': { w: 1080, h: 1920, label: 'vertical (TikTok/Stories)' },
     '16:9': { w: 1920, h: 1080, label: 'landscape (Twitter/YouTube)' },
   }[aspectRatio] || { w: 1080, h: 1080, label: 'square' };
 
@@ -3729,6 +3731,7 @@ Return ONLY the meme description (no explanation, no preamble).`,
 
       const sizeMap = {
         '1:1': '1024x1024',
+        '4:5': '1024x1280',
         '9:16': '1024x1536',
         '16:9': '1536x1024',
       };
@@ -5309,6 +5312,12 @@ app.delete('/api/persons/:id', requireAuth, async (req, res) => {
       }
     }
 
+    // Delete training data (zip) from storage
+    if (bucket) {
+      const trainingZip = `users/${req.user.uid}/persons/${req.params.id}/training/photos.zip`;
+      bucket.file(trainingZip).delete().catch(() => {});
+    }
+
     await db.collection('carousel_persons').doc(req.params.id).delete();
     res.json({ ok: true });
   } catch (error) {
@@ -5461,8 +5470,7 @@ app.post('/api/persons/:id/train-lora', requireAuth, async (req, res) => {
         const zipBuffer = await fs.readFile(zipPath);
         const storageFile = bucket.file(zipStoragePath);
         await storageFile.save(zipBuffer, { metadata: { contentType: 'application/zip' } });
-        await storageFile.makePublic();
-        zipUrl = `https://storage.googleapis.com/${bucket.name}/${zipStoragePath}`;
+        [zipUrl] = await storageFile.getSignedUrl({ action: 'read', expires: Date.now() + 3600000 });
       } else {
         return res.status(503).json({ error: 'Firebase Storage required for LoRA training' });
       }
@@ -5531,8 +5539,9 @@ app.post('/api/persons/:id/train-lora', requireAuth, async (req, res) => {
 
       console.log(`[LoRA Train] Person "${person.name}" | model=${trainerModel} | request_id=${request_id}`);
 
-      // Cleanup
+      // Cleanup local files and training zip from Storage (fal.ai has fetched it)
       await fs.unlink(zipPath).catch(() => {});
+      if (bucket) bucket.file(zipStoragePath).delete().catch(() => {});
       await cleanupTempFiles(tmpPaths);
 
       res.json({ ok: true, status: 'queued', requestId: request_id });
