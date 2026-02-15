@@ -659,6 +659,39 @@ async function downloadPersonPhotosAsBuffers(person) {
   return results;
 }
 
+// --- Person Image Generation (LoRA / Flux / GPT fallback chain) ---
+async function generatePersonImage(prompt, { person, faceImagePaths, imageModel, quality, falKey, req } = {}) {
+  let tempFiles = [];
+
+  // LoRA path — trained person model
+  if (person && person.loraStatus === 'ready' && person.loraUrl && falKey) {
+    const loraPrompt = `${person.loraTriggerWord} ${prompt}`;
+    const buffer = await generateWithLoRA(person.loraUrl, loraPrompt, { loraModel: person.loraModel, falKey });
+    return { buffer, loraUsed: true, tempFiles };
+  }
+
+  // Get reference photos if not supplied
+  if (!faceImagePaths && person) {
+    tempFiles = await downloadPersonPhotosToTemp(person);
+    faceImagePaths = tempFiles;
+  }
+
+  if (!faceImagePaths || faceImagePaths.length === 0) {
+    throw new Error('No reference photos available');
+  }
+
+  // Flux multi-ref path
+  if (falKey && faceImagePaths.length > 0) {
+    const buffer = await generateWithFlux(faceImagePaths, prompt, { falKey });
+    return { buffer, loraUsed: false, tempFiles };
+  }
+
+  // GPT fallback — single reference
+  const refBuffer = await fs.readFile(faceImagePaths[0]);
+  const buffer = await generateImage({ model: imageModel, prompt, size: '1024x1536', quality: quality || 'high', referenceImage: refBuffer, req });
+  return { buffer, loraUsed: false, tempFiles };
+}
+
 // --- Save image record to Firestore for media library ---
 async function saveImageRecord({ userId, brandId, filename, type, prompt, refinedPrompt, model, brandName, width, height }) {
   if (!db) return null;
@@ -3219,7 +3252,7 @@ app.post('/api/brands/full-setup', requireAuth, async (req, res) => {
 
     sendSSE('brand-saved', { id: brandId, name: brandData.name });
 
-    // Step 8: Generate content ideas
+    // Step 8: Generate content ideas (3 initial ideas — user can generate more later)
     sendSSE('status', { step: 'content-ideas', message: 'Creating content ideas...' });
 
     let contentIdeas = [];
@@ -3228,6 +3261,7 @@ app.post('/api/brands/full-setup', requireAuth, async (req, res) => {
       const microLabel = brandData.defaultMicroLabel;
       const brandContext = [
         brandData.systemPrompt || '',
+        brandData.productKnowledge ? `Product knowledge: ${brandData.productKnowledge}` : '',
         `Brand: ${brandData.name}`,
         brandData.website ? `Website: ${brandData.website}` : '',
         brandData.contentPillars?.length ? `Content pillars: ${brandData.contentPillars.join(', ')}` : '',
@@ -3238,9 +3272,9 @@ app.post('/api/brands/full-setup', requireAuth, async (req, res) => {
         system: brandContext,
         messages: [{
           role: 'user',
-          content: buildContentIdeasPrompt({ brand: brandData, microLabel, websiteUrl, pageTitle, metaDesc, websiteText: textContent }),
+          content: buildContentIdeasPrompt({ brand: brandData, microLabel, websiteUrl, pageTitle, metaDesc, websiteText: textContent, numIdeas: 3 }),
         }],
-        maxTokens: 4096,
+        maxTokens: 8192,
         req,
       });
 
@@ -3250,7 +3284,8 @@ app.post('/api/brands/full-setup', requireAuth, async (req, res) => {
         contentIdeas = parsed.ideas || [];
       }
     } catch (e) {
-      console.warn('[Full Setup] Content ideas generation failed:', e.message);
+      console.error('[Full Setup] Content ideas generation failed:', e.message);
+      sendSSE('content-ideas-error', { message: 'Could not generate content ideas — you can generate them from the sidebar.' });
     }
 
     if (contentIdeas.length > 0) {
@@ -4107,35 +4142,12 @@ Return ONLY the meme description (no explanation, no preamble).`,
         const refinedPrompt = await refinePromptWithClaude(rawPrompt, 'photo', data, brand, req);
         const prompt = refinedPrompt || rawPrompt;
 
-        let buffer;
-        if (person.loraStatus === 'ready' && person.loraUrl && isFalEnabled(req)) {
-          // LoRA inference — trained person model, no need to download photos
-          const loraPrompt = `${person.loraTriggerWord} ${prompt}`;
-          console.log(`[Generate] ${brand.name} | LoRA photo with person "${person.name}" (${person.loraModel}) | ${refinedPrompt ? 'Claude-refined' : 'raw'}`);
-          buffer = await generateWithLoRA(person.loraUrl, loraPrompt, {
-            loraModel: person.loraModel,
-            falKey: req.headers['x-fal-key'],
-          });
-        } else {
-          personTempFiles = await downloadPersonPhotosToTemp(person);
-          console.log(`[Generate] ${brand.name} | Hybrid photo with person "${person.name}" | ${refinedPrompt ? 'Claude-refined' : 'raw'}`);
-
-          if (isFalEnabled(req) && personTempFiles.length > 0) {
-            // Flux multi-ref for person consistency
-            buffer = await generateWithFlux(personTempFiles, prompt, { falKey: req.headers['x-fal-key'] });
-          } else {
-            // GPT fallback — single reference
-            const refBuffer = await fs.readFile(personTempFiles[0]);
-            buffer = await generateImage({
-              model: data.imageModel,
-              prompt,
-              size: '1024x1536',
-              quality: data.quality || 'high',
-              referenceImage: refBuffer,
-              req,
-            });
-          }
-        }
+        console.log(`[Generate] ${brand.name} | Person photo "${person.name}" | ${refinedPrompt ? 'Claude-refined' : 'raw'}`);
+        const result = await generatePersonImage(prompt, {
+          person, imageModel: data.imageModel, quality: data.quality, falKey: req.headers['x-fal-key'], req,
+        });
+        personTempFiles = result.tempFiles;
+        let buffer = result.buffer;
 
         // Resize to exact canvas dimensions
         const meta = await sharp(buffer).metadata();
@@ -4512,32 +4524,12 @@ app.post('/api/generate-carousel', requireAuth, generationLimiter, async (req, r
               const refined = await refinePromptWithClaude(rawPrompt, 'photo', slideData, brand, req);
               const prompt = refined || rawPrompt;
 
-              let buffer;
-              if (person.loraStatus === 'ready' && person.loraUrl && isFalEnabled(req)) {
-                const loraPrompt = `${person.loraTriggerWord} ${prompt}`;
-                console.log(`[Carousel ${jobId}] ${brand.name} | Slide ${i + 1}/${slides.length} (LoRA + person "${person.name}")`);
-                buffer = await generateWithLoRA(person.loraUrl, loraPrompt, {
-                  loraModel: person.loraModel,
-                  falKey: req.headers['x-fal-key'],
-                });
-              } else {
-                personTempFiles = await downloadPersonPhotosToTemp(person);
-                console.log(`[Carousel ${jobId}] ${brand.name} | Slide ${i + 1}/${slides.length} (hybrid + person "${person.name}")`);
-
-                if (isFalEnabled(req) && personTempFiles.length > 0) {
-                  buffer = await generateWithFlux(personTempFiles, prompt, { falKey: req.headers['x-fal-key'] });
-                } else {
-                  const refBuffer = await fs.readFile(personTempFiles[0]);
-                  buffer = await generateImage({
-                    model: imageModel,
-                    prompt,
-                    size: '1024x1536',
-                    quality: slideData.quality || 'high',
-                    referenceImage: refBuffer,
-                    req,
-                  });
-                }
-              }
+              console.log(`[Carousel ${jobId}] ${brand.name} | Slide ${i + 1}/${slides.length} (person "${person.name}")`);
+              const result = await generatePersonImage(prompt, {
+                person, imageModel: slideData.imageModel || imageModel, quality: slideData.quality, falKey: req.headers['x-fal-key'], req,
+              });
+              personTempFiles = result.tempFiles;
+              let buffer = result.buffer;
 
               const meta = await sharp(buffer).metadata();
               if (meta.width !== 1080 || meta.height !== 1920) {
@@ -5057,57 +5049,39 @@ app.post('/api/generate-personalized', requireAuth, upload.array('faceImages', 5
     const brand = await getBrandAsync(brandId, req.user?.uid);
     const model = data.model || 'flux';
 
-    // Check for LoRA-trained person first
+    // Resolve person and face image sources
     let loraUsed = false;
     let person = null;
     if (data.personId) {
       person = await getPersonById(data.personId, req.user?.uid);
     }
 
-    const scenarioPrompt = data.prompt || buildPersonalizedPrompt(data, brand);
-    const refined = await refinePromptWithClaude(scenarioPrompt, 'photo', data, brand, req);
-    const finalPrompt = refined || scenarioPrompt;
-
-    let buffer;
-    if (person && person.loraStatus === 'ready' && person.loraUrl && isFalEnabled(req)) {
-      // LoRA inference — trained person model
-      const loraPrompt = `${person.loraTriggerWord} ${finalPrompt}`;
-      console.log(`[Personalized] LoRA inference for "${person.name}" (${person.loraModel})`);
-      buffer = await generateWithLoRA(person.loraUrl, loraPrompt, {
-        loraModel: person.loraModel,
-        falKey: req.headers['x-fal-key'],
-      });
-      loraUsed = true;
-    } else {
-      // Fallback: raw reference photos
-      let faceImagePaths;
+    // Resolve fallback face image paths (uploaded files, person photos, or brand photos)
+    let faceImagePaths = null;
+    if (!person || !(person.loraStatus === 'ready' && person.loraUrl && isFalEnabled(req))) {
       if (req.files && req.files.length > 0) {
         faceImagePaths = req.files.map(f => f.path);
       } else if (person && person.photos?.length > 0) {
-        downloadedTempFiles = await downloadPersonPhotosToTemp(person);
-        faceImagePaths = downloadedTempFiles;
+        // person ref photos will be downloaded by generatePersonImage
       } else if (brand.facePhotos && brand.facePhotos.length > 0) {
         downloadedTempFiles = await downloadFacePhotosToTemp(brand);
         faceImagePaths = downloadedTempFiles;
       } else {
         return res.status(400).json({ error: 'No face photos. Select a person or upload photos.' });
       }
-
-      if (model === 'flux' && isFalEnabled(req)) {
-        buffer = await generateWithFlux(faceImagePaths, finalPrompt, { falKey: req.headers['x-fal-key'] });
-      } else {
-        // GPT fallback — use first image only (doesn't support multi-ref)
-        const refBuffer = await fs.readFile(faceImagePaths[0]);
-        buffer = await generateImage({
-          model: data.imageModel,
-          prompt: finalPrompt,
-          size: '1024x1536',
-          quality: data.quality || 'high',
-          referenceImage: refBuffer,
-          req,
-        });
-      }
     }
+
+    const scenarioPrompt = data.prompt || buildPersonalizedPrompt(data, brand);
+    const refined = await refinePromptWithClaude(scenarioPrompt, 'photo', data, brand, req);
+    const finalPrompt = refined || scenarioPrompt;
+
+    console.log(`[Personalized] Generating for ${person ? `"${person.name}"` : 'uploaded photos'}`);
+    const result = await generatePersonImage(finalPrompt, {
+      person, faceImagePaths, imageModel: data.imageModel, quality: data.quality, falKey: req.headers['x-fal-key'], req,
+    });
+    let buffer = result.buffer;
+    loraUsed = result.loraUsed;
+    if (result.tempFiles.length > 0) downloadedTempFiles = result.tempFiles;
 
     // Resize to exact dimensions if needed
     const meta = await sharp(buffer).metadata();
@@ -5146,19 +5120,19 @@ app.post('/api/generate-personalized-carousel', requireAuth, upload.array('faceI
   const brand = await getBrandAsync(brandId, req.user?.uid);
   const personId = req.body?.personId;
 
-  // Check for LoRA-trained person
-  let loraPerson = null;
+  // Resolve person and face image sources
+  let person = null;
   let faceImagePaths;
   let downloadedTempFiles = [];
   if (personId) {
-    const person = await getPersonById(personId, req.user?.uid);
-    if (person && person.loraStatus === 'ready' && person.loraUrl && isFalEnabled(req)) {
-      loraPerson = person;
-    } else if (person && person.photos?.length > 0) {
+    person = await getPersonById(personId, req.user?.uid);
+    if (!person || !person.photos?.length) {
+      return res.status(400).json({ error: 'Person not found or has no photos.' });
+    }
+    // If no LoRA, pre-download photos for reuse across slides
+    if (!(person.loraStatus === 'ready' && person.loraUrl && isFalEnabled(req))) {
       downloadedTempFiles = await downloadPersonPhotosToTemp(person);
       faceImagePaths = downloadedTempFiles;
-    } else {
-      return res.status(400).json({ error: 'Person not found or has no photos.' });
     }
   } else if (req.files && req.files.length > 0) {
     faceImagePaths = req.files.map(f => f.path);
@@ -5168,7 +5142,6 @@ app.post('/api/generate-personalized-carousel', requireAuth, upload.array('faceI
   } else {
     return res.status(400).json({ error: 'No face photos. Select a person or upload photos.' });
   }
-  const useFlux = (model || 'flux') === 'flux' && isFalEnabled(req);
 
   const jobId = crypto.randomUUID().slice(0, 12);
   const job = { id: jobId, brandId: brand.id, total: slides.length, completed: 0, current: 0, slides: [], status: 'running', error: null };
@@ -5184,26 +5157,10 @@ app.post('/api/generate-personalized-carousel', requireAuth, upload.array('faceI
         const refined = await refinePromptWithClaude(scenarioPrompt, 'photo', slideData, brand, req);
         const finalPrompt = refined || scenarioPrompt;
 
-        let buffer;
-        if (loraPerson) {
-          const loraPrompt = `${loraPerson.loraTriggerWord} ${finalPrompt}`;
-          buffer = await generateWithLoRA(loraPerson.loraUrl, loraPrompt, {
-            loraModel: loraPerson.loraModel,
-            falKey: req.headers['x-fal-key'],
-          });
-        } else if (useFlux) {
-          buffer = await generateWithFlux(faceImagePaths, finalPrompt, { falKey: req.headers['x-fal-key'] });
-        } else {
-          const refBuffer = await fs.readFile(faceImagePaths[0]);
-          buffer = await generateImage({
-            model,
-            prompt: finalPrompt,
-            size: '1024x1536',
-            quality: quality || 'high',
-            referenceImage: refBuffer,
-            req,
-          });
-        }
+        const result = await generatePersonImage(finalPrompt, {
+          person, faceImagePaths, imageModel: model, quality, falKey: req.headers['x-fal-key'], req,
+        });
+        let buffer = result.buffer;
 
         // Resize to exact dimensions if needed
         const meta = await sharp(buffer).metadata();

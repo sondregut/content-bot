@@ -1525,9 +1525,10 @@ async function startBrandGeneration(url) {
         ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
         ...(localStorage.getItem(_prefix + 'openai_key') ? { 'X-OpenAI-Key': localStorage.getItem(_prefix + 'openai_key') } : {}),
         ...(localStorage.getItem(_prefix + 'anthropic_key') ? { 'X-Anthropic-Key': localStorage.getItem(_prefix + 'anthropic_key') } : {}),
+        ...(localStorage.getItem(_prefix + 'gemini_key') ? { 'X-Gemini-Key': localStorage.getItem(_prefix + 'gemini_key') } : {}),
         ...(localStorage.getItem(_prefix + 'fal_key') ? { 'X-Fal-Key': localStorage.getItem(_prefix + 'fal_key') } : {}),
       },
-      body: JSON.stringify({ url }),
+      body: JSON.stringify({ url, textModel: getSelectedTextModel() }),
       signal: brandCreationAbort.signal,
     });
 
@@ -2284,7 +2285,34 @@ function renderSidebar() {
     el.addEventListener('click', () => selectIdea(el.dataset.ideaId));
   });
 
-  // Always show "Create Your Own" section
+  // Add "Generate Ideas" / "Generate More" section
+  const hasAiIdeas = app.categories.some(c => c.ideas.some(i => i.id?.startsWith('AI-')));
+
+  if (!hasAiIdeas) {
+    // No AI ideas yet — show prominent generate button as the primary action
+    const genDiv = document.createElement('div');
+    genDiv.className = 'sidebar-generate-initial';
+    genDiv.innerHTML = `<p class="sidebar-generate-hint">Generate AI content ideas based on your brand's website and profile.</p><input type="text" class="sidebar-prompt-input" id="sidebar-prompt-input" placeholder="Optional: topic or angle..." /><div class="sidebar-prompt-row"><select id="sidebar-format-select" class="sidebar-format-select"><option value="carousel">Carousel</option><option value="video">Video</option></select><input type="number" class="sidebar-slides-input" id="sidebar-slides-input" min="2" max="12" placeholder="Slides" title="Number of slides (default 6-7)" /><button class="btn primary sidebar-generate-btn" id="sidebar-generate-initial-btn">Generate Content Ideas</button></div><div class="sidebar-more-status" id="sidebar-more-status"></div>`;
+    sidebar.appendChild(genDiv);
+    document.getElementById('sidebar-generate-initial-btn').addEventListener('click', () => generateMoreIdeas(3));
+    document.getElementById('sidebar-format-select').addEventListener('change', (e) => {
+      const slidesInput = document.getElementById('sidebar-slides-input');
+      if (slidesInput) slidesInput.style.display = e.target.value === 'video' ? 'none' : '';
+    });
+  } else {
+    // Already have AI ideas — show "Generate More"
+    const moreDiv = document.createElement('div');
+    moreDiv.className = 'sidebar-generate-more';
+    moreDiv.innerHTML = `<input type="text" class="sidebar-prompt-input" id="sidebar-prompt-input" placeholder="e.g. explain app features..." /><div class="sidebar-prompt-row"><select id="sidebar-format-select" class="sidebar-format-select"><option value="carousel">Carousel</option><option value="video">Video</option></select><input type="number" class="sidebar-slides-input" id="sidebar-slides-input" min="2" max="12" placeholder="Slides" title="Number of slides (default 6-7)" /><button class="btn secondary sidebar-more-btn" id="sidebar-generate-more-btn">+ Generate Idea</button></div><div class="sidebar-more-status" id="sidebar-more-status"></div>`;
+    sidebar.appendChild(moreDiv);
+    document.getElementById('sidebar-generate-more-btn').addEventListener('click', () => generateMoreIdeas(1));
+    document.getElementById('sidebar-format-select').addEventListener('change', (e) => {
+      const slidesInput = document.getElementById('sidebar-slides-input');
+      if (slidesInput) slidesInput.style.display = e.target.value === 'video' ? 'none' : '';
+    });
+  }
+
+  // "Create Your Own" section (always secondary, below AI generation)
   const createDiv = document.createElement('div');
   createDiv.className = 'sidebar-create-own';
   createDiv.innerHTML = `<label>Create Your Own</label><div class="sidebar-fmt-group"><button class="sidebar-fmt-btn active" data-fmt="carousel">Carousel</button><button class="sidebar-fmt-btn" data-fmt="video">Video</button><button class="sidebar-fmt-btn" data-fmt="combo">Combo</button></div><div class="sidebar-create-row"><input type="number" class="sidebar-slides-input" id="sidebar-create-slides" min="2" max="12" value="5" title="Number of slides" /><button class="btn secondary sidebar-create-btn" id="sidebar-create-btn">Create</button></div>`;
@@ -2301,30 +2329,18 @@ function renderSidebar() {
     });
   });
   document.getElementById('sidebar-create-btn').addEventListener('click', () => createBlankIdea(createFormat));
-
-  // Add "Generate More" button for AI-generated ideas
-  const hasAiIdeas = app.categories.some(c => c.ideas.some(i => i.id?.startsWith('AI-')));
-  if (hasAiIdeas) {
-    const moreDiv = document.createElement('div');
-    moreDiv.className = 'sidebar-generate-more';
-    moreDiv.innerHTML = `<input type="text" class="sidebar-prompt-input" id="sidebar-prompt-input" placeholder="e.g. explain app features..." /><div class="sidebar-prompt-row"><select id="sidebar-format-select" class="sidebar-format-select"><option value="carousel">Carousel</option><option value="video">Video</option></select><input type="number" class="sidebar-slides-input" id="sidebar-slides-input" min="2" max="12" placeholder="Slides" title="Number of slides (default 6-7)" /><button class="btn secondary sidebar-more-btn" id="sidebar-generate-more-btn">+ Generate Idea</button></div><div class="sidebar-more-status" id="sidebar-more-status"></div>`;
-    sidebar.appendChild(moreDiv);
-    document.getElementById('sidebar-generate-more-btn').addEventListener('click', generateMoreIdeas);
-    document.getElementById('sidebar-format-select').addEventListener('change', (e) => {
-      const slidesInput = document.getElementById('sidebar-slides-input');
-      if (slidesInput) slidesInput.style.display = e.target.value === 'video' ? 'none' : '';
-    });
-  }
 }
 
-async function generateMoreIdeas() {
-  const btn = document.getElementById('sidebar-generate-more-btn');
+async function generateMoreIdeas(count) {
+  const btn = document.getElementById('sidebar-generate-more-btn') || document.getElementById('sidebar-generate-initial-btn');
   const status = document.getElementById('sidebar-more-status');
   if (!btn || !currentBrand) return;
+  const numIdeas = count || 1;
   const format = document.getElementById('sidebar-format-select')?.value || 'carousel';
   const isVideoFormat = format === 'video';
+  const originalLabel = btn.textContent;
   btn.disabled = true;
-  btn.innerHTML = `<span class="sidebar-btn-spinner"></span>${isVideoFormat ? 'Generating video idea...' : 'Generating idea...'}`;
+  btn.innerHTML = `<span class="sidebar-btn-spinner"></span>${numIdeas > 1 ? 'Generating ideas...' : (isVideoFormat ? 'Generating video idea...' : 'Generating idea...')}`;
   btn.classList.add('generating');
   if (status) status.textContent = '';
   try {
@@ -2335,7 +2351,7 @@ async function generateMoreIdeas() {
     const res = await authFetch('/api/generate-content-ideas', {
       method: 'POST',
       body: JSON.stringify({
-        brand: currentBrand, existingTitles, numIdeas: 1, startIndex,
+        brand: currentBrand, existingTitles, numIdeas, startIndex,
         userTopic: document.getElementById('sidebar-prompt-input')?.value?.trim() || '',
         slidesPerIdea: isVideoFormat ? 1 : (parseInt(document.getElementById('sidebar-slides-input')?.value) || 0),
         format,
@@ -2369,7 +2385,7 @@ async function generateMoreIdeas() {
     // Clear the prompt input
     const promptEl = document.getElementById('sidebar-prompt-input');
     if (promptEl) promptEl.value = '';
-    // Auto-select the newly generated idea
+    // Auto-select the first newly generated idea
     if (newIdeas.length > 0) {
       selectIdea(newIdeas[0].id);
     }
@@ -2387,7 +2403,7 @@ async function generateMoreIdeas() {
   } finally {
     btn.disabled = false;
     btn.classList.remove('generating');
-    btn.innerHTML = '+ Generate Idea';
+    btn.innerHTML = originalLabel;
   }
 }
 
