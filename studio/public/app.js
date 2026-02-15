@@ -14,6 +14,25 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
+// --- Toast notifications ---
+function showToast(message, duration = 4000) {
+  let container = document.getElementById('toast-container');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'toast-container';
+    document.body.appendChild(container);
+  }
+  const toast = document.createElement('div');
+  toast.className = 'toast-notification';
+  toast.textContent = message;
+  container.appendChild(toast);
+  requestAnimationFrame(() => toast.classList.add('visible'));
+  setTimeout(() => {
+    toast.classList.remove('visible');
+    setTimeout(() => toast.remove(), 300);
+  }, duration);
+}
+
 // --- Persist slide image URL to Firestore content idea ---
 function persistSlideImage(slideIndex, imageUrl) {
   if (!selectedIdea?.id || !currentBrand) return;
@@ -282,6 +301,7 @@ let bgImageFilename = null;      // Background image
 let fgImageFilename = null;      // Foreground (phone/figure) image
 let slideReferenceImages = {}; // { slideIndex: { filename, displayName } }
 let generateAbort = null; // AbortController for in-flight single-slide generation
+let generatingSlides = new Set(); // Slide indices currently being generated in background
 let userPersons = []; // User-level persons for face-consistent photo generation
 let selectedFaceStudioPerson = null; // Currently selected person in Face Studio
 
@@ -302,6 +322,7 @@ function resetAppState() {
   batchJobId = null;
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
   if (generateAbort) { generateAbort.abort(); generateAbort = null; }
+  generatingSlides.clear();
 
   // Media library state
   mlImages = [];
@@ -1311,6 +1332,16 @@ function openBrandModal(brand = null) {
     renderBrandFacePhotos([]);
   }
 
+  // Screenshots section — only show for existing brands
+  const ssSection = document.getElementById('brand-screenshots-section');
+  if (brand) {
+    ssSection.style.display = '';
+    loadBrandScreenshots(brand.id);
+  } else {
+    ssSection.style.display = 'none';
+    renderBrandScreenshots([]);
+  }
+
   brandModal.style.display = 'flex';
   _activeFocusTrap = trapFocus(brandModal);
 }
@@ -1414,6 +1445,131 @@ document.getElementById('brand-face-photo-input').addEventListener('change', asy
     renderBrandFacePhotos(brandFacePhotos);
     status.textContent = 'Photos saved!';
     setTimeout(() => { if (status.textContent === 'Photos saved!') status.textContent = ''; }, 2000);
+  } catch (err) {
+    status.textContent = `Error: ${err.message}`;
+  }
+});
+
+// --- Brand Screenshots Management ---
+let brandScreenshots = [];
+
+async function loadBrandScreenshots(brandId) {
+  renderBrandScreenshots([]);
+  const status = document.getElementById('brand-screenshot-status');
+  status.textContent = 'Loading screenshots...';
+  try {
+    const res = await authFetch(`/api/brands/${brandId}/screenshots`);
+    const data = await res.json();
+    brandScreenshots = data.screenshots || [];
+    renderBrandScreenshots(brandScreenshots);
+    status.textContent = '';
+  } catch (err) {
+    status.textContent = 'Could not load screenshots.';
+    brandScreenshots = [];
+  }
+}
+
+function renderBrandScreenshots(screenshots) {
+  const grid = document.getElementById('brand-screenshots-grid');
+  const addBtn = document.getElementById('brand-screenshot-add');
+  const countEl = document.getElementById('brand-screenshot-count');
+
+  grid.querySelectorAll('.screenshot-thumb').forEach(el => el.remove());
+
+  screenshots.forEach((ss, idx) => {
+    if (!ss.url) return;
+    const thumb = document.createElement('div');
+    thumb.className = 'screenshot-thumb';
+    thumb.innerHTML = `
+      <img src="${ss.url}" alt="Screenshot ${idx + 1}" />
+      <button class="screenshot-remove" data-idx="${idx}" title="Remove">&times;</button>
+      <span class="screenshot-label" data-idx="${idx}" title="Click to edit label">${ss.label || 'Screenshot'}</span>
+    `;
+    grid.insertBefore(thumb, addBtn);
+  });
+
+  countEl.textContent = `${screenshots.length} / 8`;
+  addBtn.style.display = screenshots.length >= 8 ? 'none' : 'flex';
+
+  // Attach remove handlers
+  grid.querySelectorAll('.screenshot-remove').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const idx = parseInt(btn.dataset.idx);
+      if (!editingBrandId) return;
+      btn.disabled = true;
+      const status = document.getElementById('brand-screenshot-status');
+      status.textContent = 'Removing...';
+      try {
+        const res = await authFetch(`/api/brands/${editingBrandId}/screenshots/${idx}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Delete failed');
+        brandScreenshots = data.screenshots || [];
+        renderBrandScreenshots(brandScreenshots);
+        status.textContent = 'Screenshot removed.';
+        setTimeout(() => { if (status.textContent === 'Screenshot removed.') status.textContent = ''; }, 2000);
+      } catch (err) {
+        status.textContent = `Error: ${err.message}`;
+      }
+    });
+  });
+
+  // Attach label edit handlers
+  grid.querySelectorAll('.screenshot-label').forEach(lbl => {
+    lbl.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const idx = parseInt(lbl.dataset.idx);
+      const current = lbl.textContent;
+      const newLabel = prompt('Screenshot label (AI uses this to pick the right screenshot):', current);
+      if (!newLabel || newLabel.trim() === current || !editingBrandId) return;
+      const status = document.getElementById('brand-screenshot-status');
+      status.textContent = 'Updating label...';
+      try {
+        const res = await authFetch(`/api/brands/${editingBrandId}/screenshots/${idx}/label`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ label: newLabel.trim() }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Update failed');
+        lbl.textContent = newLabel.trim();
+        status.textContent = 'Label updated.';
+        setTimeout(() => { if (status.textContent === 'Label updated.') status.textContent = ''; }, 2000);
+      } catch (err) {
+        status.textContent = `Error: ${err.message}`;
+      }
+    });
+  });
+}
+
+document.getElementById('brand-screenshot-add').addEventListener('click', () => {
+  document.getElementById('brand-screenshot-input').click();
+});
+
+document.getElementById('brand-screenshot-input').addEventListener('change', async () => {
+  const input = document.getElementById('brand-screenshot-input');
+  const files = Array.from(input.files);
+  input.value = '';
+  if (!files.length || !editingBrandId) return;
+
+  const remaining = 8 - brandScreenshots.length;
+  const toUpload = files.slice(0, remaining);
+  if (toUpload.length === 0) return;
+
+  const status = document.getElementById('brand-screenshot-status');
+  status.textContent = `Uploading ${toUpload.length} screenshot${toUpload.length > 1 ? 's' : ''}...`;
+
+  const fd = new FormData();
+  toUpload.forEach(f => fd.append('screenshots', f));
+
+  try {
+    const res = await authFetch(`/api/brands/${editingBrandId}/screenshots`, { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Upload failed');
+    brandScreenshots = data.screenshots || [];
+    renderBrandScreenshots(brandScreenshots);
+    status.textContent = 'Screenshots saved!';
+    setTimeout(() => { if (status.textContent === 'Screenshots saved!') status.textContent = ''; }, 2000);
   } catch (err) {
     status.textContent = `Error: ${err.message}`;
   }
@@ -2743,9 +2899,10 @@ function renderSlideTabs() {
     const s = slideEdits[i];
     const active = i === currentSlideIndex ? 'active' : '';
     const generated = generatedImages[i] ? 'generated' : '';
+    const generating = generatingSlides.has(i) ? 'generating' : '';
     const typeIcon = s.type === 'video' ? 'V' : s.type === 'photo' ? 'P' : s.type === 'mockup' ? 'M' : 'T';
     const hasSlideRef = slideReferenceImages[i] ? 'has-ref' : '';
-    html += `<button class="slide-tab ${active} ${generated} ${hasSlideRef}" data-index="${i}">`;
+    html += `<button class="slide-tab ${active} ${generated} ${generating} ${hasSlideRef}" data-index="${i}">`;
     if (canDelete) html += `<span class="tab-delete" data-del="${i}">&times;</span>`;
     html += `<span class="tab-num">${s.number}</span>`;
     html += `<span class="tab-type">${typeIcon}</span>`;
@@ -2933,7 +3090,17 @@ function loadSlideIntoForm(index) {
 
   // Determine preview mode based on slide type and whether it has been generated
   const needsAI = slideNeedsAI(slide.type, slide.imageUsage);
-  if (generatedImages[index]) {
+  if (generatingSlides.has(index)) {
+    // Slide is being generated in background — show spinner
+    setPreviewMode('generated');
+    previewImg.style.display = 'none';
+    previewVideo.style.display = 'none';
+    downloadButtons.style.display = 'none';
+    loadingSpinner.classList.add('active');
+    spinnerText.textContent = `Generating slide ${index + 1}...`;
+    statusEl.textContent = `Generating slide ${index + 1}...`;
+  } else if (generatedImages[index]) {
+    loadingSpinner.classList.remove('active');
     const gen = generatedImages[index];
     if (gen.isVideo) {
       previewImg.style.display = 'none';
@@ -2948,12 +3115,14 @@ function loadSlideIntoForm(index) {
     statusEl.textContent = `Slide ${index + 1} generated.`;
     setPreviewMode('generated');
   } else if (needsAI) {
+    loadingSpinner.classList.remove('active');
     previewImg.style.display = 'none';
     previewVideo.style.display = 'none';
     downloadButtons.style.display = 'none';
     statusEl.textContent = 'Ready — click Generate to create this slide.';
     setPreviewMode('live');
   } else {
+    loadingSpinner.classList.remove('active');
     previewImg.style.display = 'none';
     previewVideo.style.display = 'none';
     downloadButtons.style.display = 'flex'; updateRawVideoButton();
@@ -4403,24 +4572,24 @@ function buildSlidePayload(slide, slideIndex) {
   return payload;
 }
 
-// --- Generate Single Slide ---
+// --- Generate Single Slide (runs in background, survives slide switching) ---
 form.addEventListener('submit', async (e) => {
   e.preventDefault();
   saveCurrentSlideEdits();
 
-  if (generateAbort) generateAbort.abort();
-  generateAbort = new AbortController();
-  const signal = generateAbort.signal;
   const slideIndex = currentSlideIndex;
-
   const slide = slideEdits[slideIndex];
   const payload = buildSlidePayload(slide, slideIndex);
-
   const isVideo = payload.slideType === 'video';
+
+  // Mark this slide as generating
+  generatingSlides.add(slideIndex);
+  renderSlideTabs();
+
+  // Show spinner on current view
   statusEl.textContent = isVideo
     ? `Generating video ${slideIndex + 1} (this may take 1-7 min)...`
     : `Generating slide ${slideIndex + 1}...`;
-  // Switch to generated view for the spinner
   setPreviewMode('generated');
   previewImg.style.display = 'none';
   previewVideo.style.display = 'none';
@@ -4430,11 +4599,20 @@ form.addEventListener('submit', async (e) => {
     ? `Generating video... (up to 7 min)`
     : `Generating slide ${slideIndex + 1}...`;
 
+  function onGenerationDone(slideIdx, label) {
+    generatingSlides.delete(slideIdx);
+    renderSlideTabs();
+    if (currentSlideIndex === slideIdx) {
+      loadingSpinner.classList.remove('active');
+    } else {
+      showToast(label);
+    }
+  }
+
   try {
     const res = await authFetch('/api/generate', {
       method: 'POST',
       body: JSON.stringify(payload),
-      signal,
     });
 
     const data = await res.json();
@@ -4445,13 +4623,12 @@ form.addEventListener('submit', async (e) => {
       const jobId = data.videoJobId;
       let elapsed = 0;
       while (true) {
-        if (signal.aborted) return;
         await new Promise(r => setTimeout(r, 3000));
         elapsed += 3;
         if (currentSlideIndex === slideIndex) {
           spinnerText.textContent = `Generating video... (${elapsed}s)`;
         }
-        const pollRes = await authFetch(`/api/video-status/${jobId}`, { signal });
+        const pollRes = await authFetch(`/api/video-status/${jobId}`);
         if (!pollRes.ok) continue;
         const job = await pollRes.json();
         if (job.status === 'done') {
@@ -4472,6 +4649,7 @@ form.addEventListener('submit', async (e) => {
           updateEditSection();
           saveSession();
           invalidateMediaLibrary();
+          onGenerationDone(slideIndex, `Video ${slideIndex + 1} ready`);
           break;
         }
         if (job.status === 'error') {
@@ -4506,13 +4684,17 @@ form.addEventListener('submit', async (e) => {
       updateEditSection();
       saveSession();
       invalidateMediaLibrary();
+      onGenerationDone(slideIndex, `Slide ${slideIndex + 1} ready`);
     }
   } catch (err) {
     if (err.name === 'AbortError') return;
-    statusEl.textContent = `Error: ${err.message}`;
-  } finally {
+    generatingSlides.delete(slideIndex);
+    renderSlideTabs();
     if (currentSlideIndex === slideIndex) {
+      statusEl.textContent = `Error: ${err.message}`;
       loadingSpinner.classList.remove('active');
+    } else {
+      showToast(`Slide ${slideIndex + 1} failed: ${err.message}`);
     }
   }
 });

@@ -1247,6 +1247,16 @@
             <div class="brand-face-photo-status" id="brand-face-photo-status"></div>
           </div>
 
+          <div class="form-group full" id="brand-screenshots-section" style="display:none">
+            <label class="label">App Screenshots <span class="face-photo-count" id="brand-screenshot-count">0 / 8</span></label>
+            <p class="field-hint" style="margin:0 0 8px">Upload app screenshots for phone mockup slides. Label each so AI picks the right one.</p>
+            <div class="brand-screenshots-grid" id="brand-screenshots-grid">
+              <input type="file" id="brand-screenshot-input" accept="image/*" multiple style="display:none" />
+              <button type="button" class="face-add-btn screenshot-add-btn" id="brand-screenshot-add" title="Add screenshot" aria-label="Add screenshot">+</button>
+            </div>
+            <div class="brand-face-photo-status" id="brand-screenshot-status"></div>
+          </div>
+
           <div class="form-group full">
             <label class="label">Image Style</label>
             <textarea id="brand-image-style" rows="3" placeholder="2-4 sentences describing lighting, composition, mood, camera feel for AI image generation..."></textarea>
