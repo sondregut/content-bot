@@ -2021,6 +2021,81 @@ const MEME_FORMAT_INSTRUCTIONS = {
     layout: 'Four panels in 2x2 grid. Panel 1: Character A makes a confident statement. Panel 2: Character B smiles hopefully and asks confirming question. Panel 3: Character A stares silently. Panel 4: Character B\'s smile fades ("...right?"). Same two characters across all panels with changing expressions.',
     style: 'illustrated/cartoon for consistency',
   },
+  'grus-plan': {
+    label: 'Gru\'s Plan (4-Panel)',
+    layout: 'Four panels in 2x2 grid. A cartoon villain-like character presents a plan on a whiteboard/easel. Panel 1: Step 1 of plan (good). Panel 2: Step 2 (good). Panel 3: Step 3 (unexpectedly bad/backfires). Panel 4: Character looks back at the board in shock/horror, realizing the flaw. Same character and room in all panels.',
+    style: 'cartoon/illustrated',
+  },
+  'trade-offer': {
+    label: 'Trade Offer',
+    layout: 'Single panel: a confident character in business casual, arms open in a presenting gesture. The image is divided into sections: header "Trade Offer", left column "I receive:" with listed items, right column "You receive:" with listed items. The humor is the lopsided or absurd trade.',
+    style: 'photorealistic or stylized',
+  },
+  'change-my-mind': {
+    label: 'Change My Mind',
+    layout: 'Single panel: a person sitting casually outdoors at a folding table with a large sign/banner propped up displaying a bold, provocative opinion. The person has a confident, relaxed posture. Setting is a park or campus. The sign text is the punchline.',
+    style: 'photorealistic',
+  },
+  'always-has-been': {
+    label: 'Always Has Been',
+    layout: 'Two panels or single wide panel. Two astronauts floating in space with Earth visible below. Astronaut 1 (foreground) looks at Earth and has a realization (speech bubble). Astronaut 2 (behind) points a finger gun at Astronaut 1 and says "Always has been." The revelation + betrayal combo is the format.',
+    style: 'illustrated/stylized space scene',
+  },
+  'domino-effect': {
+    label: 'Domino Effect',
+    layout: 'Single wide panel showing a chain of dominoes from left to right. The first domino is tiny (labeled with something small/trivial). Each subsequent domino is larger. The final domino is massive (labeled with a huge consequence). Shows cascading cause-and-effect. Side/perspective view to show the size progression.',
+    style: 'photorealistic or clean illustrated',
+  },
+  'iceberg': {
+    label: 'Iceberg Tiers',
+    layout: 'Single tall panel showing an iceberg. The tip above water shows surface-level/obvious things. Below the waterline, progressively deeper tiers show increasingly niche, obscure, or intense versions. 4-6 labeled tiers from top to bottom. The water line clearly divides "what people see" from "what\'s hidden beneath."',
+    style: 'illustrated/infographic style',
+  },
+  'bell-curve': {
+    label: 'Bell Curve / IQ Meme',
+    layout: 'Single panel with a bell curve/normal distribution graph. Left tail (low end) and right tail (high end) characters are labeled with the SAME simple opinion, both looking relaxed/happy. The peak (middle/majority) character has an overcomplicated opposing take, looking stressed. The joke: beginners and experts agree, while midwits overthink it.',
+    style: 'illustrated/diagram with character faces',
+  },
+  'same-picture': {
+    label: 'They\'re the Same Picture',
+    layout: 'Three-panel format. Top two panels show two images side by side that appear different but are being compared. Bottom panel shows a person holding both photos and saying "They\'re the same picture." The humor is that the two things are either obviously different (sarcasm) or surprisingly identical.',
+    style: 'photorealistic or illustrated',
+  },
+  'types-of-headaches': {
+    label: 'Types of Headaches',
+    layout: 'Four-panel medical diagram style. Shows a human head outline from above in each panel with a red area indicating pain location. Panel 1: "Migraine" (side). Panel 2: "Tension" (forehead band). Panel 3: "Cluster" (eye area). Panel 4: Custom label with the whole head highlighted red — the relatable/funny trigger.',
+    style: 'clean medical diagram/illustrated',
+  },
+  'left-exit': {
+    label: 'Left Exit / Highway Swerve',
+    layout: 'Aerial view of a highway with a car swerving dramatically at the last second to take an exit ramp, crossing the divider lines. The main road continuing straight is labeled (the "sensible" choice). The exit ramp is labeled (the impulsive/funny choice). Skid marks emphasize the sudden decision.',
+    style: 'illustrated/diagram or aerial photo',
+  },
+  'gigachad': {
+    label: 'Gigachad (Yes.)',
+    layout: 'Single panel: an extremely muscular, chiseled, confident male figure in dramatic black-and-white lighting, looking forward with supreme confidence. A speech bubble or caption simply says "Yes." The format is used when someone confidently owns a behavior others would question.',
+    style: 'dramatic black-and-white photography',
+  },
+  'uno-reverse': {
+    label: 'UNO Reverse Card',
+    layout: 'Single panel focused on a hand holding up or slamming down a large UNO reverse card. The card is prominently displayed, colorful (red/yellow/green/blue). Context text above or around explains the situation being reversed. The format means "no u" / turning something back on the sender.',
+    style: 'photorealistic close-up or illustrated',
+  },
+  'wojak-comparison': {
+    label: 'Wojak Comparison (Virgin vs Chad)',
+    layout: 'Two-panel side by side. Left panel: a sad, slouching, anxious stick-figure character (the bad approach) with multiple negative trait labels scattered around. Right panel: a confident, buff, glowing character (the good approach) with positive trait labels. Multiple small text annotations on both sides.',
+    style: 'simple line-art/illustrated',
+  },
+  'boyfriend-jacket': {
+    label: 'My Goals / Distractions',
+    layout: 'Single panel showing a person trying to work/focus at a desk or with a task, surrounded by multiple floating distractions pulling their attention (phones, snacks, games, social media, etc.). The person is labeled "Me", the work is labeled "My goals", and each distraction is labeled. Overwhelm and relatability is the humor.',
+    style: 'illustrated or photorealistic with labeled overlays',
+  },
+  'scroll-of-truth': {
+    label: 'Scroll of Truth',
+    layout: 'Three panels. Panel 1: Adventurer character finds an ancient scroll in a cave/temple. Panel 2: Character opens and reads the scroll — the scroll contains an uncomfortable truth or hot take. Panel 3: Character throws the scroll away in disgust/denial, saying "Nyeh!" The truth on the scroll is the punchline.',
+    style: 'cartoon/illustrated adventure style',
+  },
 };
 
 function buildMemePrompt(data, brand) {
@@ -5342,11 +5417,13 @@ app.post('/api/persons/:id/photos', requireAuth, upload.array('photos', 20), asy
     }
 
     const newPhotos = [];
+    let skipped = 0;
     for (const file of req.files) {
       try {
         await validateImageFile(file);
       } catch {
         await fs.unlink(file.path).catch(() => {});
+        skipped++;
         continue;
       }
 
@@ -5380,8 +5457,12 @@ app.post('/api/persons/:id/photos', requireAuth, upload.array('photos', 20), asy
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
 
+    if (newPhotos.length === 0 && skipped > 0) {
+      return res.status(400).json({ error: `All ${skipped} file(s) were invalid and skipped.` });
+    }
+
     const withUrls = await getFacePhotoUrls(allPhotos);
-    res.json({ ok: true, photos: withUrls });
+    res.json({ ok: true, photos: withUrls, skipped });
   } catch (error) {
     if (req.files) for (const f of req.files) await fs.unlink(f.path).catch(() => {});
     console.error('[Person Photo Upload]', error);
