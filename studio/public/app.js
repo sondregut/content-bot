@@ -491,6 +491,16 @@ function getSelectedVideoModel() {
   return videoModelSelect ? videoModelSelect.value : 'kling-v3-standard';
 }
 
+// Show/hide video person selector based on Veo 3.1
+function updateVideoPersonRowVisibility() {
+  const row = document.getElementById('video-person-row');
+  if (!row) return;
+  row.style.display = getSelectedVideoModel() === 'veo-3.1' ? '' : 'none';
+}
+if (videoModelSelect) {
+  videoModelSelect.addEventListener('change', updateVideoPersonRowVisibility);
+}
+
 // Loading spinner refs
 const loadingSpinner = document.getElementById('loading-spinner');
 const spinnerText = document.getElementById('spinner-text');
@@ -1090,24 +1100,28 @@ async function pollLoraStatus(personId) {
 }
 
 function populatePersonSelectors() {
-  const select = document.getElementById('person-select');
-  if (!select) return;
-
-  const currentVal = select.value;
-  const firstOption = select.querySelector('option');
-  const defaultText = firstOption?.textContent || 'None';
-  select.innerHTML = `<option value="">${escapeHtml(defaultText)}</option>`;
-  for (const person of userPersons) {
-    const photoCount = person.photos?.length || 0;
-    const opt = document.createElement('option');
-    opt.value = person.id;
-    const loraBadge = person.loraStatus === 'ready' ? ' [LoRA]' : '';
-    opt.textContent = `${person.name} (${photoCount} photo${photoCount !== 1 ? 's' : ''})${loraBadge}`;
-    if (photoCount === 0 && person.loraStatus !== 'ready') opt.disabled = true;
-    select.appendChild(opt);
-  }
-  if (currentVal && userPersons.some(p => p.id === currentVal)) {
-    select.value = currentVal;
+  const selectors = [
+    { el: document.getElementById('person-select'), requireLora: true },
+    { el: document.getElementById('video-person-select'), requireLora: false },
+  ];
+  for (const { el: select, requireLora } of selectors) {
+    if (!select) continue;
+    const currentVal = select.value;
+    const firstOption = select.querySelector('option');
+    const defaultText = firstOption?.textContent || 'None';
+    select.innerHTML = `<option value="">${escapeHtml(defaultText)}</option>`;
+    for (const person of userPersons) {
+      const photoCount = person.photos?.length || 0;
+      const opt = document.createElement('option');
+      opt.value = person.id;
+      const loraBadge = person.loraStatus === 'ready' ? ' [LoRA]' : '';
+      opt.textContent = `${person.name} (${photoCount} photo${photoCount !== 1 ? 's' : ''})${loraBadge}`;
+      if (photoCount === 0 && (requireLora ? person.loraStatus !== 'ready' : true)) opt.disabled = true;
+      select.appendChild(opt);
+    }
+    if (currentVal && userPersons.some(p => p.id === currentVal)) {
+      select.value = currentVal;
+    }
   }
 }
 
@@ -2728,6 +2742,9 @@ function loadSlideIntoForm(index) {
   if (form.elements.videoDuration) form.elements.videoDuration.value = slide.duration || '5';
   if (form.elements.videoAudio) form.elements.videoAudio.checked = slide.audio || false;
   if (form.elements.videoTextOverlay) form.elements.videoTextOverlay.checked = slide.videoTextOverlay ?? true;
+  const vpSelect = document.getElementById('video-person-select');
+  if (vpSelect) vpSelect.value = slide.videoPersonId || '';
+  updateVideoPersonRowVisibility();
   // Ken Burns fields
   if (form.elements.kbSetting) form.elements.kbSetting.value = slide.kbSetting || '';
   if (form.elements.kbMood) form.elements.kbMood.value = slide.kbMood || '';
@@ -2904,6 +2921,8 @@ function saveCurrentSlideEdits() {
       slide.duration = parseInt(form.elements.videoDuration?.value) || 5;
       slide.audio = form.elements.videoAudio?.checked || false;
       slide.videoTextOverlay = form.elements.videoTextOverlay?.checked ?? true;
+      const vpSel = document.getElementById('video-person-select');
+      slide.videoPersonId = vpSel?.value || '';
     }
   }
 }
@@ -2963,6 +2982,7 @@ function toggleTypeFields() {
     const method = videoMethodSelect.value;
     if (aiVideoFields) aiVideoFields.style.display = method === 'ai' ? '' : 'none';
     if (kenBurnsFields) kenBurnsFields.style.display = method === 'ken-burns' ? '' : 'none';
+    updateVideoPersonRowVisibility();
   }
 
   // Hide reference sections for mockup/video (they are ignored server-side, except ken-burns)
@@ -4241,6 +4261,8 @@ function buildSlidePayload(slide, slideIndex) {
       payload.duration = slide.duration || parseInt(form.elements.videoDuration?.value) || 5;
       payload.audio = slide.audio || form.elements.videoAudio?.checked || false;
       payload.videoTextOverlay = form.elements.videoTextOverlay?.checked ?? true;
+      const videoPersonSelect = document.getElementById('video-person-select');
+      if (videoPersonSelect?.value) payload.personId = slide.videoPersonId || videoPersonSelect.value;
     }
     payload.headlineFontSize = slide.headlineFontSize || parseInt(form.elements.headlineFontSize?.value) || 82;
     payload.bodyFontSize = slide.bodyFontSize || parseInt(form.elements.bodyFontSize?.value) || 34;

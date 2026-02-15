@@ -284,6 +284,7 @@ function buildVideoPrompt(data, brand) {
     `Mood: ${mood}.`,
     `Camera: ${cameraMove}.`,
     `Duration: ${data.duration || 5} seconds.`,
+    data.personId ? 'Feature the person shown in the reference images prominently. Preserve their face and identity throughout the video.' : null,
   ].filter(Boolean).join('\n');
 }
 
@@ -299,16 +300,24 @@ async function generateVideoSlide(prompt, options = {}) {
     const gemini = options.gemini;
     const modelLabel = VIDEO_MODEL_NAMES[videoModel] || videoModel;
     if (!gemini) throw new Error(`Add your Google Gemini API key in Settings to use ${modelLabel}.`);
+    const hasRefImages = options.referenceImages?.length > 0 && videoModel === 'veo-3.1';
+    const veoConfig = {
+      aspectRatio: options.aspectRatio === '16:9' ? '16:9' : '9:16',
+      numberOfVideos: 1,
+      durationSeconds: Math.min(options.duration || 5, 8),
+      personGeneration: hasRefImages ? 'allow_adult' : 'allow_all',
+      ...(videoModel !== 'veo-2' && { generateAudio: options.audio !== false }),
+    };
+    if (hasRefImages) {
+      veoConfig.referenceImages = options.referenceImages.map(img => ({
+        image: { imageBytes: img.imageBytes, mimeType: img.mimeType },
+        referenceType: 'ASSET',
+      }));
+    }
     const response = await gemini.models.generateVideos({
       model: VEO_API_MODELS[videoModel],
       prompt,
-      config: {
-        aspectRatio: options.aspectRatio === '16:9' ? '16:9' : '9:16',
-        numberOfVideos: 1,
-        durationSeconds: Math.min(options.duration || 5, 8),
-        personGeneration: 'allow_all',
-        ...(videoModel !== 'veo-2' && { includeAudio: options.audio !== false }),
-      },
+      config: veoConfig,
     });
     // Poll Veo operation
     let op = response;
@@ -318,6 +327,12 @@ async function generateVideoSlide(prompt, options = {}) {
       op = await gemini.operations.get({ operation: op });
     }
     if (!op.done) throw new Error(`${modelLabel} video generation timed out`);
+    // Check for safety filter rejection
+    const raiFiltered = op.response?.raiMediaFilteredCount;
+    if (raiFiltered > 0) {
+      const reasons = op.response?.raiMediaFilteredReasons?.join(', ') || 'unknown';
+      throw new Error(`Video blocked by safety filters (${reasons}). Try different reference photos or adjust the prompt.`);
+    }
     const videoData = op.response?.generatedVideos?.[0]?.video;
     if (!videoData?.uri) throw new Error(`${modelLabel} returned no video`);
     // Download the video from the URI
@@ -619,6 +634,29 @@ async function downloadPersonPhotosToTemp(person) {
     tmpPaths.push(tmpPath);
   }
   return tmpPaths;
+}
+
+async function downloadPersonPhotosAsBuffers(person) {
+  const photos = person.photos;
+  if (!photos || photos.length === 0) return [];
+  const results = [];
+  for (const photo of photos.slice(0, 3)) {
+    let buffer;
+    if (bucket) {
+      const file = bucket.file(photo.storagePath);
+      [buffer] = await file.download();
+    } else {
+      const src = path.join(outputDir, path.basename(photo.storagePath));
+      buffer = await fs.readFile(src);
+    }
+    // Resize to 1024px max dimension for Veo
+    buffer = await sharp(buffer)
+      .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
+      .png()
+      .toBuffer();
+    results.push({ imageBytes: buffer.toString('base64'), mimeType: 'image/png' });
+  }
+  return results;
 }
 
 // --- Save image record to Firestore for media library ---
@@ -3981,6 +4019,16 @@ Return ONLY the meme description (no explanation, no preamble).`,
       };
       videoJobs.set(videoJobId, videoJob);
 
+      // Fetch person reference images for Veo 3.1 before entering background job
+      let personRefImages = [];
+      if (data.personId && videoModel === 'veo-3.1') {
+        const person = await getPersonById(data.personId, req.user?.uid);
+        if (person) {
+          personRefImages = await downloadPersonPhotosAsBuffers(person);
+          console.log(`[Generate] Person "${person.name}" — ${personRefImages.length} reference photo(s) for Veo 3.1`);
+        }
+      }
+
       // Process video in background
       (async () => {
         try {
@@ -3992,6 +4040,7 @@ Return ONLY the meme description (no explanation, no preamble).`,
             falKey: req.headers['x-fal-key'],
             gemini: isVeo ? getGemini(req) : null,
             geminiKey: req.headers['x-gemini-key'],
+            referenceImages: personRefImages,
           });
 
           const videoRes = await fetch(videoUrl);
@@ -4397,6 +4446,16 @@ app.post('/api/generate-carousel', requireAuth, generationLimiter, async (req, r
           const refined = await refinePromptWithClaude(rawPrompt, 'video', slideData, brand, req);
           const prompt = refined || rawPrompt;
 
+          // Fetch person reference images for Veo 3.1
+          let vidPersonRefImages = [];
+          if (slideData.personId && videoModel === 'veo-3.1') {
+            const person = await getPersonById(slideData.personId, req.user?.uid);
+            if (person) {
+              vidPersonRefImages = await downloadPersonPhotosAsBuffers(person);
+              console.log(`[Carousel ${jobId}] Person "${person.name}" — ${vidPersonRefImages.length} reference photo(s)`);
+            }
+          }
+
           const videoUrl = await generateVideoSlide(prompt, {
             videoModel,
             duration: slideData.duration || 5,
@@ -4405,6 +4464,7 @@ app.post('/api/generate-carousel', requireAuth, generationLimiter, async (req, r
             falKey: req.headers['x-fal-key'],
             gemini: isVeo ? getGemini(req) : null,
             geminiKey: req.headers['x-gemini-key'],
+            referenceImages: vidPersonRefImages,
           });
 
           // Download video to local storage
