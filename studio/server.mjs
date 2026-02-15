@@ -296,16 +296,35 @@ function buildVideoPrompt(data, brand) {
   const scene = data.scene || data.headline || 'dynamic product showcase';
   const mood = data.mood || 'energetic and professional';
   const cameraMove = data.cameraMove || 'slow tracking shot';
+  const isVeo = Boolean(VEO_API_MODELS[data.videoModel]);
 
   return [
-    `Brand: ${brand.name}.`,
+    // Subject anchoring (first for both models)
+    data.subject ? `Subject: ${data.subject}.` : null,
+    brand.name ? `Brand: ${brand.name}.` : null,
     brand.imageStyle ? `Visual style: ${brand.imageStyle}.` : null,
-    brand.defaultBackground ? `Brand aesthetic: ${brand.defaultBackground}.` : null,
-    brand.productKnowledge ? `Product: ${brand.productKnowledge.slice(0, 300)}` : null,
+
+    // Scene & environment
     `Scene: ${scene}.`,
     `Mood: ${mood}.`,
-    `Camera: ${cameraMove}.`,
+
+    // Camera (with lens hint for Veo)
+    isVeo
+      ? `Camera: ${cameraMove}.${data.lens ? ` Lens: ${data.lens}.` : ''}`
+      : `Camera: ${cameraMove}.`,
+
+    // Brand context
+    brand.defaultBackground ? `Brand aesthetic: ${brand.defaultBackground}.` : null,
+    brand.productKnowledge ? `Product: ${brand.productKnowledge.slice(0, 300)}` : null,
+
+    // Duration
     `Duration: ${data.duration || 5} seconds.`,
+
+    // Audio/dialogue (if provided)
+    data.dialogue ? `Dialogue: "${data.dialogue}"` : null,
+    data.audioNote ? `Audio: ${data.audioNote}` : null,
+
+    // Person reference
     data.personId ? 'Feature the person shown in the reference images prominently. Preserve their face and identity throughout the video.' : null,
   ].filter(Boolean).join('\n');
 }
@@ -385,7 +404,7 @@ async function generateVideoSlide(prompt, options = {}) {
       duration: String(options.duration || 5),
       aspect_ratio: options.aspectRatio || '9:16',
       generate_audio: options.audio !== false,
-      negative_prompt: 'blur, distortion, low quality, morphing, flickering, disfigured hands, extra fingers, watermark, text overlay, logo, compression artifacts',
+      negative_prompt: 'blur, distortion, low quality, morphing, flickering, disfigured hands, extra fingers, watermark, text overlay, logo, compression artifacts, inconsistent lighting, morphing faces, extra limbs, unnatural physics, style drift',
     }),
   });
 
@@ -2504,22 +2523,25 @@ CRITICAL: Respect the brand's visual style direction. Do not override it with ge
 
 Return ONLY the refined prompt text. No preamble, no explanation, no markdown formatting.`;
 
-const VIDEO_REFINEMENT_INSTRUCTIONS = `Your job: Transform a raw video brief into an optimized prompt for Kling 3.0 AI video generation.
+const KLING_REFINEMENT_INSTRUCTIONS = `Your job: Transform a raw video brief into an optimized prompt for Kling 3.0 AI video generation.
 
 PROMPT STRUCTURE (follow this order):
-1. Scene & environment — describe the setting, lighting, time of day
-2. Subject & appearance — who/what is in frame, what they look like, what they wear
-3. Action & motion — describe what HAPPENS over time ("starts with... transitions to... ends with..."). Video needs change — never describe a static scene.
+1. Subject anchoring — define core subjects clearly in the first sentence: appearance, attire, distinguishing features. Keep descriptions consistent.
+2. Scene & environment — describe foreground action, midground subject, and background environment as separate depth layers
+3. Action & motion — describe what HAPPENS over time using temporal markers ("initially... then... finally"). Video needs change — never describe a static scene.
 4. Camera movement — use cinematic terms: tracking shot, dolly-in, dolly-out, crane shot, pan, tilt, orbit, steadicam, handheld, push-in, low-angle, FPV drone. Describe movement relative to the subject.
 5. Atmosphere — lighting quality (golden hour, volumetric, Rembrandt, soft studio), depth of field, color grading feel
 
 KLING 3.0 BEST PRACTICES:
 - Think like a Director of Photography — describe time, space, and intent
 - Use ++double plus++ markers around the most important visual element to emphasize it
-- Add motion/physics details: dust kicked up, hair flowing, fabric rippling, light rays shifting — Kling handles these well
+- For multi-character scenes, label them: [Character A: tired coach], [Character B: young athlete]
+- If the scene has natural progression, structure as labeled shots: Shot 1: ..., Shot 2: ...
+- For spoken lines, describe action first, then attach dialogue with tone markers: [Character A: calm, steady voice] says: "exact words"
+- Add motion/physics details: dust kicked up, hair flowing, fabric rippling, light rays shifting
 - Use speed modifiers for camera: "slowly," "smoothly," "rapidly"
 - Keep to one camera movement per shot — simultaneous complex movements cause warping
-- Describe colors as natural language ("warm amber tones", "deep navy atmosphere", "electric orange accents") — never use hex codes
+- Describe colors as natural language ("warm amber tones", "deep navy atmosphere") — never use hex codes
 - 50-150 words is the sweet spot — shorter lacks detail, longer introduces conflicts
 
 AVOID:
@@ -2538,12 +2560,48 @@ BRAND ADAPTATION:
 
 Return ONLY the refined prompt. No preamble, no explanation, no markdown.`;
 
+const VEO_REFINEMENT_INSTRUCTIONS = `Your job: Transform a raw video brief into an optimized prompt for Google Veo AI video generation.
+
+PROMPT STRUCTURE — follow the 7-layer formula in this order:
+1. Camera + Lens — specify lens focal length (16mm=wide/expansive, 35mm=natural/documentary, 85mm=intimate/compressed background) and camera movement type
+2. Subject — anchor identity upfront with specific visual traits: age, build, attire with fabric type (fabric predicts how light behaves)
+3. Action + Physics — use force-based verbs (push, pull, strike, sway, ripple, settle). Describe weight and resistance. ONE dominant action per prompt — multiple conflicting actions cause floaty results.
+4. Setting + Atmosphere — transform location into a living system: time of day, what's in the air (haze, dust motes, steam), background behavior
+5. Light Source — always NAME a source (side window, overcast sky, neon sign, campfire). Never just "well-lit." Specify direction (from above, raking from left).
+6. Style + Texture — add micro-details to avoid AI-plastic look: skin texture, fabric weave, material finishes ("charcoal cotton hoodie", "brushed aluminum")
+7. Audio — keep dialogue naturally short (one breath per 8s clip). Format: [Character] says: "exact line." Add ambient sound description separately.
+
+VEO BEST PRACTICES:
+- For pacing control, use timestamp prompting: "0-3s: [setup], 3-6s: [action], 6-8s: [resolution]"
+- Describe temporal progression: "starts with... transitions to... ends with..."
+- Separate foreground, midground, and background as distinct depth layers
+- Describe colors as natural atmospheric language — never pass hex codes
+- 100-150 words, 3-6 sentences is optimal
+- One dominant force/action per prompt — conflicting movements create floaty artifacts
+
+AVOID:
+- Hex color codes — the model doesn't understand them
+- Exact counts ("five people" → use "a small group") — counts cause duplication artifacts
+- Brightness descriptions without a named source ("well-lit", "bright room")
+- Multiple conflicting dominant actions in one prompt
+- Static descriptions with no motion or change over time
+- AI-tell words: "perfect", "flawless", "ultra-detailed", "8K", "hyper-realistic", "masterpiece"
+- Any text, watermarks, or logos in the video — text is overlaid separately afterward
+- Mentioning aspect ratio or duration — these are set as API parameters
+
+BRAND ADAPTATION:
+- Translate the brand's visual identity into atmospheric and lighting language
+- Match the brand's energy level and aesthetic (premium vs playful, minimal vs bold)
+- Use the brand's color palette as lighting/environmental direction, not literal color instructions
+
+Return ONLY the refined prompt. No preamble, no explanation, no markdown.`;
+
 async function refinePromptWithClaude(rawPrompt, slideType, formData, brand, req) {
   try {
     const refinementInstructions = slideType === 'meme'
       ? MEME_REFINEMENT_INSTRUCTIONS
       : slideType === 'video'
-        ? VIDEO_REFINEMENT_INSTRUCTIONS
+        ? (VEO_API_MODELS[formData.videoModel] ? VEO_REFINEMENT_INSTRUCTIONS : KLING_REFINEMENT_INSTRUCTIONS)
         : BASE_REFINEMENT_INSTRUCTIONS;
     const brandContextParts = [
       brand.systemPrompt,
@@ -2555,7 +2613,8 @@ async function refinePromptWithClaude(rawPrompt, slideType, formData, brand, req
     if (slideType === 'meme') {
       context = `This is a MEME for ${brand.name}. It must look like a genuine internet meme — informal, humorous, culturally aware. Do NOT apply carousel rules (no safe zones, no TikTok composition, no professional typography). Preserve the meme format and humor. Only refine for text legibility and spelling accuracy. Keep the raw, authentic meme aesthetic. CRITICAL: If the user prompt mentions real people by name (Drake, celebrities, public figures), replace them with generic characters — OpenAI will reject prompts depicting real people.`;
     } else if (slideType === 'video') {
-      context = `This is a VIDEO prompt for ${brand.name} using Kling 3.0 AI video generation. Transform the brief below into a cinematic prompt optimized for Kling 3.0. The brand's colors are: ${Object.entries(brand.colors || {}).map(([k,v]) => `${k}: ${v}`).join(', ')} — translate these into natural atmospheric/lighting descriptions, never pass hex codes to Kling.`;
+      const modelName = VIDEO_MODEL_NAMES[formData.videoModel] || formData.videoModel || 'Kling 3.0';
+      context = `This is a VIDEO prompt for ${brand.name} using ${modelName} video generation. Transform the brief below into a cinematic prompt optimized for ${modelName}. The brand's colors are: ${Object.entries(brand.colors || {}).map(([k,v]) => `${k}: ${v}`).join(', ')} — translate these into natural atmospheric/lighting descriptions, never pass hex codes.`;
     } else if (slideType === 'photo') {
       context = `This is a photo-led slide for ${brand.name} featuring a ${formData.sport || 'person in action'} scene with text overlay.`;
     } else {
@@ -3474,14 +3533,16 @@ app.post('/api/brands/full-setup', requireAuth, async (req, res) => {
     }
 
     // Step 9: Generate first carousel slides (photo/text = AI, mockup = Sharp)
-    sendSSE('status', { step: 'carousel', message: 'Generating first carousel...' });
-
     const brand = { id: brandId, ...brandData };
     const hasImageKey = getOpenAI(req) || getGemini(req);
     const slideImages = {};
-    if (contentIdeas.length > 0 && hasImageKey) {
-      const firstIdea = contentIdeas[0];
-      const slides = firstIdea.slides || [];
+    const canGenerateSlides = contentIdeas.length > 0 && hasImageKey;
+    const firstIdea = canGenerateSlides ? contentIdeas[0] : null;
+    const allSlides = firstIdea ? (firstIdea.slides || []) : [];
+    const totalSlides = Math.min(allSlides.length, 5);
+    sendSSE('status', { step: 'carousel', message: 'Generating first carousel...', ...(totalSlides > 0 && { totalSlides }) });
+    if (canGenerateSlides) {
+      const slides = allSlides;
       for (let i = 0; i < Math.min(slides.length, 5); i++) {
         const slide = slides[i];
         try {
@@ -4261,8 +4322,8 @@ Return ONLY the meme description (no explanation, no preamble).`,
       if (isVeo && !getGemini(req)) return res.status(400).json({ error: `Google Gemini API key required for ${VIDEO_MODEL_NAMES[videoModel] || videoModel}. Add it in Settings.` });
       const modelName = VIDEO_MODEL_NAMES[videoModel] || videoModel;
       console.log(`[Generate] ${brand.name} | Video (${modelName}) | ${data.duration || 5}s`);
-      const rawPrompt = buildVideoPrompt(data, brand);
-      const refinedPrompt = await refinePromptWithClaude(rawPrompt, 'video', data, brand, req);
+      const rawPrompt = buildVideoPrompt({ ...data, videoModel }, brand);
+      const refinedPrompt = await refinePromptWithClaude(rawPrompt, 'video', { ...data, videoModel }, brand, req);
       const prompt = refinedPrompt || rawPrompt;
 
       // Create async job and return immediately
@@ -4692,8 +4753,8 @@ app.post('/api/generate-carousel', requireAuth, generationLimiter, async (req, r
           if (isVeo && !getGemini(req)) throw new Error(`Google Gemini API key required for ${VIDEO_MODEL_NAMES[videoModel] || videoModel}`);
           const vidModelName = VIDEO_MODEL_NAMES[videoModel] || videoModel;
           console.log(`[Carousel ${jobId}] ${brand.name} | Slide ${i + 1}/${slides.length} (video: ${vidModelName})`);
-          const rawPrompt = buildVideoPrompt(slideData, brand);
-          const refined = await refinePromptWithClaude(rawPrompt, 'video', slideData, brand, req);
+          const rawPrompt = buildVideoPrompt({ ...slideData, videoModel }, brand);
+          const refined = await refinePromptWithClaude(rawPrompt, 'video', { ...slideData, videoModel }, brand, req);
           const prompt = refined || rawPrompt;
 
           // Fetch person reference images for Veo 3.1

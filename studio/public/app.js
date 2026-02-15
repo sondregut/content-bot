@@ -1815,9 +1815,19 @@ function handleCreationEvent(event, data) {
         list.innerHTML = '<div class="creation-ideas-loading">Generating ideas...</div>';
         section.style.display = 'block';
       }
-      // Show carousel section with loading indicator when step starts
+      // Show carousel section with skeleton placeholders when step starts
       if (data.step === 'carousel') {
         const section = document.getElementById('creation-section-carousel');
+        const strip = document.getElementById('creation-carousel-strip');
+        strip.innerHTML = '';
+        const total = data.totalSlides || 5;
+        for (let i = 0; i < total; i++) {
+          const skeleton = document.createElement('div');
+          skeleton.className = 'creation-slide-skeleton';
+          skeleton.dataset.slideIndex = i;
+          skeleton.innerHTML = `<span>Generating slide ${i + 1}...</span>`;
+          strip.appendChild(skeleton);
+        }
         section.style.display = 'block';
       }
       break;
@@ -2002,14 +2012,26 @@ function handleCreationEvent(event, data) {
         const img = document.createElement('img');
         img.src = data.imageUrl;
         img.loading = 'lazy';
-        strip.appendChild(img);
+        // Replace skeleton placeholder if it exists
+        const skeleton = strip.querySelector(`.creation-slide-skeleton[data-slide-index="${data.index}"]`);
+        if (skeleton) {
+          skeleton.replaceWith(img);
+        } else {
+          strip.appendChild(img);
+        }
       }
       break;
     }
 
-    case 'slide-error':
-      // Non-critical; just skip
+    case 'slide-error': {
+      const strip = document.getElementById('creation-carousel-strip');
+      const skeleton = strip?.querySelector(`.creation-slide-skeleton[data-slide-index="${data.index}"]`);
+      if (skeleton) {
+        skeleton.classList.add('error');
+        skeleton.innerHTML = `<span>Failed</span>`;
+      }
       break;
+    }
 
     case 'done': {
       // Mark all steps done
