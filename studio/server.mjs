@@ -1890,6 +1890,15 @@ async function generateMockupSlide(data, brand) {
   const theme = themeFn(brand);
   const layout = data.mockupLayout || 'text-statement';
 
+  // Auto-inject brand screenshot for phone mockups when no image provided
+  let autoScreenshotPath = null;
+  if (data.imageUsage === 'phone' && !data.fgImage && !data.screenshotImage && brand.screenshots && brand.screenshots.length > 0) {
+    autoScreenshotPath = await downloadScreenshotToTemp(brand, data.screenshotLabel);
+    if (autoScreenshotPath) {
+      data.fgImage = path.basename(autoScreenshotPath);
+    }
+  }
+
   let result;
   switch (layout) {
     case 'phone-right':
@@ -1902,6 +1911,11 @@ async function generateMockupSlide(data, brand) {
     default:
       result = await renderTextStatement(data, brand, theme);
       break;
+  }
+
+  // Clean up auto-injected screenshot temp file
+  if (autoScreenshotPath) {
+    await fs.unlink(autoScreenshotPath).catch(() => {});
   }
 
   let { buffer, textPositions } = result;
