@@ -1239,10 +1239,17 @@ async function renderPhoneLeft(data, brand, theme) {
   const highlight = data.highlightPhrase || '';
   const highlightOpacity = data.highlightStyle === 'bold' ? 0.4 : 0.28;
 
+  // Resolve dual image slots with backward compat
+  const bgFile = data.bgImage || (imageUsage === 'background' ? data.screenshotImage : null);
+  const hasBg = data.bgEnabled !== undefined ? data.bgEnabled : (imageUsage === 'background');
+  const fgMode = data.foregroundMode || (imageUsage === 'background' || imageUsage === 'none' ? 'none' : imageUsage);
+  const fgFile = data.fgImage || (fgMode !== 'none' && imageUsage !== 'background' ? data.screenshotImage : null);
+  const hasBgImage = hasBg && !!bgFile;
+
   // Color overrides
   const microColor = data.microColor || theme.microColor;
-  const textFill = data.textColor || (imageUsage === 'background' ? '#FFFFFF' : theme.textColor);
-  const subtextFill = data.subtextColor || (imageUsage === 'background' ? 'rgba(255,255,255,0.75)' : theme.subtextColor);
+  const textFill = data.textColor || (hasBgImage ? '#FFFFFF' : theme.textColor);
+  const subtextFill = data.subtextColor || (hasBgImage ? 'rgba(255,255,255,0.75)' : theme.subtextColor);
   const highlightColor = data.microColor || theme.highlightColor;
 
   let baseBuffer = null;
@@ -1253,15 +1260,18 @@ async function renderPhoneLeft(data, brand, theme) {
   const bodyFontSize = parseInt(data.bodyFontSize) || 30;
   const microFontSize = 22;
 
-  if (imageUsage === 'background' && data.screenshotImage) {
-    baseBuffer = await createBackgroundImage(data.screenshotImage, parseFloat(data.bgOverlayOpacity) || 0.55, width, height);
-    baseTextX = safe.left;
-    textMaxWidth = width - safe.left - safe.right;
-  } else if (imageUsage === 'figure' && data.screenshotImage) {
+  // Step 1: Background layer
+  if (hasBgImage) {
+    baseBuffer = await createBackgroundImage(bgFile, parseFloat(data.bgOverlayOpacity) || 0.55, width, height);
+  }
+
+  // Step 2: Foreground (phone or figure)
+  baseTextX = safe.left;
+  if (fgMode === 'figure' && fgFile) {
     const figSizeMap = { small: 280, medium: 380, large: 500 };
     const maxW = figSizeMap[data.figureSize] || 380;
     const figBuf = await createFigureElement({
-      imagePath: data.screenshotImage,
+      imagePath: fgFile,
       maxWidth: maxW,
       maxHeight: Math.round(maxW * 1.5),
       borderRadius: parseInt(data.figureBorderRadius) || 24,
@@ -1272,19 +1282,16 @@ async function renderPhoneLeft(data, brand, theme) {
       const clippedFig = await clipToCanvas(figBuf, pos.left, pos.top, width, height);
       imageComposite = { input: clippedFig, left: pos.left, top: pos.top };
       baseTextX = pos.left + (figMeta.width || maxW) + 40;
-    } else {
-      baseTextX = safe.left;
     }
     textMaxWidth = Math.max(width - baseTextX - safe.right, 300);
-  } else {
-    // Phone frame (default)
+  } else if (fgMode === 'phone' && fgFile) {
     const phoneSizeMap = { small: 340, medium: 400, large: 480 };
     const pw = phoneSizeMap[data.phoneSize] || 400;
     const ph = Math.round(pw * 2.05);
     const phoneAngle = parseInt(data.phoneAngle) || 0;
 
     const phoneMockup = await createPhoneMockup({
-      screenshotPath: data.screenshotImage,
+      screenshotPath: fgFile,
       brandId: brand.id,
       phoneWidth: pw,
       phoneHeight: ph,
@@ -1297,6 +1304,8 @@ async function renderPhoneLeft(data, brand, theme) {
     imageComposite = { input: clippedPhone, left: phoneLeft, top: phoneTop };
     baseTextX = (phoneMeta.width || pw) + safe.left + 40;
     textMaxWidth = Math.max(width - baseTextX - safe.right, 300);
+  } else {
+    textMaxWidth = hasBgImage ? (width - safe.left - safe.right) : Math.max(width - baseTextX - safe.right, 300);
   }
 
   const headlineLines = wrapText(headline, headlineFontSize, textMaxWidth, true);
@@ -1349,6 +1358,7 @@ async function renderPhoneLeft(data, brand, theme) {
       ${bodySvg}
     </svg>`;
     composites.push({ input: Buffer.from(textSvg) });
+    if (imageComposite) composites.push(imageComposite);
     return { buffer: await sharp(baseBuffer).composite(composites).png().toBuffer(), textPositions };
   }
 
@@ -1379,22 +1389,33 @@ async function renderTextStatement(data, brand, theme) {
   const highlight = data.highlightPhrase || '';
   const highlightOpacity = data.highlightStyle === 'bold' ? 0.5 : 0.3;
 
+  // Resolve dual image slots with backward compat
+  const bgFile = data.bgImage || (imageUsage === 'background' ? data.screenshotImage : null);
+  const hasBg = data.bgEnabled !== undefined ? data.bgEnabled : (imageUsage === 'background');
+  const fgMode = data.foregroundMode || (imageUsage === 'background' || imageUsage === 'none' ? 'none' : imageUsage);
+  const fgFile = data.fgImage || (fgMode !== 'none' && imageUsage !== 'background' ? data.screenshotImage : null);
+  const hasBgImage = hasBg && !!bgFile;
+
   // Color overrides
   const microColor = data.microColor || theme.microColor;
-  const textFill = data.textColor || (imageUsage === 'background' ? '#FFFFFF' : theme.textColor);
-  const subtextFill = data.subtextColor || (imageUsage === 'background' ? 'rgba(255,255,255,0.75)' : theme.subtextColor);
+  const textFill = data.textColor || (hasBgImage ? '#FFFFFF' : theme.textColor);
+  const subtextFill = data.subtextColor || (hasBgImage ? 'rgba(255,255,255,0.75)' : theme.subtextColor);
   const highlightColor = data.microColor || theme.highlightColor;
 
   let baseBuffer = null;
   let imageComposite = null;
 
-  if (imageUsage === 'background' && data.screenshotImage) {
-    baseBuffer = await createBackgroundImage(data.screenshotImage, parseFloat(data.bgOverlayOpacity) || 0.6, width, height);
-  } else if (imageUsage === 'figure' && data.screenshotImage) {
+  // Step 1: Background layer
+  if (hasBgImage) {
+    baseBuffer = await createBackgroundImage(bgFile, parseFloat(data.bgOverlayOpacity) || 0.6, width, height);
+  }
+
+  // Step 2: Foreground (figure)
+  if (fgMode === 'figure' && fgFile) {
     const figSizeMap = { small: 240, medium: 340, large: 460 };
     const maxW = figSizeMap[data.figureSize] || 340;
     const figBuf = await createFigureElement({
-      imagePath: data.screenshotImage,
+      imagePath: fgFile,
       maxWidth: maxW,
       maxHeight: maxW,
       borderRadius: parseInt(data.figureBorderRadius) || 24,

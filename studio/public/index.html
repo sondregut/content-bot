@@ -638,29 +638,29 @@
                     </select>
                   </div>
                 </div>
-                <div class="form-row">
-                  <div class="form-group">
-                    <label class="label">Image Usage</label>
-                    <select name="imageUsage" id="imageUsage">
-                      <option value="phone">Phone Frame</option>
-                      <option value="figure">Figure / Icon</option>
-                      <option value="background">Full Background</option>
-                      <option value="ai-background">AI Background</option>
-                      <option value="none">No Image</option>
-                    </select>
+                <!-- Background Image (optional) -->
+                <div id="mockup-bg-section">
+                  <div class="form-row" style="align-items:center">
+                    <label class="checkbox" style="display:flex;align-items:center;gap:6px;cursor:pointer">
+                      <input type="checkbox" id="bgEnabled" name="bgEnabled" /> Background Image
+                    </label>
                   </div>
-                </div>
-
-                <div id="mockup-image-upload-section">
-                  <label class="label">Image</label>
-                  <div class="ref-upload-row">
-                    <input type="file" id="screenshot-image-input" accept="image/*" style="display:none" />
-                    <button type="button" class="btn small" id="screenshot-upload-btn">Upload Image</button>
-                    <button type="button" class="btn small" id="bg-library-btn">Browse Library</button>
-                    <span class="screenshot-filename" id="screenshot-filename">No image</span>
-                    <button type="button" class="btn small danger" id="screenshot-clear-btn" style="display:none">Clear</button>
+                  <div id="mockup-bg-upload" style="display:none">
+                    <div class="ref-upload-row">
+                      <input type="file" id="bg-image-input" accept="image/*" style="display:none" />
+                      <button type="button" class="btn small" id="bg-upload-btn">Upload</button>
+                      <button type="button" class="btn small" id="bg-browse-library-btn">Browse Library</button>
+                      <span class="screenshot-filename" id="bg-filename">No image</span>
+                      <button type="button" class="btn small danger" id="bg-clear-btn" style="display:none">Clear</button>
+                    </div>
+                    <img id="bg-preview" class="ref-preview-img" style="display:none" />
+                    <div class="form-row" style="margin-top:8px">
+                      <div class="form-group">
+                        <label class="label">Overlay Darkness <span id="bgOverlayOpacityValue">55%</span></label>
+                        <input type="range" name="bgOverlayOpacity" id="bgOverlayOpacity" min="0" max="100" value="55" />
+                      </div>
+                    </div>
                   </div>
-                  <img id="screenshot-preview" class="ref-preview-img" style="display:none" />
                 </div>
 
                 <div id="mockup-ai-bg-options" style="display:none">
@@ -674,6 +674,30 @@
                       <input name="aiBgMood" id="aiBgMood" type="text" placeholder="energetic, calm, premium..." />
                     </div>
                   </div>
+                </div>
+
+                <!-- Foreground Image -->
+                <div class="form-row">
+                  <div class="form-group">
+                    <label class="label">Foreground</label>
+                    <select name="foregroundMode" id="foregroundMode">
+                      <option value="phone">Phone Frame</option>
+                      <option value="figure">Figure / Icon</option>
+                      <option value="none">None</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div id="mockup-fg-upload-section">
+                  <label class="label">App Screenshot</label>
+                  <div class="ref-upload-row">
+                    <input type="file" id="fg-image-input" accept="image/*" style="display:none" />
+                    <button type="button" class="btn small" id="fg-upload-btn">Upload Image</button>
+                    <button type="button" class="btn small" id="fg-library-btn">Browse Library</button>
+                    <span class="screenshot-filename" id="fg-filename">No image</span>
+                    <button type="button" class="btn small danger" id="fg-clear-btn" style="display:none">Clear</button>
+                  </div>
+                  <img id="fg-preview" class="ref-preview-img" style="display:none" />
                 </div>
 
                 <div id="mockup-phone-options" style="display:none">
@@ -731,15 +755,6 @@
                         <option value="48">Large</option>
                         <option value="999">Circle</option>
                       </select>
-                    </div>
-                  </div>
-                </div>
-
-                <div id="mockup-bg-options" style="display:none">
-                  <div class="form-row">
-                    <div class="form-group">
-                      <label class="label">Overlay Darkness <span id="bgOverlayOpacityValue">55%</span></label>
-                      <input type="range" name="bgOverlayOpacity" id="bgOverlayOpacity" min="0" max="100" value="55" />
                     </div>
                   </div>
                 </div>
