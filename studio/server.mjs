@@ -347,7 +347,6 @@ async function generateVideoSlide(prompt, options = {}) {
       numberOfVideos: 1,
       durationSeconds: Math.min(options.duration || 5, 8),
       personGeneration: hasRefImages ? 'allow_adult' : 'allow_all',
-      ...(videoModel === 'veo-2' && { generateAudio: options.audio !== false }),
     };
     if (hasRefImages) {
       veoConfig.referenceImages = options.referenceImages.map(img => ({
