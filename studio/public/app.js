@@ -1765,12 +1765,9 @@ function handleCreationEvent(event, data) {
           brands = bData.brands || [];
           renderBrandSelector();
           if (currentBrand) {
-            const hasIdeas = contentData?.apps?.[0]?.categories?.some(c => c.ideas?.length > 0);
-            if (hasIdeas) {
-              renderSidebar();
-            } else {
-              await loadContentIdeas();
-            }
+            // Always re-fetch content ideas from Firestore to get latest data
+            // (including imageUrls persisted after slide generation)
+            await loadContentIdeas();
             updateIconPreview();
           }
         } catch (err) {
