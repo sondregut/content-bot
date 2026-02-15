@@ -1959,8 +1959,71 @@ function buildPhotoImagePrompt(data, brand) {
     .join('\n');
 }
 
+const MEME_FORMAT_INSTRUCTIONS = {
+  'drake': {
+    label: 'Drake Approval (Two-Panel Preference)',
+    layout: 'Two panels stacked vertically. Top panel: generic cartoon character looking away with hand raised in dismissal (rejection). Bottom panel: same character pointing and smiling approvingly (approval). Each panel has a text label on the right side describing the rejected/approved thing.',
+    style: 'illustrated/cartoon',
+  },
+  'expanding-brain': {
+    label: 'Expanding Brain',
+    layout: 'Multiple panels (3-5) stacked vertically showing progressive brain expansion. Each panel pairs a text statement on the left with a brain visualization on the right, growing from small/simple to massive/cosmic/galaxy-level. The brain images escalate in intensity: normal brain → glowing brain → energy/lightning brain → cosmic galaxy brain.',
+    style: 'illustrated/cartoon',
+  },
+  'nobody': {
+    label: 'Nobody: / Me:',
+    layout: 'Text header area at top reading "Nobody:" with blank space, then "Me:" or "[Brand] users:" below it. The bottom 2/3 of the image is a single strong visual showing exaggerated, enthusiastic, or absurd behavior related to the concept.',
+    style: 'can be photorealistic or illustrated',
+  },
+  'two-buttons': {
+    label: 'Two Buttons (Sweating Decision)',
+    layout: 'Single panel showing a cartoon character sweating nervously, finger hovering between two large labeled buttons on a control panel. Exaggerated worried expression. The humor comes from the impossible choice between the two button labels.',
+    style: 'illustrated/cartoon',
+  },
+  'is-this': {
+    label: 'Is This a Pigeon? (Misidentification)',
+    layout: 'Single panel: a character in relevant attire standing outdoors, confidently pointing up at a small object (butterfly, bird, etc.). The character is labeled, the object is labeled, and a speech bubble asks "Is this a [wrong identification]?" The humor is the confident misidentification.',
+    style: 'anime/illustrated',
+  },
+  'pov': {
+    label: 'POV (Point of View)',
+    layout: 'First-person perspective shot. Text header at top reads "POV: [scenario]". The image shows what the viewer would see from their own eyes in the described situation. Hands/arms of the viewer may be visible at bottom edges.',
+    style: 'photorealistic or stylized',
+  },
+  'expectation-reality': {
+    label: 'Expectation vs. Reality',
+    layout: 'Two panels side by side. Left panel labeled "Expectation" shows an idealized, perfect version. Right panel labeled "Reality" shows a humorous, messy, relatable actual version. Same subject in both panels, contrasting quality.',
+    style: 'photorealistic works well for contrast',
+  },
+  'this-is-fine': {
+    label: 'This Is Fine',
+    layout: 'Single panel: a character sitting calmly at a desk/table with a coffee cup, smiling serenely, while the room around them is engulfed in flames. Speech bubble or caption: "This is fine." The juxtaposition of calm character + fire is the key.',
+    style: 'cartoon/illustrated',
+  },
+  'starter-pack': {
+    label: 'Starter Pack / Action Figure',
+    layout: 'Product photography of a toy action figure in sealed plastic blister packaging. The figure resembles the target persona. Includes 4-5 miniature accessories relevant to the concept. Retail toy packaging style with title text, studio lighting.',
+    style: 'photorealistic product photography',
+  },
+  'distracted': {
+    label: 'Distracted Boyfriend',
+    layout: 'Street scene with three characters: a person walking with their partner but turning their head to look at a third person walking past. Each character is labeled — the partner (current thing), the distracted person (the audience), and the passing person (the tempting new thing).',
+    style: 'photorealistic street photography',
+  },
+  'how-it-started': {
+    label: 'How It Started vs. How It\'s Going',
+    layout: 'Two panels side by side or stacked. Left/top labeled "How it started" shows humble, scrappy, early-stage version. Right/bottom labeled "How it\'s going" shows polished, successful, evolved version. Same subject at different stages.',
+    style: 'photorealistic or illustrated',
+  },
+  'anakin-padme': {
+    label: 'For the Better, Right? (4-Panel)',
+    layout: 'Four panels in 2x2 grid. Panel 1: Character A makes a confident statement. Panel 2: Character B smiles hopefully and asks confirming question. Panel 3: Character A stares silently. Panel 4: Character B\'s smile fades ("...right?"). Same two characters across all panels with changing expressions.',
+    style: 'illustrated/cartoon for consistency',
+  },
+};
+
 function buildMemePrompt(data, brand) {
-  const { description, aspectRatio } = data;
+  const { description, aspectRatio, memeFormat } = data;
 
   const dimensions = {
     '1:1': { w: 1080, h: 1080, label: 'square' },
@@ -1969,15 +2032,30 @@ function buildMemePrompt(data, brand) {
   }[aspectRatio] || { w: 1080, h: 1080, label: 'square' };
 
   const c = brand.colors || {};
+  const formatInfo = memeFormat && memeFormat !== 'auto' ? MEME_FORMAT_INSTRUCTIONS[memeFormat] : null;
 
-  return [
+  const lines = [
     `Create a meme image (${dimensions.w}x${dimensions.h}, ${dimensions.label}).`,
     '',
     `CONCEPT: ${description}`,
     '',
+  ];
+
+  if (formatInfo) {
+    lines.push(
+      `MEME FORMAT: ${formatInfo.label}`,
+      `LAYOUT: ${formatInfo.layout}`,
+      `VISUAL STYLE: ${formatInfo.style}`,
+      '',
+    );
+  }
+
+  lines.push(
     'FORMAT & STYLE:',
     '- This is an internet MEME — not a polished ad, not a carousel slide, not a brand graphic.',
-    '- If the concept references a meme format (two-panel approval/disapproval, expanding brain tiers, "nobody:" reaction, POV, side-by-side comparison, etc.), follow that format\'s visual structure and panel layout. Do NOT depict real celebrities or identifiable public figures — use generic illustrated or cartoon characters instead.',
+    formatInfo
+      ? `- Follow the ${formatInfo.label} format layout EXACTLY as described above. Do NOT depict real celebrities — use generic illustrated or cartoon characters.`
+      : '- If the concept references a meme format (two-panel approval/disapproval, expanding brain tiers, "nobody:" reaction, POV, side-by-side comparison, etc.), follow that format\'s visual structure and panel layout. Do NOT depict real celebrities or identifiable public figures — use generic illustrated or cartoon characters instead.',
     '- The aesthetic must feel native to social media — raw, authentic, shareable. Not over-produced.',
     '- Fill the entire canvas. No safe zones, no padding, no decorative borders.',
     '',
@@ -1996,9 +2074,10 @@ function buildMemePrompt(data, brand) {
     'CONSTRAINTS:',
     '- No watermarks, no logos (brand icon is added separately after generation)',
     '- No AI artifacts — this should look like a real meme someone would share',
-    '- Avoid these AI-tell words in the visual style: "perfect", "flawless", "ultra-detailed", "8K", "hyper-realistic", "masterpiece"',
     '- Keep composition simple and punchy — memes are quick to read and understand',
-  ].filter(Boolean).join('\n');
+  );
+
+  return lines.filter(Boolean).join('\n');
 }
 
 function buildPersonalizedPrompt(data, brand) {
@@ -3613,6 +3692,11 @@ app.post('/api/generate', requireAuth, generationLimiter, async (req, res) => {
           return res.status(400).json({ error: `Could not reach website: ${e.message}` });
         }
 
+        const selectedFormat = data.memeFormat && data.memeFormat !== 'auto' ? MEME_FORMAT_INSTRUCTIONS[data.memeFormat] : null;
+        const formatConstraint = selectedFormat
+          ? `You MUST use the "${selectedFormat.label}" format. Layout: ${selectedFormat.layout}`
+          : 'Pick a specific meme format — vary it each time (do NOT always default to the same format)';
+
         data.description = await generateText({
           model: data.textModel,
           maxTokens: 300,
@@ -3624,21 +3708,16 @@ Brand: ${brand.name}
 Website: ${websiteUrl}
 Website content: ${websiteText}
 
+Format: ${formatConstraint}
+
 Requirements:
-- Pick a specific meme format (two-panel approval/disapproval, expanding brain tiers, comparison, "nobody:" reaction, POV, etc.) — do NOT reference real celebrities like Drake or specific actors
+- Do NOT reference real celebrities like Drake or specific actors
 - The joke should be about the brand's actual product, features, or industry — something their audience would relate to
 - Include exact text for each panel/section of the meme
 - Keep it funny, relatable, and shareable — not corporate or salesy
 - The meme should make sense even to people who don't know the brand
 
-Return ONLY the meme description (no explanation, no preamble). Vary the format — here are examples:
-- "Expanding brain meme — Level 1: Using spreadsheets to track inventory, Level 2: Using basic software, Level 3: Using [brand]'s AI-powered system, Level 4: [brand] auto-managing everything while you sleep"
-- "Nobody: ... [brand] users: (description of enthusiastic/relatable behavior)"
-- "POV: You just discovered [brand] — (description of the reaction/scenario)"
-- "Two-panel approval meme — top (disapproval): old way of doing X, bottom (approval): using [brand] to do X better"
-- "Side-by-side comparison — Left: struggling without [brand], Right: thriving with [brand]"
-
-Pick a DIFFERENT format each time. Do NOT default to two-panel approval.`,
+Return ONLY the meme description (no explanation, no preamble).`,
           }],
           req,
         });

@@ -910,20 +910,23 @@ function renderFaceStudioPersonDetail() {
       photoGrid.appendChild(addBtn);
     }
 
-    // Drag & drop
+    // Drag & drop — abort previous listeners to avoid stacking on re-render
+    if (photoGrid._dragAbort) photoGrid._dragAbort.abort();
+    const ac = new AbortController();
+    photoGrid._dragAbort = ac;
     photoGrid.addEventListener('dragover', (e) => {
       e.preventDefault();
       photoGrid.classList.add('drag-over');
-    });
+    }, { signal: ac.signal });
     photoGrid.addEventListener('dragleave', (e) => {
       if (!photoGrid.contains(e.relatedTarget)) photoGrid.classList.remove('drag-over');
-    });
+    }, { signal: ac.signal });
     photoGrid.addEventListener('drop', (e) => {
       e.preventDefault();
       photoGrid.classList.remove('drag-over');
       if (photoCount >= 20) return;
       uploadPhotosForPerson(e.dataTransfer.files);
-    });
+    }, { signal: ac.signal });
 
     // Photo count
     const countEl = document.getElementById('face-studio-photo-count');
@@ -962,9 +965,17 @@ function renderFaceStudioPersonDetail() {
         <button class="btn small" id="face-studio-retrain">Retrain</button>
       </div>`;
       document.getElementById('face-studio-retrain').addEventListener('click', () => {
-        person.loraStatus = null;
-        renderFaceStudioPersons();
-        renderFaceStudioPersonDetail();
+        if (!confirm(`Retrain LoRA model for "${person.name}"? This will start a new training run.`)) return;
+        // Show train UI without corrupting Firestore state — render with override
+        loraContainer.innerHTML = `<div class="person-lora-status">
+          <select class="person-train-model" id="face-studio-train-model">
+            <option value="flux-2">Flux 2 (~$8)</option>
+            <option value="portrait">Portrait (~$6)</option>
+            <option value="fast">Fast ($2)</option>
+          </select>
+          <button class="btn small primary" id="face-studio-train-btn">Train LoRA</button>
+        </div>`;
+        document.getElementById('face-studio-train-btn').addEventListener('click', () => trainLoraForPerson(person));
       });
     } else if (ls === 'queued' || ls === 'training') {
       loraContainer.innerHTML = `<div class="person-lora-status lora-training">
@@ -4776,6 +4787,7 @@ document.getElementById('personalize-back-btn').addEventListener('click', closeP
 
 const memeView = document.getElementById('meme-view');
 const memeDescription = document.getElementById('meme-description');
+const memeFormat = document.getElementById('meme-format');
 const memeAspectRatio = document.getElementById('meme-aspect-ratio');
 const memeModelSelect = document.getElementById('meme-model');
 const memeStatus = document.getElementById('meme-status');
@@ -4825,6 +4837,7 @@ document.getElementById('generate-meme-btn').addEventListener('click', async () 
       body: JSON.stringify({
         slideType: 'meme',
         description,
+        memeFormat: memeFormat ? memeFormat.value : 'auto',
         aspectRatio: memeAspectRatio.value,
         brand: currentBrand,
         imageModel: memeModelSelect ? memeModelSelect.value : getSelectedImageModel(),
@@ -4870,6 +4883,7 @@ document.getElementById('preview-meme-prompt-btn').addEventListener('click', asy
     const payload = {
       slideType: 'meme',
       description,
+      memeFormat: memeFormat ? memeFormat.value : 'auto',
       aspectRatio: memeAspectRatio.value,
       brand: currentBrand,
       imageModel: memeModelSelect ? memeModelSelect.value : getSelectedImageModel(),

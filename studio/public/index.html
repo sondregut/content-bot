@@ -288,6 +288,31 @@
                 <label class="label">Describe your meme (optional)</label>
                 <textarea class="freeform-input" id="meme-description" rows="4" placeholder="Leave empty to auto-generate from your website, or describe: e.g. Drake meme — top: boring stock photos, bottom: AI-generated memes"></textarea>
 
+                <div class="form-group" style="margin-top:12px">
+                  <label class="label">Meme Format</label>
+                  <select id="meme-format">
+                    <option value="auto">Auto (AI picks best format)</option>
+                    <optgroup label="Easy (Text-Heavy)">
+                      <option value="drake">Drake Approval (two-panel preference)</option>
+                      <option value="expanding-brain">Expanding Brain (escalating levels)</option>
+                      <option value="nobody">Nobody: / Me: (unprompted behavior)</option>
+                      <option value="two-buttons">Two Buttons (sweating decision)</option>
+                      <option value="is-this">Is This a Pigeon? (misidentification)</option>
+                    </optgroup>
+                    <optgroup label="Visual">
+                      <option value="pov">POV (first-person perspective)</option>
+                      <option value="expectation-reality">Expectation vs. Reality</option>
+                      <option value="this-is-fine">This Is Fine (calm in chaos)</option>
+                      <option value="starter-pack">Starter Pack / Action Figure</option>
+                      <option value="distracted">Distracted Boyfriend (temptation)</option>
+                    </optgroup>
+                    <optgroup label="Narrative">
+                      <option value="how-it-started">How It Started vs. How It's Going</option>
+                      <option value="anakin-padme">For the Better, Right? (4-panel)</option>
+                    </optgroup>
+                  </select>
+                </div>
+
                 <div class="form-row" style="margin-top:12px">
                   <div class="form-group">
                     <label class="label">Aspect Ratio</label>
