@@ -2536,10 +2536,11 @@ async function refinePromptWithClaude(rawPrompt, slideType, formData, brand, req
       : slideType === 'video'
         ? VIDEO_REFINEMENT_INSTRUCTIONS
         : BASE_REFINEMENT_INSTRUCTIONS;
-    const brandContext = [
+    const brandContextParts = [
       brand.systemPrompt,
       brand.productKnowledge ? `Product knowledge: ${brand.productKnowledge}` : '',
     ].filter(Boolean).join('\n\n');
+    const brandContext = brandContextParts ? `<brand_context>\n${brandContextParts}\n</brand_context>` : '';
     const systemPrompt = `${brandContext}\n\n${refinementInstructions}`;
     let context;
     if (slideType === 'meme') {
@@ -2688,6 +2689,10 @@ app.post('/api/brands', requireAuth, async (req, res) => {
     const { name, website, colors, systemPrompt, defaultMicroLabel, defaultBackground, iconOverlayText, contentPillars, contentIdeaPrompt } = req.body;
     if (!name || !colors) return res.status(400).json({ error: 'Name and colors are required' });
     if (name.length > 100) return res.status(400).json({ error: 'Name too long (max 100 chars)' });
+    const hexRe = /^#[0-9a-fA-F]{3,8}$/;
+    for (const [key, val] of Object.entries(colors)) {
+      if (val && !hexRe.test(val)) return res.status(400).json({ error: `Invalid color for ${key}: must be a hex color (e.g. #FF6B35)` });
+    }
     if (systemPrompt && systemPrompt.length > 5000) return res.status(400).json({ error: 'System prompt too long (max 5000 chars)' });
     if (website && website.length > 200) return res.status(400).json({ error: 'Website too long (max 200 chars)' });
     if (defaultMicroLabel && defaultMicroLabel.length > 500) return res.status(400).json({ error: 'Micro label too long (max 500 chars)' });
@@ -4530,6 +4535,7 @@ app.post('/api/generate-carousel', requireAuth, generationLimiter, async (req, r
   const jobId = crypto.randomUUID().slice(0, 12);
   const job = {
     id: jobId,
+    userId: req.user?.uid,
     brandId: brand.id,
     total: slides.length,
     completed: 0,
@@ -4843,7 +4849,7 @@ app.post('/api/generate-carousel', requireAuth, generationLimiter, async (req, r
 
 app.get('/api/carousel-status/:jobId', requireAuth, (req, res) => {
   const job = carouselJobs.get(req.params.jobId);
-  if (!job) {
+  if (!job || (job.userId && job.userId !== req.user?.uid)) {
     return res.status(404).json({ error: 'Job not found' });
   }
   res.json({
@@ -4888,8 +4894,8 @@ app.post('/api/generate-freeform', requireAuth, generationLimiter, async (req, r
     const brand = await getBrandAsync(brandId, req.user?.uid);
     const numSlides = Math.min(Math.max(parseInt(slideCount) || 7, 1), 20);
 
-    const freeformSystemPrompt = `${brand.systemPrompt}
-${brand.productKnowledge ? `\nProduct knowledge:\n${brand.productKnowledge}` : ''}
+    const brandCtx = [brand.systemPrompt, brand.productKnowledge ? `Product knowledge:\n${brand.productKnowledge}` : ''].filter(Boolean).join('\n\n');
+    const freeformSystemPrompt = `<brand_context>\n${brandCtx}\n</brand_context>
 
 You are generating carousel slide content for ${brand.name} social media (TikTok/Instagram).
 
@@ -5349,7 +5355,7 @@ app.post('/api/generate-personalized-carousel', requireAuth, upload.array('faceI
   }
 
   const jobId = crypto.randomUUID().slice(0, 12);
-  const job = { id: jobId, brandId: brand.id, total: slides.length, completed: 0, current: 0, slides: [], status: 'running', error: null };
+  const job = { id: jobId, userId: req.user?.uid, brandId: brand.id, total: slides.length, completed: 0, current: 0, slides: [], status: 'running', error: null };
   carouselJobs.set(jobId, job);
   res.json({ jobId, total: slides.length });
 

@@ -13,7 +13,15 @@
       window.__firebaseReady = fetch('/api/firebase-config')
         .then(r => r.json())
         .then(cfg => { if (cfg.available) firebase.initializeApp(cfg); })
-        .catch(() => {});
+        .catch(err => {
+          console.error('[Firebase] Config load failed:', err);
+          document.addEventListener('DOMContentLoaded', () => {
+            const banner = document.createElement('div');
+            banner.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#d32f2f;color:#fff;padding:12px;text-align:center;z-index:99999;font-family:sans-serif';
+            banner.textContent = 'Failed to load app configuration. Please refresh or check your connection.';
+            document.body.prepend(banner);
+          });
+        });
     </script>
   </head>
   <body>

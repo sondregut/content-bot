@@ -1,8 +1,24 @@
+// --- Media URL validation (prevents javascript: / data: XSS) ---
+function isValidMediaUrl(url) {
+  if (!url || typeof url !== 'string') return false;
+  try {
+    const parsed = new URL(url, window.location.origin);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+function sanitizeMediaUrl(url) {
+  return isValidMediaUrl(url) ? url : '';
+}
+
 // --- Image lightbox ---
 function openLightbox(src) {
+  if (!isValidMediaUrl(src)) return;
   const overlay = document.createElement('div');
   overlay.className = 'lightbox-overlay';
-  overlay.innerHTML = `<img src="${src}" class="lightbox-img" />`;
+  overlay.innerHTML = `<img src="${escapeHtml(src)}" class="lightbox-img" />`;
   overlay.addEventListener('click', () => overlay.remove());
   document.body.appendChild(overlay);
 }
@@ -12,6 +28,26 @@ function escapeHtml(str) {
   const div = document.createElement('div');
   div.textContent = str;
   return div.innerHTML;
+}
+
+// --- Friendly Firebase auth error messages ---
+const AUTH_ERROR_MESSAGES = {
+  'auth/user-not-found': 'No account found with this email.',
+  'auth/wrong-password': 'Incorrect password. Please try again.',
+  'auth/invalid-email': 'Please enter a valid email address.',
+  'auth/email-already-in-use': 'An account with this email already exists.',
+  'auth/weak-password': 'Password must be at least 6 characters.',
+  'auth/too-many-requests': 'Too many attempts. Please wait a moment and try again.',
+  'auth/network-request-failed': 'Network error. Please check your connection.',
+  'auth/popup-closed-by-user': 'Sign-in popup was closed. Please try again.',
+  'auth/invalid-credential': 'Invalid email or password. Please try again.',
+  'auth/invalid-login-credentials': 'Invalid email or password. Please try again.',
+};
+
+function friendlyAuthError(err) {
+  if (err.code && AUTH_ERROR_MESSAGES[err.code]) return AUTH_ERROR_MESSAGES[err.code];
+  if (err.message === 'Firebase not configured') return err.message;
+  return 'Sign-in failed. Please try again.';
 }
 
 // --- Toast notifications ---
@@ -223,7 +259,7 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
       await firebase.auth().signInWithEmailAndPassword(email, password);
     }
   } catch (err) {
-    errEl.textContent = err.message;
+    errEl.textContent = friendlyAuthError(err);
   } finally {
     btn.disabled = false;
   }
@@ -237,7 +273,7 @@ document.getElementById('google-login-btn').addEventListener('click', async () =
     const provider = new firebase.auth.GoogleAuthProvider();
     await firebase.auth().signInWithPopup(provider);
   } catch (err) {
-    errEl.textContent = err.message;
+    errEl.textContent = friendlyAuthError(err);
   }
 });
 
@@ -919,7 +955,7 @@ function renderFaceStudioPersonDetail() {
   if (photoGrid) {
     const photoCount = person.photos?.length || 0;
     photoGrid.innerHTML = (person.photos || []).map((p, idx) =>
-      p.url ? `<div class="face-photo-thumb"><img src="${p.url}" alt="Photo" /><button class="face-photo-remove" data-idx="${idx}" title="Remove">&times;</button></div>` : ''
+      p.url && isValidMediaUrl(p.url) ? `<div class="face-photo-thumb"><img src="${escapeHtml(p.url)}" alt="Photo" /><button class="face-photo-remove" data-idx="${idx}" title="Remove">&times;</button></div>` : ''
     ).join('');
 
     // Shared upload helper
@@ -4985,15 +5021,16 @@ function updateGallery() {
   for (let i = 0; i < slideEdits.length; i++) {
     const gen = generatedImages[i];
     if (gen) {
+      const safeUrl = sanitizeMediaUrl(gen.url);
       html += `<div class="gallery-thumb ${i === currentSlideIndex ? 'active' : ''}" data-index="${i}">`;
       if (gen.isVideo) {
-        html += `<video src="${gen.url}" muted style="width:100%;height:100%;object-fit:cover"></video>`;
+        html += `<video src="${escapeHtml(safeUrl)}" muted style="width:100%;height:100%;object-fit:cover"></video>`;
         html += `<span class="thumb-video-badge">&#9654;</span>`;
       } else {
-        html += `<img src="${gen.url}" alt="Slide ${i + 1}" />`;
+        html += `<img src="${escapeHtml(safeUrl)}" alt="Slide ${i + 1}" />`;
       }
       html += `<span class="thumb-num">${i + 1}</span>`;
-      html += `<button class="thumb-download" data-filename="${gen.filename}" title="Download">&#8681;</button>`;
+      html += `<button class="thumb-download" data-filename="${escapeHtml(gen.filename)}" title="Download">&#8681;</button>`;
       html += `</div>`;
     } else if (failedSlides[i] !== undefined) {
       html += `<div class="gallery-thumb failed" data-index="${i}" title="${failedSlides[i]}">`;
