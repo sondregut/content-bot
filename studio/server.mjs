@@ -3398,7 +3398,7 @@ app.post('/api/brands/full-setup', requireAuth, async (req, res) => {
       await updateBrandFields(brandId, { contentIdeas: formattedIdeas, generationHistory: trimGenerationHistory(initialHistory) });
     }
 
-    // Step 9: Generate first carousel slides (photo = AI, text/mockup = Sharp)
+    // Step 9: Generate first carousel slides (photo/text = AI, mockup = Sharp)
     sendSSE('status', { step: 'carousel', message: 'Generating first carousel...' });
 
     const brand = { id: brandId, ...brandData };
@@ -3410,18 +3410,30 @@ app.post('/api/brands/full-setup', requireAuth, async (req, res) => {
       for (let i = 0; i < Math.min(slides.length, 5); i++) {
         const slide = slides[i];
         try {
-          if (slide.type === 'photo') {
-            // AI-generated photo slide
-            const rawPrompt = buildPhotoPrompt({
-              sport: '', setting: '', action: '', mood: '',
-              microLabel: slide.microLabel || brandData.defaultMicroLabel,
-              headline: slide.headline || '',
-              body: slide.body || '',
-              highlightPhrase: slide.highlight || '',
-              overlayStyle: 'dark gradient',
-              overlayPlacement: 'bottom third',
-            }, brand);
-            const refinedPrompt = await refinePromptWithClaude(rawPrompt, 'photo', slide, brand, req);
+          if (slide.type === 'photo' || slide.type === 'text') {
+            // AI-generated slide (photo = full scene, text = AI background with text overlay)
+            let rawPrompt;
+            if (slide.type === 'photo') {
+              rawPrompt = buildPhotoPrompt({
+                sport: '', setting: '', action: '', mood: '',
+                microLabel: slide.microLabel || brandData.defaultMicroLabel,
+                headline: slide.headline || '',
+                body: slide.body || '',
+                highlightPhrase: slide.highlight || '',
+                overlayStyle: 'dark gradient',
+                overlayPlacement: 'bottom third',
+              }, brand);
+            } else {
+              // text slide — use backgroundStyle as scene description
+              rawPrompt = buildTextPrompt({
+                backgroundStyle: slide.backgroundStyle || brandData.defaultBackground,
+                microLabel: slide.microLabel || brandData.defaultMicroLabel,
+                headline: slide.headline || '',
+                body: slide.body || '',
+                highlightPhrase: slide.highlight || '',
+              }, brand);
+            }
+            const refinedPrompt = await refinePromptWithClaude(rawPrompt, slide.type, slide, brand, req);
             const prompt = refinedPrompt || rawPrompt;
             try {
               let buffer = await generateImage({
