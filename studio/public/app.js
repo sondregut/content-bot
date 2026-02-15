@@ -1322,34 +1322,32 @@ function openBrandModal(brand = null) {
     document.getElementById(`brand-color-${key}-hex`).textContent = input.value.toUpperCase();
   }
 
-  // Face photos section — only show for existing brands
+  // Media section — only show for existing brands
+  const mediaSection = document.getElementById('brand-media-section');
   const faceSection = document.getElementById('brand-face-photos-section');
-  if (brand) {
-    faceSection.style.display = '';
-    loadBrandFacePhotos(brand.id);
-  } else {
-    faceSection.style.display = 'none';
-    renderBrandFacePhotos([]);
-  }
-
-  // Screenshots section — only show for existing brands
   const ssSection = document.getElementById('brand-screenshots-section');
   if (brand) {
+    mediaSection.style.display = '';
+    faceSection.style.display = '';
     ssSection.style.display = '';
+    loadBrandFacePhotos(brand.id);
     loadBrandScreenshots(brand.id);
   } else {
+    mediaSection.style.display = 'none';
+    faceSection.style.display = 'none';
     ssSection.style.display = 'none';
+    renderBrandFacePhotos([]);
     renderBrandScreenshots([]);
   }
 
+  document.getElementById('app-shell').style.display = 'none';
   brandModal.style.display = 'flex';
-  _activeFocusTrap = trapFocus(brandModal);
 }
 
 function closeBrandModal() {
   brandModal.style.display = 'none';
+  document.getElementById('app-shell').style.display = 'flex';
   editingBrandId = null;
-  if (_activeFocusTrap) { _activeFocusTrap.restore(); _activeFocusTrap = null; }
 }
 
 // --- Brand Face Photos Management ---
@@ -2010,8 +2008,6 @@ document.getElementById('edit-brand-btn').addEventListener('click', () => {
   if (brand) openBrandModal(brand);
 });
 document.getElementById('brand-modal-close').addEventListener('click', closeBrandModal);
-document.getElementById('brand-modal-cancel').addEventListener('click', closeBrandModal);
-brandModal.addEventListener('click', (e) => { if (e.target === brandModal) closeBrandModal(); });
 
 // --- Website Analysis (auto-trigger on URL input) ---
 const brandAnalysisSection = document.getElementById('brand-analysis-section');

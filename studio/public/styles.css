@@ -2662,9 +2662,33 @@ input:focus, select:focus, textarea:focus {
 .prompt-settings-section textarea { font-family: monospace; font-size: 0.8rem; line-height: 1.5; }
 .prompt-settings-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
 
-/* Brand Modal */
-.brand-modal-wide { width: 560px; max-width: 95vw; }
-.brand-modal-wide .modal-body { max-height: 70vh; overflow-y: auto; }
+/* Brand Edit Full-Screen */
+.brand-edit-screen {
+  position: fixed; inset: 0;
+  background: var(--panel);
+  z-index: 1000;
+  display: flex; flex-direction: column;
+}
+.brand-edit-inner { display: flex; flex-direction: column; height: 100%; }
+.brand-edit-topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 24px;
+  background: var(--white); border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.brand-edit-topbar-left { display: flex; align-items: center; gap: 16px; }
+.brand-edit-topbar-left h3 { font-size: 1.15rem; font-weight: 700; margin: 0; }
+.brand-edit-topbar-right { display: flex; align-items: center; gap: 12px; }
+.brand-edit-body { flex: 1; overflow-y: auto; padding: 32px 24px 64px; }
+.brand-edit-container { max-width: 720px; margin: 0 auto; }
+.brand-edit-section {
+  background: var(--white); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 24px; margin-bottom: 24px;
+}
+.brand-edit-section-title {
+  font-size: 0.95rem; font-weight: 700; margin: 0 0 20px;
+  padding-bottom: 12px; border-bottom: 1px solid var(--border);
+}
 
 button.brand-add-btn {
   font-size: 1.2rem;
@@ -2752,30 +2776,6 @@ button.brand-edit-btn {
   font-size: 0.7rem;
   font-family: 'Space Mono', monospace;
   color: var(--muted);
-}
-
-.brand-advanced {
-  margin-bottom: 16px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 0;
-}
-
-.brand-advanced summary {
-  padding: 10px 14px;
-  font-size: 0.85rem;
-  font-weight: 600;
-  cursor: pointer;
-  color: var(--muted);
-}
-
-.brand-advanced[open] summary {
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 12px;
-}
-
-.brand-advanced .form-group {
-  padding: 0 14px;
 }
 
 .brand-modal-status {
@@ -3710,6 +3710,10 @@ button.brand-edit-btn {
 /* Responsive */
 
 @media (max-width: 900px) {
+  .brand-edit-topbar { padding: 10px 16px; flex-wrap: wrap; gap: 8px; }
+  .brand-edit-body { padding: 16px 12px 48px; }
+  .brand-edit-section { padding: 16px; }
+
   .app-body { flex-direction: column; }
 
   .sidebar {

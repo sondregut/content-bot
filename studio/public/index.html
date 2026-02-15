@@ -1131,169 +1131,179 @@
     </div>
 
     <!-- Settings Modal -->
-    <!-- Brand Creation / Edit Modal -->
-    <div class="modal-overlay" id="brand-modal" style="display:none" role="dialog" aria-modal="true" aria-labelledby="brand-modal-title">
-      <div class="modal brand-modal-wide">
-        <div class="modal-header">
-          <h3 id="brand-modal-title">Create Brand</h3>
-          <button class="modal-close" id="brand-modal-close" aria-label="Close">&times;</button>
+    <!-- Brand Edit Full-Screen -->
+    <div class="brand-edit-screen" id="brand-modal" style="display:none" role="dialog" aria-labelledby="brand-modal-title">
+      <div class="brand-edit-inner">
+        <div class="brand-edit-topbar">
+          <div class="brand-edit-topbar-left">
+            <button class="btn small" id="brand-modal-close" aria-label="Back">&larr; Back</button>
+            <h3 id="brand-modal-title">Create Brand</h3>
+          </div>
+          <div class="brand-edit-topbar-right">
+            <span class="brand-modal-status" id="brand-modal-status"></span>
+            <button class="btn" id="brand-delete-btn" style="display:none;color:#ef4444">Delete Brand</button>
+            <button class="btn primary" id="brand-save-btn">Save Brand</button>
+          </div>
         </div>
-        <div class="modal-body">
-          <div class="form-group full">
-            <label class="label" for="brand-name">Brand Name *</label>
-            <input type="text" id="brand-name" placeholder="e.g. My Startup" required />
-          </div>
-          <div class="form-group full">
-            <label class="label" for="brand-website">Website URL</label>
-            <input type="text" id="brand-website" placeholder="e.g. myapp.com — paste a URL and we'll auto-fill everything" />
-          </div>
+        <div class="brand-edit-body">
+          <div class="brand-edit-container">
 
-          <!-- Website Analysis Section -->
-          <div id="brand-analysis-section" style="display:none">
-            <!-- Brand Preview Card (prominent, shows once data arrives) -->
-            <div class="brand-preview-card" id="brand-preview-row" style="display:none">
-              <img id="brand-preview-thumb" class="brand-preview-thumb" />
-              <div class="brand-preview-info">
-                <strong id="brand-preview-name"></strong>
-                <p id="brand-preview-desc"></p>
+            <!-- Section: General -->
+            <div class="brand-edit-section">
+              <h4 class="brand-edit-section-title">General</h4>
+              <div class="form-group full">
+                <label class="label" for="brand-name">Brand Name *</label>
+                <input type="text" id="brand-name" placeholder="e.g. My Startup" required />
               </div>
-            </div>
+              <div class="form-group full">
+                <label class="label" for="brand-website">Website URL</label>
+                <input type="text" id="brand-website" placeholder="e.g. myapp.com — paste a URL and we'll auto-fill everything" />
+              </div>
 
-            <!-- Collapsible Analysis Accordion -->
-            <div class="brand-analysis-card" id="brand-analysis-card">
-              <div class="analysis-header" id="analysis-header">
-                <span class="analysis-header-label">Analyzing Your Brand</span>
-                <span class="analysis-header-count" id="analysis-count">0 of 4 completed</span>
-                <span class="analysis-chevron" id="analysis-chevron">&#9660;</span>
-              </div>
-              <div class="brand-analysis-steps" id="brand-analysis-steps">
-                <div class="analysis-step" data-step="fetch">
-                  <span class="step-icon"></span>
-                  <span class="step-text">Finding your website...</span>
+              <!-- Website Analysis Section -->
+              <div id="brand-analysis-section" style="display:none">
+                <div class="brand-preview-card" id="brand-preview-row" style="display:none">
+                  <img id="brand-preview-thumb" class="brand-preview-thumb" />
+                  <div class="brand-preview-info">
+                    <strong id="brand-preview-name"></strong>
+                    <p id="brand-preview-desc"></p>
+                  </div>
                 </div>
-                <div class="analysis-step" data-step="analyze">
-                  <span class="step-icon"></span>
-                  <span class="step-text">Analyzing brand identity...</span>
+                <div class="brand-analysis-card" id="brand-analysis-card">
+                  <div class="analysis-header" id="analysis-header">
+                    <span class="analysis-header-label">Analyzing Your Brand</span>
+                    <span class="analysis-header-count" id="analysis-count">0 of 4 completed</span>
+                    <span class="analysis-chevron" id="analysis-chevron">&#9660;</span>
+                  </div>
+                  <div class="brand-analysis-steps" id="brand-analysis-steps">
+                    <div class="analysis-step" data-step="fetch">
+                      <span class="step-icon"></span>
+                      <span class="step-text">Finding your website...</span>
+                    </div>
+                    <div class="analysis-step" data-step="analyze">
+                      <span class="step-icon"></span>
+                      <span class="step-text">Analyzing brand identity...</span>
+                    </div>
+                    <div class="analysis-step" data-step="images">
+                      <span class="step-icon"></span>
+                      <span class="step-text">Extracting images & colors...</span>
+                    </div>
+                    <div class="analysis-step" data-step="generate">
+                      <span class="step-icon"></span>
+                      <span class="step-text">Generating brand profile...</span>
+                    </div>
+                  </div>
+                  <div class="analysis-status-line" id="analysis-status-line" style="display:none">
+                    <span id="analysis-status-text"></span>
+                  </div>
                 </div>
-                <div class="analysis-step" data-step="images">
-                  <span class="step-icon"></span>
-                  <span class="step-text">Extracting images & colors...</span>
-                </div>
-                <div class="analysis-step" data-step="generate">
-                  <span class="step-icon"></span>
-                  <span class="step-text">Generating brand profile...</span>
+                <div id="brand-images-section" style="display:none">
+                  <label class="label">Website Images <span id="brand-images-count"></span></label>
+                  <div class="brand-images-grid" id="brand-images-grid"></div>
                 </div>
               </div>
-              <!-- Status line -->
-              <div class="analysis-status-line" id="analysis-status-line" style="display:none">
-                <span id="analysis-status-text"></span>
+
+              <div class="form-group full" id="brand-description-group">
+                <label class="label">Short Description</label>
+                <textarea id="brand-description" rows="2" placeholder="Auto-filled from your website, or type manually"></textarea>
+              </div>
+
+              <div class="brand-ai-row" id="brand-ai-row">
+                <button type="button" class="btn secondary" id="brand-ai-setup-btn">Regenerate with AI</button>
+                <span class="brand-ai-status" id="brand-ai-status">Paste a URL to auto-setup</span>
               </div>
             </div>
 
-            <div id="brand-images-section" style="display:none">
-              <label class="label">Website Images <span id="brand-images-count"></span></label>
-              <div class="brand-images-grid" id="brand-images-grid"></div>
-            </div>
-          </div>
-
-          <div class="form-group full" id="brand-description-group">
-            <label class="label">Short Description</label>
-            <textarea id="brand-description" rows="2" placeholder="Auto-filled from your website, or type manually"></textarea>
-          </div>
-
-          <div class="brand-ai-row" id="brand-ai-row">
-            <button type="button" class="btn secondary" id="brand-ai-setup-btn">Regenerate with AI</button>
-            <span class="brand-ai-status" id="brand-ai-status">Paste a URL to auto-setup</span>
-          </div>
-
-          <div class="brand-colors-section">
-            <label class="label">Brand Colors</label>
-            <div class="brand-color-row">
-              <div class="brand-color-picker">
-                <label>Primary</label>
-                <input type="color" id="brand-color-primary" value="#1A1A2E" />
-                <span class="color-hex" id="brand-color-primary-hex">#1A1A2E</span>
+            <!-- Section: Visual Identity -->
+            <div class="brand-edit-section">
+              <h4 class="brand-edit-section-title">Visual Identity</h4>
+              <div class="brand-colors-section">
+                <label class="label">Brand Colors</label>
+                <div class="brand-color-row">
+                  <div class="brand-color-picker">
+                    <label>Primary</label>
+                    <input type="color" id="brand-color-primary" value="#1A1A2E" />
+                    <span class="color-hex" id="brand-color-primary-hex">#1A1A2E</span>
+                  </div>
+                  <div class="brand-color-picker">
+                    <label>Accent</label>
+                    <input type="color" id="brand-color-accent" value="#E94560" />
+                    <span class="color-hex" id="brand-color-accent-hex">#E94560</span>
+                  </div>
+                  <div class="brand-color-picker">
+                    <label>Text</label>
+                    <input type="color" id="brand-color-white" value="#FFFFFF" />
+                    <span class="color-hex" id="brand-color-white-hex">#FFFFFF</span>
+                  </div>
+                  <div class="brand-color-picker">
+                    <label>Secondary</label>
+                    <input type="color" id="brand-color-secondary" value="#16213E" />
+                    <span class="color-hex" id="brand-color-secondary-hex">#16213E</span>
+                  </div>
+                  <div class="brand-color-picker">
+                    <label>CTA</label>
+                    <input type="color" id="brand-color-cta" value="#0F3460" />
+                    <span class="color-hex" id="brand-color-cta-hex">#0F3460</span>
+                  </div>
+                </div>
               </div>
-              <div class="brand-color-picker">
-                <label>Accent</label>
-                <input type="color" id="brand-color-accent" value="#E94560" />
-                <span class="color-hex" id="brand-color-accent-hex">#E94560</span>
-              </div>
-              <div class="brand-color-picker">
-                <label>Text</label>
-                <input type="color" id="brand-color-white" value="#FFFFFF" />
-                <span class="color-hex" id="brand-color-white-hex">#FFFFFF</span>
-              </div>
-              <div class="brand-color-picker">
-                <label>Secondary</label>
-                <input type="color" id="brand-color-secondary" value="#16213E" />
-                <span class="color-hex" id="brand-color-secondary-hex">#16213E</span>
-              </div>
-              <div class="brand-color-picker">
-                <label>CTA</label>
-                <input type="color" id="brand-color-cta" value="#0F3460" />
-                <span class="color-hex" id="brand-color-cta-hex">#0F3460</span>
+              <div class="form-group full">
+                <label class="label">Image Style</label>
+                <textarea id="brand-image-style" rows="3" placeholder="2-4 sentences describing lighting, composition, mood, camera feel for AI image generation..."></textarea>
+                <span class="field-hint">Drives the visual direction for AI-generated slides. Auto-filled when you analyze a URL.</span>
               </div>
             </div>
+
+            <!-- Section: Media -->
+            <div class="brand-edit-section" id="brand-media-section">
+              <h4 class="brand-edit-section-title">Media</h4>
+              <div class="form-group full" id="brand-face-photos-section" style="display:none">
+                <label class="label">Face Photos <span class="face-photo-count" id="brand-face-photo-count">0 / 5</span></label>
+                <p class="field-hint" style="margin:0 0 8px">Upload 2-3 clear face photos for AI personalization. Front-facing, good lighting works best.</p>
+                <div class="brand-face-photos-grid" id="brand-face-photos-grid">
+                  <input type="file" id="brand-face-photo-input" accept="image/*" multiple style="display:none" />
+                  <button type="button" class="face-add-btn" id="brand-face-photo-add" title="Add face photo" aria-label="Add face photo">+</button>
+                </div>
+                <div class="brand-face-photo-status" id="brand-face-photo-status"></div>
+              </div>
+              <div class="form-group full" id="brand-screenshots-section" style="display:none">
+                <label class="label">App Screenshots <span class="face-photo-count" id="brand-screenshot-count">0 / 8</span></label>
+                <p class="field-hint" style="margin:0 0 8px">Upload app screenshots for phone mockup slides. Label each so AI picks the right one.</p>
+                <div class="brand-screenshots-grid" id="brand-screenshots-grid">
+                  <input type="file" id="brand-screenshot-input" accept="image/*" multiple style="display:none" />
+                  <button type="button" class="face-add-btn screenshot-add-btn" id="brand-screenshot-add" title="Add screenshot" aria-label="Add screenshot">+</button>
+                </div>
+                <div class="brand-face-photo-status" id="brand-screenshot-status"></div>
+              </div>
+            </div>
+
+            <!-- Section: AI & Advanced -->
+            <div class="brand-edit-section">
+              <h4 class="brand-edit-section-title">AI &amp; Advanced</h4>
+              <div class="form-group full">
+                <label class="label">System Prompt (AI brand voice)</label>
+                <textarea id="brand-system-prompt" rows="5" placeholder="AI-generated brand brief will appear here..."></textarea>
+              </div>
+              <div class="form-group full">
+                <label class="label">Product Knowledge</label>
+                <textarea id="brand-product-knowledge" rows="5" placeholder="AI-generated product details will appear here..."></textarea>
+                <span class="field-hint">AI-extracted product details — edit to improve content accuracy.</span>
+              </div>
+              <div class="form-group full">
+                <label class="label">Default Micro-Label</label>
+                <input type="text" id="brand-micro-label" placeholder="e.g. MY BRAND" />
+              </div>
+              <div class="form-group full">
+                <label class="label">Watermark Text</label>
+                <input type="text" id="brand-watermark" placeholder="e.g. mybrand.com" />
+              </div>
+              <div class="form-group full">
+                <label class="label">Default Background Description</label>
+                <input type="text" id="brand-bg-desc" placeholder="e.g. dark navy with subtle grain" />
+              </div>
+            </div>
+
           </div>
-
-          <div class="form-group full" id="brand-face-photos-section" style="display:none">
-            <label class="label">Face Photos <span class="face-photo-count" id="brand-face-photo-count">0 / 5</span></label>
-            <p class="field-hint" style="margin:0 0 8px">Upload 2-3 clear face photos for AI personalization. Front-facing, good lighting works best.</p>
-            <div class="brand-face-photos-grid" id="brand-face-photos-grid">
-              <input type="file" id="brand-face-photo-input" accept="image/*" multiple style="display:none" />
-              <button type="button" class="face-add-btn" id="brand-face-photo-add" title="Add face photo" aria-label="Add face photo">+</button>
-            </div>
-            <div class="brand-face-photo-status" id="brand-face-photo-status"></div>
-          </div>
-
-          <div class="form-group full" id="brand-screenshots-section" style="display:none">
-            <label class="label">App Screenshots <span class="face-photo-count" id="brand-screenshot-count">0 / 8</span></label>
-            <p class="field-hint" style="margin:0 0 8px">Upload app screenshots for phone mockup slides. Label each so AI picks the right one.</p>
-            <div class="brand-screenshots-grid" id="brand-screenshots-grid">
-              <input type="file" id="brand-screenshot-input" accept="image/*" multiple style="display:none" />
-              <button type="button" class="face-add-btn screenshot-add-btn" id="brand-screenshot-add" title="Add screenshot" aria-label="Add screenshot">+</button>
-            </div>
-            <div class="brand-face-photo-status" id="brand-screenshot-status"></div>
-          </div>
-
-          <div class="form-group full">
-            <label class="label">Image Style</label>
-            <textarea id="brand-image-style" rows="3" placeholder="2-4 sentences describing lighting, composition, mood, camera feel for AI image generation..."></textarea>
-            <span class="field-hint">Drives the visual direction for AI-generated slides. Auto-filled when you analyze a URL.</span>
-          </div>
-
-          <details class="brand-advanced">
-            <summary>Advanced Settings</summary>
-            <div class="form-group full">
-              <label class="label">System Prompt (AI brand voice)</label>
-              <textarea id="brand-system-prompt" rows="5" placeholder="AI-generated brand brief will appear here..."></textarea>
-            </div>
-            <div class="form-group full">
-              <label class="label">Product Knowledge</label>
-              <textarea id="brand-product-knowledge" rows="5" placeholder="AI-generated product details will appear here..."></textarea>
-              <span class="field-hint">AI-extracted product details — edit to improve content accuracy.</span>
-            </div>
-            <div class="form-group full">
-              <label class="label">Default Micro-Label</label>
-              <input type="text" id="brand-micro-label" placeholder="e.g. MY BRAND" />
-            </div>
-            <div class="form-group full">
-              <label class="label">Watermark Text</label>
-              <input type="text" id="brand-watermark" placeholder="e.g. mybrand.com" />
-            </div>
-            <div class="form-group full">
-              <label class="label">Default Background Description</label>
-              <input type="text" id="brand-bg-desc" placeholder="e.g. dark navy with subtle grain" />
-            </div>
-          </details>
-
-          <div class="brand-modal-status" id="brand-modal-status"></div>
-        </div>
-        <div class="modal-footer">
-          <button class="btn" id="brand-delete-btn" style="display:none;color:#ef4444;margin-right:auto">Delete</button>
-          <button class="btn" id="brand-modal-cancel">Cancel</button>
-          <button class="btn primary" id="brand-save-btn">Save Brand</button>
         </div>
       </div>
     </div>
