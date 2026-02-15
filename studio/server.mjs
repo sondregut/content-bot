@@ -3901,24 +3901,47 @@ Return ONLY the meme description (no explanation, no preamble).`,
           });
         }
 
-        // Generate text overlay if enabled
-        const overlayPng = data.videoTextOverlay ? await generateVideoTextOverlay(data, brand) : null;
-
-        const videoBuffer = await generateKenBurnsVideo(imageBuffer, {
+        // Generate raw video first (no overlay)
+        const rawVideoBuffer = await generateKenBurnsVideo(imageBuffer, {
           duration: data.duration || 5,
-          overlayPng,
-          includeOwl: data.includeOwl,
-          owlPosition: data.owlPosition,
-          brand,
         });
 
+        // Save raw version for clean download
         const slug = crypto.randomUUID().slice(0, 8);
-        const filename = `video_${brandId}_kb_${Date.now()}_${slug}.mp4`;
+        const ts = Date.now();
+        const rawFilename = `video_${brandId}_kb_${ts}_${slug}_raw.mp4`;
+        const rawUrl = await uploadVideoToStorage(rawVideoBuffer, rawFilename);
+
+        // Apply text overlay + icon on top of raw video
+        let videoBuffer = rawVideoBuffer;
+        const overlayPng = data.videoTextOverlay ? await generateVideoTextOverlay(data, brand) : null;
+        if (overlayPng || data.includeOwl) {
+          try {
+            let overlay = overlayPng;
+            if (data.includeOwl && overlay && brand) {
+              overlay = await addAppIconOverlay(overlay, data.owlPosition, brand);
+            } else if (data.includeOwl && !overlay && brand) {
+              overlay = await sharp({ create: { width: 1080, height: 1920, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } }).png().toBuffer();
+              overlay = await addAppIconOverlay(overlay, data.owlPosition, brand);
+            }
+            if (overlay) {
+              const finalPath = path.join(outputDir, `kb_final_${crypto.randomUUID().slice(0, 8)}.mp4`);
+              await overlayPngOnVideo(rawVideoBuffer, overlay, finalPath);
+              videoBuffer = await fs.readFile(finalPath);
+              await fs.unlink(finalPath).catch(() => {});
+            }
+          } catch (overlayErr) {
+            console.error('[Ken Burns overlay] Failed, returning raw video:', overlayErr.message);
+          }
+        }
+
+        const filename = `video_${brandId}_kb_${ts}_${slug}.mp4`;
         const url = await uploadVideoToStorage(videoBuffer, filename);
         saveImageRecord({ userId: req.user?.uid, brandId, filename, type: 'video', prompt: 'Ken Burns', model: 'ken-burns', brandName: brand.name });
 
         return res.json({
           ok: true, filename, url, isVideo: true,
+          rawFilename, rawUrl,
           prompt: 'Ken Burns effect',
           refinedPrompt: null,
           usedRefined: false,
@@ -3965,7 +3988,14 @@ Return ONLY the meme description (no explanation, no preamble).`,
 
           const videoRes = await fetch(videoUrl);
           if (!videoRes.ok) throw new Error('Failed to download generated video');
-          let videoBuffer = Buffer.from(await videoRes.arrayBuffer());
+          const rawVideoBuffer = Buffer.from(await videoRes.arrayBuffer());
+          let videoBuffer = rawVideoBuffer;
+
+          // Save raw video (without overlay) for optional clean download
+          const slug = crypto.randomUUID().slice(0, 8);
+          const ts = Date.now();
+          const rawFilename = `video_${brandId}_${ts}_${slug}_raw.mp4`;
+          const rawUrl = await uploadVideoToStorage(rawVideoBuffer, rawFilename);
 
           // Apply text overlay if enabled
           try {
@@ -3982,14 +4012,15 @@ Return ONLY the meme description (no explanation, no preamble).`,
             console.error('[Video overlay] Failed, returning raw video:', overlayErr.message);
           }
 
-          const slug = crypto.randomUUID().slice(0, 8);
-          const filename = `video_${brandId}_${Date.now()}_${slug}.mp4`;
+          const filename = `video_${brandId}_${ts}_${slug}.mp4`;
           const url = await uploadVideoToStorage(videoBuffer, filename);
           saveImageRecord({ userId: req.user?.uid, brandId, filename, type: 'video', prompt: rawPrompt, refinedPrompt, model: modelName, brandName: brand.name });
 
           videoJob.status = 'done';
           videoJob.url = url;
           videoJob.filename = filename;
+          videoJob.rawFilename = rawFilename;
+          videoJob.rawUrl = rawUrl;
         } catch (err) {
           videoJob.status = 'error';
           videoJob.error = err.message;
@@ -4306,22 +4337,43 @@ app.post('/api/generate-carousel', requireAuth, generationLimiter, async (req, r
               });
             }
 
-            const overlayPng = slideData.videoTextOverlay ? await generateVideoTextOverlay(slideData, brand) : null;
-
-            const videoBuffer = await generateKenBurnsVideo(imageBuffer, {
+            // Generate raw video first
+            const rawVideoBuffer = await generateKenBurnsVideo(imageBuffer, {
               duration: slideData.duration || 5,
-              overlayPng,
-              includeOwl: slideData.includeOwl,
-              owlPosition: slideData.owlPosition,
-              brand,
             });
 
             const slug = crypto.randomUUID().slice(0, 8);
+            const rawFilename = `carousel_${brand.id}_${jobId}_s${i + 1}_${slug}_raw.mp4`;
+            await uploadVideoToStorage(rawVideoBuffer, rawFilename);
+
+            // Apply overlay + icon
+            let videoBuffer = rawVideoBuffer;
+            const overlayPng = slideData.videoTextOverlay ? await generateVideoTextOverlay(slideData, brand) : null;
+            if (overlayPng || slideData.includeOwl) {
+              try {
+                let overlay = overlayPng;
+                if (slideData.includeOwl && overlay && brand) {
+                  overlay = await addAppIconOverlay(overlay, slideData.owlPosition, brand);
+                } else if (slideData.includeOwl && !overlay && brand) {
+                  overlay = await sharp({ create: { width: 1080, height: 1920, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } }).png().toBuffer();
+                  overlay = await addAppIconOverlay(overlay, slideData.owlPosition, brand);
+                }
+                if (overlay) {
+                  const finalPath = path.join(outputDir, `kb_final_${crypto.randomUUID().slice(0, 8)}.mp4`);
+                  await overlayPngOnVideo(rawVideoBuffer, overlay, finalPath);
+                  videoBuffer = await fs.readFile(finalPath);
+                  await fs.unlink(finalPath).catch(() => {});
+                }
+              } catch (overlayErr) {
+                console.error(`[Carousel ${jobId}] Ken Burns overlay failed:`, overlayErr.message);
+              }
+            }
+
             const filename = `carousel_${brand.id}_${jobId}_s${i + 1}_${slug}.mp4`;
             const slideUrl = await uploadVideoToStorage(videoBuffer, filename);
             saveImageRecord({ userId: req.user?.uid, brandId: brand.id, filename, type: 'carousel-video', prompt: 'Ken Burns', model: 'ken-burns', brandName: brand.name });
 
-            job.slides.push({ slideNumber: i + 1, url: slideUrl, filename, ok: true, isVideo: true });
+            job.slides.push({ slideNumber: i + 1, url: slideUrl, filename, ok: true, isVideo: true, rawFilename });
             job.completed = i + 1;
             continue;
           }
@@ -4350,7 +4402,13 @@ app.post('/api/generate-carousel', requireAuth, generationLimiter, async (req, r
           // Download video to local storage
           const videoRes = await fetch(videoUrl);
           if (!videoRes.ok) throw new Error('Failed to download generated video');
-          let videoBuffer = Buffer.from(await videoRes.arrayBuffer());
+          const rawVideoBuffer = Buffer.from(await videoRes.arrayBuffer());
+          let videoBuffer = rawVideoBuffer;
+
+          // Save raw video for clean download
+          const slug = crypto.randomUUID().slice(0, 8);
+          const rawFilename = `carousel_${brand.id}_${jobId}_s${i + 1}_${slug}_raw.mp4`;
+          await uploadVideoToStorage(rawVideoBuffer, rawFilename);
 
           // Apply text overlay if enabled
           try {
@@ -4367,12 +4425,11 @@ app.post('/api/generate-carousel', requireAuth, generationLimiter, async (req, r
             console.error(`[Carousel ${jobId}] Video overlay failed, using raw video:`, overlayErr.message);
           }
 
-          const slug = crypto.randomUUID().slice(0, 8);
           const filename = `carousel_${brand.id}_${jobId}_s${i + 1}_${slug}.mp4`;
           const slideUrl = await uploadVideoToStorage(videoBuffer, filename);
           saveImageRecord({ userId: req.user?.uid, brandId: brand.id, filename, type: 'carousel-video', prompt: rawPrompt, refinedPrompt: refined, model: vidModelName, brandName: brand.name });
 
-          job.slides.push({ slideNumber: i + 1, url: slideUrl, filename, ok: true, isVideo: true });
+          job.slides.push({ slideNumber: i + 1, url: slideUrl, filename, ok: true, isVideo: true, rawFilename });
           job.completed = i + 1;
           continue;
         }
@@ -4544,6 +4601,8 @@ app.get('/api/video-status/:jobId', requireAuth, (req, res) => {
     status: job.status,
     url: job.url,
     filename: job.filename,
+    rawFilename: job.rawFilename || null,
+    rawUrl: job.rawUrl || null,
     prompt: job.prompt,
     refinedPrompt: job.refinedPrompt,
     error: job.error,

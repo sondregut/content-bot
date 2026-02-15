@@ -391,6 +391,7 @@ const progressLabel = document.getElementById('progress-label');
 const progressFill = document.getElementById('progress-fill');
 const downloadButtons = document.getElementById('download-buttons');
 const downloadSingleBtn = document.getElementById('download-single-btn');
+const downloadRawVideoBtn = document.getElementById('download-raw-video-btn');
 const downloadAllBtn = document.getElementById('download-all-btn');
 const refImageInput = document.getElementById('ref-image-input');
 const refUploadBtn = document.getElementById('ref-upload-btn');
@@ -2667,7 +2668,7 @@ function loadSlideIntoForm(index) {
       previewImg.src = gen.url;
       previewImg.style.display = 'block';
     }
-    downloadButtons.style.display = 'flex';
+    downloadButtons.style.display = 'flex'; updateRawVideoButton();
     statusEl.textContent = `Slide ${index + 1} generated.`;
     setPreviewMode('generated');
   } else if (needsAI) {
@@ -2679,7 +2680,7 @@ function loadSlideIntoForm(index) {
   } else {
     previewImg.style.display = 'none';
     previewVideo.style.display = 'none';
-    downloadButtons.style.display = 'flex';
+    downloadButtons.style.display = 'flex'; updateRawVideoButton();
     statusEl.textContent = 'Live preview — updates instantly.';
     setPreviewMode('live');
   }
@@ -4168,12 +4169,12 @@ form.addEventListener('submit', async (e) => {
         if (!pollRes.ok) continue;
         const job = await pollRes.json();
         if (job.status === 'done') {
-          generatedImages[slideIndex] = { url: job.url, filename: job.filename, isVideo: true };
+          generatedImages[slideIndex] = { url: job.url, filename: job.filename, isVideo: true, rawFilename: job.rawFilename || null };
           if (currentSlideIndex === slideIndex) {
             previewImg.style.display = 'none';
             previewVideo.src = job.url;
             previewVideo.style.display = 'block';
-            downloadButtons.style.display = 'flex';
+            downloadButtons.style.display = 'flex'; updateRawVideoButton();
             statusEl.textContent = job.refinedPrompt
               ? `Video done (Claude-refined).`
               : `Video done.`;
@@ -4192,7 +4193,7 @@ form.addEventListener('submit', async (e) => {
       }
     } else {
       // Synchronous result (images, ken-burns, etc.)
-      generatedImages[slideIndex] = { url: data.url, filename: data.filename, isVideo: data.isVideo || false, textPositions: data.textPositions };
+      generatedImages[slideIndex] = { url: data.url, filename: data.filename, isVideo: data.isVideo || false, textPositions: data.textPositions, rawFilename: data.rawFilename || null };
 
       if (currentSlideIndex === slideIndex) {
         if (data.isVideo) {
@@ -4204,7 +4205,7 @@ form.addEventListener('submit', async (e) => {
           previewImg.src = data.url;
           previewImg.style.display = 'block';
         }
-        downloadButtons.style.display = 'flex';
+        downloadButtons.style.display = 'flex'; updateRawVideoButton();
         statusEl.textContent = data.usedRefined
           ? `Slide ${slideIndex + 1} done (Claude-refined).`
           : `Slide ${slideIndex + 1} done.`;
@@ -4296,6 +4297,27 @@ applyEditBtn.addEventListener('click', async () => {
     }
   }
 });
+
+// --- Download Raw Video (without text overlay) ---
+if (downloadRawVideoBtn) {
+  downloadRawVideoBtn.addEventListener('click', () => {
+    const gen = generatedImages[currentSlideIndex];
+    if (gen?.rawFilename) {
+      const a = document.createElement('a');
+      a.href = `/api/download/${gen.rawFilename}`;
+      a.download = gen.rawFilename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+  });
+}
+
+function updateRawVideoButton() {
+  if (!downloadRawVideoBtn) return;
+  const gen = generatedImages[currentSlideIndex];
+  downloadRawVideoBtn.style.display = (gen?.isVideo && gen?.rawFilename) ? 'inline-block' : 'none';
+}
 
 // --- Download Single ---
 downloadSingleBtn.addEventListener('click', async () => {
@@ -4438,7 +4460,7 @@ async function pollBatchStatus() {
       if (slide.ok && slide.url) {
         const idx = slide.slideNumber - 1;
         if (!generatedImages[idx]) invalidateMediaLibrary();
-        generatedImages[idx] = { url: slide.url, filename: slide.filename, isVideo: slide.isVideo || false, textPositions: slide.textPositions };
+        generatedImages[idx] = { url: slide.url, filename: slide.filename, isVideo: slide.isVideo || false, textPositions: slide.textPositions, rawFilename: slide.rawFilename || null };
       }
     }
     renderSlideTabs();
@@ -4456,7 +4478,7 @@ async function pollBatchStatus() {
         previewImg.src = gen.url;
         previewImg.style.display = 'block';
       }
-      downloadButtons.style.display = 'flex';
+      downloadButtons.style.display = 'flex'; updateRawVideoButton();
     }
 
     if (job.status === 'done') {
