@@ -84,6 +84,13 @@ Vercel auto-deploys from `main` branch. Config in root `vercel.json`.
 - **Mockup canvas:** 1080x1920 (9:16 TikTok). Safe zones: top 120px, bottom 200px, sides 90px.
 - **Batch jobs:** In-memory Map (`carouselJobs`), auto-cleaned after 30 min. Not persistent across deploys.
 
+## Large Files — Do NOT Read in Full
+
+- `server.mjs` (6,900+ lines) and `app.js` (6,300+ lines) will fill the context window
+- Use Grep to find the function/route first, then Read with offset+limit (200 lines max)
+- Use /compact proactively at ~70% context usage
+- Use /clear between unrelated tasks
+
 ## File Map
 
 ```

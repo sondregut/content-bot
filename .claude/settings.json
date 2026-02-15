@@ -17,6 +17,8 @@
       "Read(studio/.env)",
       "Read(studio/.env.local)",
       "Read(.env.local)",
+      "Read(studio/output/**)",
+      "Read(generators/**)",
       "Bash(rm -rf *)"
     ]
   }
