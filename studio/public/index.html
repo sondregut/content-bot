@@ -347,6 +347,20 @@
                   </div>
                 </div>
 
+                <div class="form-row" style="margin-top:12px;align-items:center">
+                  <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;white-space:nowrap">
+                    <input type="checkbox" id="meme-include-icon" checked> App icon &amp; name
+                  </label>
+                  <div class="form-group" id="meme-icon-position-group">
+                    <select id="meme-icon-position">
+                      <option value="bottom-right">Bottom Right</option>
+                      <option value="bottom-left">Bottom Left</option>
+                      <option value="top-right">Top Right</option>
+                      <option value="top-left">Top Left</option>
+                    </select>
+                  </div>
+                </div>
+
                 <div style="display:flex;gap:8px;margin-top:12px">
                   <button type="button" class="btn primary" id="generate-meme-btn" style="flex:1">Generate Meme</button>
                   <button type="button" class="btn small" id="preview-meme-prompt-btn" title="Preview the prompt before generating">Preview Prompt</button>

@@ -1008,6 +1008,8 @@ function renderFaceStudioPersonDetail() {
 async function trainLoraForPerson(person) {
   const modelSelect = document.getElementById('face-studio-train-model');
   const model = modelSelect ? modelSelect.value : 'flux-2';
+  const costEstimate = model === 'flux-2' ? '~$8' : model === 'portrait' ? '~$6' : '~$2';
+  if (!confirm(`Train LoRA model for "${person.name}"? Estimated cost: ${costEstimate}`)) return;
   try {
     const res = await authFetch(`/api/persons/${person.id}/train-lora`, {
       method: 'POST',
@@ -4794,7 +4796,15 @@ const memeStatus = document.getElementById('meme-status');
 const memePreviewImg = document.getElementById('meme-preview-img');
 const memePlaceholder = document.querySelector('.meme-placeholder');
 const downloadMemeBtn = document.getElementById('download-meme-btn');
+const memeIncludeIcon = document.getElementById('meme-include-icon');
+const memeIconPosition = document.getElementById('meme-icon-position');
+const memeIconPositionGroup = document.getElementById('meme-icon-position-group');
 let memeFilename = null;
+
+memeIncludeIcon.addEventListener('change', () => {
+  memeIconPositionGroup.style.opacity = memeIncludeIcon.checked ? '1' : '0.4';
+  memeIconPosition.disabled = !memeIncludeIcon.checked;
+});
 
 function openMemeView() {
   emptyState.style.display = 'none';
@@ -4842,8 +4852,8 @@ document.getElementById('generate-meme-btn').addEventListener('click', async () 
         brand: currentBrand,
         imageModel: memeModelSelect ? memeModelSelect.value : getSelectedImageModel(),
         textModel: getSelectedTextModel(),
-        includeOwl: true,
-        owlPosition: 'bottom-right',
+        includeOwl: memeIncludeIcon.checked,
+        owlPosition: memeIconPosition.value,
       }),
     });
 
@@ -4888,8 +4898,8 @@ document.getElementById('preview-meme-prompt-btn').addEventListener('click', asy
       brand: currentBrand,
       imageModel: memeModelSelect ? memeModelSelect.value : getSelectedImageModel(),
       textModel: getSelectedTextModel(),
-      includeOwl: true,
-      owlPosition: 'bottom-right',
+      includeOwl: memeIncludeIcon.checked,
+      owlPosition: memeIconPosition.value,
       previewOnly: true,
     };
     const res = await authFetch('/api/generate', {
