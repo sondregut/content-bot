@@ -1976,6 +1976,38 @@ input:focus, select:focus, textarea:focus {
 
 .gallery-thumb.empty { background: #e5e1d9; }
 
+.gallery-thumb.failed {
+  background: #fce4e4;
+  border-color: #d44;
+}
+
+.thumb-error {
+  font-size: 1.4rem;
+  font-weight: 800;
+  color: #d44;
+}
+
+.thumb-retry {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: rgba(200,40,40,0.75);
+  color: var(--white);
+  border: none;
+  cursor: pointer;
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.gallery-thumb.failed:hover .thumb-retry { opacity: 1; }
+
 .thumb-num {
   position: absolute;
   bottom: 4px;

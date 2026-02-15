@@ -296,6 +296,7 @@ let generatedImages = {};
 let generatedImagesCache = {}; // { ideaId: { slideIndex: { url, filename, isVideo } } }
 let batchJobId = null;
 let pollTimer = null;
+let failedSlides = {}; // { slideIndex: errorMessage }
 let referenceImageFilename = null;
 let bgImageFilename = null;      // Background image
 let fgImageFilename = null;      // Foreground (phone/figure) image
@@ -317,6 +318,7 @@ function resetAppState() {
   slideEdits = [];
   generatedImages = {};
   generatedImagesCache = {};
+  failedSlides = {};
 
   // Generation state
   batchJobId = null;
@@ -4926,11 +4928,14 @@ async function pollBatchStatus() {
     progressLabel.textContent = `Generating slide ${job.current} of ${job.total}... (${job.completed} done)`;
 
     for (const slide of job.slides) {
+      const idx = slide.slideNumber - 1;
       if (slide.ok && slide.url) {
-        const idx = slide.slideNumber - 1;
         if (!generatedImages[idx]) invalidateMediaLibrary();
         generatedImages[idx] = { url: slide.url, filename: slide.filename, isVideo: slide.isVideo || false, textPositions: slide.textPositions, rawFilename: slide.rawFilename || null };
+        delete failedSlides[idx];
         persistSlideImage(idx, slide.url);
+      } else if (!slide.ok) {
+        failedSlides[idx] = slide.error || 'Generation failed';
       }
     }
     renderSlideTabs();
@@ -4990,6 +4995,12 @@ function updateGallery() {
       html += `<span class="thumb-num">${i + 1}</span>`;
       html += `<button class="thumb-download" data-filename="${gen.filename}" title="Download">&#8681;</button>`;
       html += `</div>`;
+    } else if (failedSlides[i] !== undefined) {
+      html += `<div class="gallery-thumb failed" data-index="${i}" title="${failedSlides[i]}">`;
+      html += `<span class="thumb-error">!</span>`;
+      html += `<span class="thumb-num">${i + 1}</span>`;
+      html += `<button class="thumb-retry" data-index="${i}" title="Retry">&#8635;</button>`;
+      html += `</div>`;
     } else {
       html += `<div class="gallery-thumb empty" data-index="${i}">`;
       html += `<span class="thumb-num">${i + 1}</span>`;
@@ -5000,7 +5011,7 @@ function updateGallery() {
 
   galleryStrip.querySelectorAll('.gallery-thumb').forEach((thumb) => {
     thumb.addEventListener('click', (e) => {
-      if (e.target.classList.contains('thumb-download')) return;
+      if (e.target.classList.contains('thumb-download') || e.target.classList.contains('thumb-retry')) return;
       saveCurrentSlideEdits();
       const idx = parseInt(thumb.dataset.index);
       currentSlideIndex = idx;
@@ -5020,6 +5031,21 @@ function updateGallery() {
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
+    });
+  });
+
+  galleryStrip.querySelectorAll('.thumb-retry').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const idx = parseInt(btn.dataset.index);
+      delete failedSlides[idx];
+      saveCurrentSlideEdits();
+      currentSlideIndex = idx;
+      renderSlideTabs();
+      loadSlideIntoForm(idx);
+      updatePreviewMockup();
+      updateGallery();
+      form.requestSubmit();
     });
   });
 
