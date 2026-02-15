@@ -3996,6 +3996,7 @@ button.brand-edit-btn {
 .meme-preview {
   display: flex;
   flex-direction: column;
+  align-items: center;
 }
 
 .meme-preview-container {
@@ -4006,17 +4007,46 @@ button.brand-edit-btn {
   align-items: center;
   justify-content: center;
   overflow: hidden;
+  position: relative;
+  width: 100%;
+  max-width: 400px;
   aspect-ratio: 1 / 1;
-  max-height: 500px;
-  transition: aspect-ratio 0.3s ease;
+  transition: aspect-ratio 0.25s ease;
 }
 
-.meme-preview-container img {
+.meme-preview-container > img {
   width: 100%;
   height: 100%;
   object-fit: contain;
   display: block;
   border-radius: 10px;
+}
+
+.meme-icon-preview {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  opacity: 0.5;
+  pointer-events: none;
+  padding: 8px;
+  z-index: 2;
+}
+
+.meme-icon-preview img {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+}
+
+.meme-icon-preview span {
+  font-size: 11px;
+  font-weight: 600;
+  color: white;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.5);
+  text-align: center;
+  white-space: nowrap;
 }
 
 .meme-placeholder {

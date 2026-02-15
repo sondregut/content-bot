@@ -503,6 +503,8 @@ const mockupPhotoPlaceholder = document.getElementById('mockup-photo-placeholder
 const mockupIconImg = document.getElementById('mockup-icon-img');
 const mockupTextGroup = document.getElementById('mockup-text-group');
 const mockupTextReset = document.getElementById('mockup-text-reset');
+let brandIconUrl = null;
+let brandIconAvailable = false;
 
 // Preview image overlay refs
 const previewImageOverlay = document.getElementById('preview-image-overlay');
@@ -3828,28 +3830,40 @@ document.addEventListener('mousedown', (e) => {
 // --- Icon Upload & Corner Picker ---
 async function updateIconPreview() {
   if (!currentBrand) {
+    brandIconUrl = null;
+    brandIconAvailable = false;
     iconPreviewImg.style.display = 'none';
     mockupIconImg.style.display = 'none';
+    updateMemeIconPreview();
     return;
   }
   const iconUrl = `/brands/${currentBrand}/assets/app-icon.png?t=${Date.now()}`;
   try {
     const res = await fetch(iconUrl, { method: 'HEAD' });
     if (!res.ok || res.status === 204) {
+      brandIconUrl = null;
+      brandIconAvailable = false;
       iconPreviewImg.style.display = 'none';
       mockupIconImg.style.display = 'none';
+      updateMemeIconPreview();
       return;
     }
   } catch {
+    brandIconUrl = null;
+    brandIconAvailable = false;
     iconPreviewImg.style.display = 'none';
     mockupIconImg.style.display = 'none';
+    updateMemeIconPreview();
     return;
   }
+  brandIconUrl = iconUrl;
+  brandIconAvailable = true;
   iconPreviewImg.src = iconUrl;
   mockupIconImg.src = iconUrl;
   iconPreviewImg.style.display = 'block';
   const showWatermark = form.elements.includeOwl?.checked ?? true;
   mockupIconImg.style.display = showWatermark ? 'block' : 'none';
+  updateMemeIconPreview();
 }
 
 iconUploadBtn.addEventListener('click', () => iconFileInput.click());
@@ -4806,18 +4820,64 @@ const downloadMemeBtn = document.getElementById('download-meme-btn');
 const memeIncludeIcon = document.getElementById('meme-include-icon');
 const memeIconPosition = document.getElementById('meme-icon-position');
 const memeIconPositionGroup = document.getElementById('meme-icon-position-group');
+const memeIconPreview = document.getElementById('meme-icon-preview');
+const memeIconPreviewImg = document.getElementById('meme-icon-preview-img');
+const memeIconPreviewText = document.getElementById('meme-icon-preview-text');
 let memeFilename = null;
 
-memeIncludeIcon.addEventListener('change', () => {
+function updateMemeIconControls() {
   memeIconPositionGroup.style.opacity = memeIncludeIcon.checked ? '1' : '0.4';
   memeIconPosition.disabled = !memeIncludeIcon.checked;
-});
+  updateMemeIconPreview();
+}
+
+memeIncludeIcon.addEventListener('change', updateMemeIconControls);
+memeIconPosition.addEventListener('change', updateMemeIconPreview);
 
 const memePreviewContainer = document.getElementById('meme-preview-container');
-const MEME_ASPECT_RATIOS = { '1:1': '1 / 1', '4:5': '4 / 5', '9:16': '9 / 16', '16:9': '16 / 9' };
-memeAspectRatio.addEventListener('change', () => {
-  memePreviewContainer.style.aspectRatio = MEME_ASPECT_RATIOS[memeAspectRatio.value] || '1 / 1';
-});
+const MEME_DIMENSIONS = {
+  '1:1': { width: 400, height: 400 },
+  '4:5': { width: 320, height: 400 },
+  '9:16': { width: 225, height: 400 },
+  '16:9': { width: 400, height: 225 },
+};
+
+function updateMemePreviewAspect() {
+  if (!memePreviewContainer) return;
+  const dims = MEME_DIMENSIONS[memeAspectRatio.value] || MEME_DIMENSIONS['1:1'];
+  memePreviewContainer.style.width = dims.width + 'px';
+  memePreviewContainer.style.height = dims.height + 'px';
+}
+memeAspectRatio.addEventListener('change', updateMemePreviewAspect);
+updateMemePreviewAspect();
+
+function updateMemeIconPreview() {
+  if (!memeIconPreview || !memeIconPreviewImg || !memeIconPreviewText) return;
+  if (!currentBrand || !memeIncludeIcon.checked) {
+    memeIconPreview.style.display = 'none';
+    return;
+  }
+
+  const brand = brands.find(b => b.id === currentBrand);
+  memeIconPreviewText.textContent = brand?.iconOverlayText || '';
+
+  const pos = memeIconPosition.value || 'bottom-right';
+  memeIconPreview.style.top = pos.includes('top') ? '8px' : '';
+  memeIconPreview.style.bottom = pos.includes('bottom') ? '8px' : '';
+  memeIconPreview.style.left = pos.includes('left') ? '8px' : '';
+  memeIconPreview.style.right = pos.includes('right') ? '8px' : '';
+
+  if (brandIconAvailable && brandIconUrl) {
+    memeIconPreviewImg.src = brandIconUrl;
+    memeIconPreviewImg.style.display = 'block';
+    memeIconPreview.style.display = 'flex';
+  } else {
+    memeIconPreviewImg.style.display = 'none';
+    memeIconPreview.style.display = memeIconPreviewText.textContent ? 'flex' : 'none';
+  }
+}
+
+updateMemeIconControls();
 
 function openMemeView() {
   emptyState.style.display = 'none';
@@ -4826,6 +4886,10 @@ function openMemeView() {
   document.getElementById('content-plan-view').style.display = 'none';
   if (document.getElementById('media-library-view')) document.getElementById('media-library-view').style.display = 'none';
   memeView.style.display = 'block';
+  updateMemePreviewAspect();
+  updateMemeIconPreview();
+  updateMemePreviewAspect();
+  updateMemeIconPreview();
 }
 
 function closeMemeView() {
