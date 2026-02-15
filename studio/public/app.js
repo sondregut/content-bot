@@ -14,6 +14,15 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
+// --- Persist slide image URL to Firestore content idea ---
+function persistSlideImage(slideIndex, imageUrl) {
+  if (!selectedIdea?.id || !currentBrand) return;
+  authFetch(`/api/content-ideas/${selectedIdea.id}/slides/${slideIndex}/image?brand=${currentBrand}`, {
+    method: 'PUT',
+    body: JSON.stringify({ imageUrl }),
+  }).catch(err => console.warn('[Persist slide image]', err.message));
+}
+
 // --- Slide AI detection ---
 function slideNeedsAI(slideType, imageUsage) {
   if (slideType === 'photo' || slideType === 'video') return true;
@@ -3888,6 +3897,7 @@ async function regenerateMockup() {
     if (!res.ok) throw new Error(data.error || 'Generation failed');
 
     generatedImages[currentSlideIndex] = { url: data.url, filename: data.filename, textPositions: data.textPositions };
+    persistSlideImage(currentSlideIndex, data.url);
     previewImg.src = data.url;
     previewImg.style.display = 'block';
     statusEl.textContent = `Slide ${currentSlideIndex + 1} done.`;
@@ -4391,6 +4401,7 @@ form.addEventListener('submit', async (e) => {
         const job = await pollRes.json();
         if (job.status === 'done') {
           generatedImages[slideIndex] = { url: job.url, filename: job.filename, isVideo: true, rawFilename: job.rawFilename || null };
+          persistSlideImage(slideIndex, job.url);
           if (currentSlideIndex === slideIndex) {
             previewImg.style.display = 'none';
             previewVideo.src = job.url;
@@ -4415,6 +4426,7 @@ form.addEventListener('submit', async (e) => {
     } else {
       // Synchronous result (images, ken-burns, etc.)
       generatedImages[slideIndex] = { url: data.url, filename: data.filename, isVideo: data.isVideo || false, textPositions: data.textPositions, rawFilename: data.rawFilename || null };
+      persistSlideImage(slideIndex, data.url);
 
       if (currentSlideIndex === slideIndex) {
         if (data.isVideo) {
@@ -4496,6 +4508,7 @@ applyEditBtn.addEventListener('click', async () => {
     if (!res.ok) throw new Error(data.error || 'Edit failed');
 
     generatedImages[slideIndex] = { url: data.url, filename: data.filename };
+    persistSlideImage(slideIndex, data.url);
 
     if (currentSlideIndex === slideIndex) {
       previewImg.src = data.url;
@@ -4572,6 +4585,7 @@ downloadSingleBtn.addEventListener('click', async () => {
     if (!res.ok) throw new Error(data.error || 'Render failed');
 
     generatedImages[slideIndex] = { url: data.url, filename: data.filename, isVideo: false, textPositions: data.textPositions };
+    persistSlideImage(slideIndex, data.url);
     renderSlideTabs();
 
     const a = document.createElement('a');
@@ -4682,6 +4696,7 @@ async function pollBatchStatus() {
         const idx = slide.slideNumber - 1;
         if (!generatedImages[idx]) invalidateMediaLibrary();
         generatedImages[idx] = { url: slide.url, filename: slide.filename, isVideo: slide.isVideo || false, textPositions: slide.textPositions, rawFilename: slide.rawFilename || null };
+        persistSlideImage(idx, slide.url);
       }
     }
     renderSlideTabs();

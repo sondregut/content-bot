@@ -3779,6 +3779,29 @@ app.get('/api/content-ideas', requireAuth, async (req, res) => {
   }
 });
 
+// Persist a generated image URL on a content idea slide
+app.put('/api/content-ideas/:ideaId/slides/:slideIndex/image', requireAuth, async (req, res) => {
+  try {
+    const brandId = req.query.brand;
+    if (!brandId) return res.status(400).json({ error: 'brand is required' });
+    const { imageUrl } = req.body || {};
+    if (!imageUrl) return res.status(400).json({ error: 'imageUrl is required' });
+    const brand = await getBrandAsync(brandId, req.user?.uid);
+    if (brand.id === 'generic') return res.status(403).json({ error: 'Cannot modify generic brand' });
+    const stored = brand.contentIdeas || [];
+    const idea = stored.find(i => i.id === req.params.ideaId);
+    if (!idea) return res.status(404).json({ error: 'Idea not found' });
+    const idx = parseInt(req.params.slideIndex);
+    if (!idea.slides || idx < 0 || idx >= idea.slides.length) return res.status(400).json({ error: 'Invalid slide index' });
+    idea.slides[idx].imageUrl = imageUrl;
+    await updateBrandFields(brandId, { contentIdeas: stored });
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('[Persist Slide Image]', error);
+    res.status(500).json({ error: safeErrorMessage(error) });
+  }
+});
+
 // Delete a content idea
 app.delete('/api/content-ideas/:ideaId', requireAuth, async (req, res) => {
   try {
