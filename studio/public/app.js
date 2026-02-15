@@ -2468,6 +2468,15 @@ function selectIdea(ideaId) {
   batchJobId = null;
   slideReferenceImages = {};
 
+  // Restore generated images from persisted slide imageUrl (e.g. from brand setup)
+  if (Object.keys(generatedImages).length === 0 && idea.slides) {
+    idea.slides.forEach((slide, i) => {
+      if (slide.imageUrl) {
+        generatedImages[i] = { url: slide.imageUrl };
+      }
+    });
+  }
+
   slideEdits = idea.slides.map((slide) => ({ ...slide }));
 
   emptyState.style.display = 'none';

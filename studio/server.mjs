@@ -2684,9 +2684,9 @@ app.delete('/api/brands/:id', requireAuth, async (req, res) => {
         try { await bucket.file(photo.storagePath).delete(); } catch (e) { /* ignore */ }
       }
     }
-    // Clean up background images from disk
+    // Clean up background images from disk (fire and forget)
     const brandBgDir = path.join(backgroundsDir, req.params.id);
-    try { await fs.rm(brandBgDir, { recursive: true, force: true }); } catch (e) { /* ignore */ }
+    fs.rm(brandBgDir, { recursive: true, force: true }).catch(() => {});
     res.json({ ok: true });
   } catch (err) {
     console.error('[Delete Brand]', err);
@@ -3325,6 +3325,7 @@ app.post('/api/brands/full-setup', requireAuth, async (req, res) => {
 
     const brand = { id: brandId, ...brandData };
     const hasImageKey = getOpenAI(req) || getGemini(req);
+    const slideImages = {};
     if (contentIdeas.length > 0 && hasImageKey) {
       const firstIdea = contentIdeas[0];
       const slides = firstIdea.slides || [];
@@ -3358,6 +3359,7 @@ app.post('/api/brands/full-setup', requireAuth, async (req, res) => {
               const slideUrl = await uploadToStorage(buffer, filename);
               saveImageRecord({ userId: req.user.uid, brandId, filename, type: 'carousel', prompt: rawPrompt, refinedPrompt, model: req.body?.imageModel, brandName: brand.name, width: 1080, height: 1920 });
               sendSSE('slide', { index: i, imageUrl: slideUrl, type: 'ai' });
+              slideImages[i] = slideUrl;
             } catch (imgErr) {
               console.warn(`[Full Setup] Slide ${i + 1} image failed:`, imgErr.message);
             }
@@ -3381,12 +3383,23 @@ app.post('/api/brands/full-setup', requireAuth, async (req, res) => {
             const slideUrl = await uploadToStorage(mockupBuffer, filename);
             saveImageRecord({ userId: req.user.uid, brandId, filename, type: 'carousel', brandName: brand.name, width: 1080, height: 1920 });
             sendSSE('slide', { index: i, imageUrl: slideUrl, type: 'mockup' });
+            slideImages[i] = slideUrl;
           }
         } catch (slideErr) {
           console.warn(`[Full Setup] Slide ${i + 1} failed:`, slideErr.message);
           sendSSE('slide-error', { index: i, message: slideErr.message });
         }
       }
+    }
+
+    // Persist generated image URLs back into content ideas so they survive refresh
+    if (Object.keys(slideImages).length > 0) {
+      for (const [idx, url] of Object.entries(slideImages)) {
+        if (formattedIdeas[0] && formattedIdeas[0].slides[idx]) {
+          formattedIdeas[0].slides[idx].imageUrl = url;
+        }
+      }
+      await updateBrandFields(brandId, { contentIdeas: formattedIdeas });
     }
 
     sendSSE('done', { brandId });
