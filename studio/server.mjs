@@ -5098,9 +5098,11 @@ Rules:
     // Parse JSON from response (handle potential markdown wrapping)
     let parsed;
     try {
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      parsed = JSON.parse(jsonMatch ? jsonMatch[0] : text);
-    } catch {
+      let cleaned = text.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
+      const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+      parsed = JSON.parse(jsonMatch ? jsonMatch[0] : cleaned);
+    } catch (parseErr) {
+      console.error('[Freeform] JSON parse failed. Raw (first 500):', text?.slice(0, 500));
       throw new Error('Failed to parse AI response as JSON');
     }
 
@@ -5271,9 +5273,11 @@ Rules:
 
     let parsed;
     try {
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      parsed = JSON.parse(jsonMatch ? jsonMatch[0] : text);
-    } catch {
+      let cleaned = text.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
+      const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+      parsed = JSON.parse(jsonMatch ? jsonMatch[0] : cleaned);
+    } catch (parseErr) {
+      console.error('[Content Ideas] JSON parse failed. Raw (first 500):', text?.slice(0, 500));
       throw new Error('Failed to parse AI response as JSON');
     }
 
