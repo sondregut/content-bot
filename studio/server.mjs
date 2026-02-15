@@ -2754,7 +2754,7 @@ app.get('/api/brands', requireAuth, async (req, res) => {
 // Create a new brand
 app.post('/api/brands', requireAuth, async (req, res) => {
   try {
-    const { name, website, colors, systemPrompt, defaultMicroLabel, defaultBackground, iconOverlayText, contentPillars, contentIdeaPrompt } = req.body;
+    const { name, website, colors, systemPrompt, defaultMicroLabel, defaultBackground, iconOverlayText, contentPillars, contentIdeaPrompt, fontFamily, imageStyle } = req.body;
     if (!name || !colors) return res.status(400).json({ error: 'Name and colors are required' });
     if (name.length > 100) return res.status(400).json({ error: 'Name too long (max 100 chars)' });
     const hexRe = /^#[0-9a-fA-F]{3,8}$/;
@@ -2783,6 +2783,8 @@ app.post('/api/brands', requireAuth, async (req, res) => {
       iconOverlayText: iconOverlayText || website || '',
       contentPillars: contentPillars || [],
       contentIdeaPrompt: contentIdeaPrompt || '',
+      imageStyle: imageStyle || '',
+      fontFamily: fontFamily || 'Helvetica',
       createdBy: req.user.uid,
     };
     if (db) {
@@ -2811,13 +2813,15 @@ app.put('/api/brands/:id', requireAuth, async (req, res) => {
     if (req.body.defaultMicroLabel && req.body.defaultMicroLabel.length > 500) return res.status(400).json({ error: 'Micro label too long (max 500 chars)' });
     if (req.body.defaultBackground && req.body.defaultBackground.length > 500) return res.status(400).json({ error: 'Background description too long (max 500 chars)' });
     if (req.body.iconOverlayText && req.body.iconOverlayText.length > 500) return res.status(400).json({ error: 'Icon overlay text too long (max 500 chars)' });
+    const ALLOWED_FONTS = ['Helvetica', 'Arial', 'Georgia', 'Times New Roman', 'Courier', 'Impact'];
+    if (req.body.fontFamily && !ALLOWED_FONTS.includes(req.body.fontFamily)) return res.status(400).json({ error: `Invalid font family. Allowed: ${ALLOWED_FONTS.join(', ')}` });
     if (req.body.colors && typeof req.body.colors === 'object') {
       const hexRe = /^#[0-9a-fA-F]{3,8}$/;
       for (const [key, val] of Object.entries(req.body.colors)) {
         if (val && !hexRe.test(val)) return res.status(400).json({ error: `Invalid color for ${key}: must be a hex color (e.g. #FF6B35)` });
       }
     }
-    const allowedKeys = ['name', 'website', 'colors', 'systemPrompt', 'defaultMicroLabel', 'defaultBackground', 'iconOverlayText', 'contentPillars', 'contentIdeaPrompt', 'productKnowledge', 'iconStorageUrl'];
+    const allowedKeys = ['name', 'website', 'colors', 'systemPrompt', 'defaultMicroLabel', 'defaultBackground', 'iconOverlayText', 'contentPillars', 'contentIdeaPrompt', 'productKnowledge', 'iconStorageUrl', 'imageStyle', 'fontFamily'];
     if (db) {
       const doc = await db.collection('carousel_brands').doc(req.params.id).get();
       if (!doc.exists) return res.status(404).json({ error: 'Brand not found' });
@@ -2936,7 +2940,7 @@ app.delete('/api/account', requireAuth, async (req, res) => {
 });
 
 // --- Shared brand config prompt builder ---
-function buildBrandConfigPrompt({ url, pageTitle, metaDesc, ogSiteName, ogImage, themeColor, extractedColors, textContent, name, description }) {
+function buildBrandConfigPrompt({ url, pageTitle, metaDesc, ogSiteName, ogImage, themeColor, extractedColors, extractedFonts, textContent, name, description }) {
   const contextLines = [];
   if (url) contextLines.push(`Page URL: ${url}`);
   if (pageTitle) contextLines.push(`Page title: ${pageTitle}`);
@@ -2948,6 +2952,9 @@ function buildBrandConfigPrompt({ url, pageTitle, metaDesc, ogSiteName, ogImage,
   if (description) contextLines.push(`Brand description: ${description}`);
   if (extractedColors?.length) {
     contextLines.push(`CSS colors extracted from the website (sorted by frequency, most used first): ${extractedColors.join(', ')}`);
+  }
+  if (extractedFonts?.length) {
+    contextLines.push(`Fonts detected on website (by frequency): ${extractedFonts.join(', ')}`);
   }
   if (textContent) contextLines.push(`Page text (first 3000 chars): ${textContent}`);
 
@@ -2978,7 +2985,8 @@ Return ONLY valid JSON (no markdown, no code fences) with:
 - tone: 2-3 word tone description (e.g. "bold, energetic")
 - microLabel: short uppercase label for slides (e.g. "MYBRAND")
 - watermarkText: website domain for watermark (e.g. "mybrand.com")
-- contentPillars: array of 4-5 content theme strings suited to this brand`;
+- contentPillars: array of 4-5 content theme strings suited to this brand
+- fontFamily: one of "Helvetica", "Arial", "Georgia", "Times New Roman", "Courier", "Impact" — pick the closest system font match to the website's primary font. Mapping: serif fonts → "Georgia" or "Times New Roman", monospace → "Courier", display/bold/impact → "Impact", clean sans-serif → "Helvetica" or "Arial". Default to "Helvetica" if no fonts detected`;
 }
 
 // --- Shared content ideas prompt builder ---
@@ -3262,6 +3270,21 @@ app.post('/api/brands/full-setup', requireAuth, async (req, res) => {
     }
     sendSSE('colors', { extracted: extractedColors.slice(0, 10) });
 
+    // Extract font-family declarations from CSS
+    const fontRegex = /font-family:\s*([^;}]+)/gi;
+    const fontFreq = {};
+    let fontMatch;
+    while ((fontMatch = fontRegex.exec(allCssSources)) !== null) {
+      const firstFont = fontMatch[1].split(',')[0].trim().replace(/["']/g, '');
+      if (firstFont && !['inherit', 'initial', 'unset'].includes(firstFont.toLowerCase())) {
+        fontFreq[firstFont] = (fontFreq[firstFont] || 0) + 1;
+      }
+    }
+    const extractedFonts = Object.entries(fontFreq)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([f]) => f);
+
     // Step 4: Fetch icon
     sendSSE('status', { step: 'icon', message: 'Finding icon...' });
 
@@ -3379,7 +3402,7 @@ app.post('/api/brands/full-setup', requireAuth, async (req, res) => {
         system: BRAND_STRATEGIST_SYSTEM,
         messages: [{
           role: 'user',
-          content: buildBrandConfigPrompt({ url: finalUrl, pageTitle, metaDesc, ogSiteName, ogImage, themeColor, extractedColors, textContent }),
+          content: buildBrandConfigPrompt({ url: finalUrl, pageTitle, metaDesc, ogSiteName, ogImage, themeColor, extractedColors, extractedFonts, textContent }),
         }],
         maxTokens: 2048,
         req,
@@ -3418,6 +3441,7 @@ app.post('/api/brands/full-setup', requireAuth, async (req, res) => {
       iconOverlayText: brandConfig.watermarkText || new URL(finalUrl).hostname.replace(/^www\./, ''),
       contentPillars: brandConfig.contentPillars || [],
       productKnowledge: brandConfig.productKnowledge || '',
+      fontFamily: brandConfig.fontFamily || 'Helvetica',
       createdBy: req.user.uid,
     };
 
@@ -3819,6 +3843,21 @@ app.post('/api/brands/analyze-website', requireAuth, async (req, res) => {
     }
     const extractedColors = Object.entries(colorFreq).sort((a, b) => b[1] - a[1]).slice(0, 15).map(([c]) => c);
 
+    // Extract font-family declarations from CSS
+    const fontRegex2 = /font-family:\s*([^;}]+)/gi;
+    const fontFreq2 = {};
+    let fontMatch2;
+    while ((fontMatch2 = fontRegex2.exec(allCssSources)) !== null) {
+      const firstFont = fontMatch2[1].split(',')[0].trim().replace(/["']/g, '');
+      if (firstFont && !['inherit', 'initial', 'unset'].includes(firstFont.toLowerCase())) {
+        fontFreq2[firstFont] = (fontFreq2[firstFont] || 0) + 1;
+      }
+    }
+    const extractedFonts = Object.entries(fontFreq2)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([f]) => f);
+
     // Extract text content
     const textContent = html
       .replace(/<script[\s\S]*?<\/script>/gi, '')
@@ -3912,7 +3951,7 @@ app.post('/api/brands/analyze-website', requireAuth, async (req, res) => {
       system: BRAND_STRATEGIST_SYSTEM,
       messages: [{
         role: 'user',
-        content: buildBrandConfigPrompt({ url: finalUrl, pageTitle, metaDesc, ogSiteName, ogImage, themeColor, extractedColors, textContent }),
+        content: buildBrandConfigPrompt({ url: finalUrl, pageTitle, metaDesc, ogSiteName, ogImage, themeColor, extractedColors, extractedFonts, textContent }),
       }],
       maxTokens: 2048,
       req,

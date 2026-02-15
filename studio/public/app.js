@@ -1375,6 +1375,8 @@ function openBrandModal(brand = null) {
   document.getElementById('brand-micro-label').value = brand?.defaultMicroLabel || '';
   document.getElementById('brand-watermark').value = brand?.iconOverlayText || '';
   document.getElementById('brand-bg-desc').value = brand?.defaultBackground || '';
+  const brandFontSelect = document.getElementById('brand-font-family');
+  if (brandFontSelect) brandFontSelect.value = brand?.fontFamily || 'Helvetica';
   brandModalStatus.textContent = '';
   brandAiStatus.textContent = brand ? '' : 'Paste a URL to auto-setup';
   brandDeleteBtn.style.display = brand ? 'inline-block' : 'none';
@@ -1972,6 +1974,7 @@ function handleCreationEvent(event, data) {
       if (data.tone) html += `<div class="config-field"><span class="config-label">Tone</span>${data.tone}</div>`;
       if (data.imageStyle) html += `<div class="config-field"><span class="config-label">Image Style</span>${data.imageStyle}</div>`;
       if (data.defaultBackground) html += `<div class="config-field"><span class="config-label">Background</span>${data.defaultBackground}</div>`;
+      if (data.fontFamily && data.fontFamily !== 'Helvetica') html += `<div class="config-field"><span class="config-label">Font</span>${data.fontFamily}</div>`;
       if (data.contentPillars?.length) html += `<div class="config-field"><span class="config-label">Content Pillars</span>${data.contentPillars.join(' &middot; ')}</div>`;
       content.innerHTML = html;
       section.style.display = 'block';
@@ -2464,6 +2467,7 @@ brandSaveBtn.addEventListener('click', async () => {
     defaultMicroLabel: document.getElementById('brand-micro-label').value.trim() || name.toUpperCase(),
     defaultBackground: document.getElementById('brand-bg-desc').value.trim() || DEFAULT_BACKGROUND,
     iconOverlayText: document.getElementById('brand-watermark').value.trim() || brandWebsiteInput.value.trim(),
+    fontFamily: document.getElementById('brand-font-family')?.value || 'Helvetica',
   };
   if (pendingContentPillars) payload.contentPillars = pendingContentPillars;
   brandSaveBtn.disabled = true;
@@ -3100,7 +3104,7 @@ function loadSlideIntoForm(index) {
 
   // New mockup controls
   if (form.elements.aspectRatio) form.elements.aspectRatio.value = slide.aspectRatio || '9:16';
-  if (form.elements.mockupFont) form.elements.mockupFont.value = slide.fontFamily || 'Helvetica';
+  if (form.elements.mockupFont) form.elements.mockupFont.value = slide.fontFamily || brands.find(b => b.id === currentBrand)?.fontFamily || 'Helvetica';
   if (form.elements.overlayDarken) {
     form.elements.overlayDarken.value = Math.round((slide.overlayDarken || 0) * 100);
     const darkenLabel = document.getElementById('darkenValue');
@@ -4631,7 +4635,7 @@ function buildSlidePayload(slide, slideIndex) {
     payload.iconOffsetY = slide.iconOffsetY || 0;
     // New controls
     payload.aspectRatio = slide.aspectRatio || form.elements.aspectRatio?.value || '9:16';
-    payload.fontFamily = slide.fontFamily || form.elements.mockupFont?.value || 'Helvetica';
+    payload.fontFamily = slide.fontFamily || form.elements.mockupFont?.value || brands.find(b => b.id === currentBrand)?.fontFamily || 'Helvetica';
     payload.overlayDarken = slide.overlayDarken || 0;
     payload.headlineFontSize = slide.headlineFontSize || parseInt(form.elements.headlineFontSize?.value) || 82;
     payload.bodyFontSize = slide.bodyFontSize || parseInt(form.elements.bodyFontSize?.value) || 34;
@@ -4661,7 +4665,7 @@ function buildSlidePayload(slide, slideIndex) {
     }
     payload.headlineFontSize = slide.headlineFontSize || parseInt(form.elements.headlineFontSize?.value) || 82;
     payload.bodyFontSize = slide.bodyFontSize || parseInt(form.elements.bodyFontSize?.value) || 34;
-    payload.fontFamily = slide.fontFamily || form.elements.mockupFont?.value || 'Helvetica';
+    payload.fontFamily = slide.fontFamily || form.elements.mockupFont?.value || brands.find(b => b.id === currentBrand)?.fontFamily || 'Helvetica';
   } else {
     payload.backgroundStyle = form.elements.backgroundStyle?.value || 'dark premium navy/near-black with very subtle grain';
     payload.layoutTemplate = form.elements.layoutTemplate?.value || 'Layout A - Classic Left Lane';
