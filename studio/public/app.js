@@ -2273,6 +2273,9 @@ function renderSidebar() {
       html += `<span class="idea-name">${escapeHtml(idea.title)}</span>`;
       const isVideo = idea.slides.length === 1 && idea.slides[0].type === 'video';
       html += `<span class="idea-slides-count">${isVideo ? '&#9654;' : idea.slides.length + 's'}</span>`;
+      if (idea.id?.startsWith('AI-')) {
+        html += `<button class="idea-delete-btn" data-idea-id="${escapeHtml(idea.id)}" title="Delete idea">&times;</button>`;
+      }
       html += `</div>`;
     }
     html += `</div>`;
@@ -2282,7 +2285,34 @@ function renderSidebar() {
   ideaCount.textContent = `${totalIdeas} ideas`;
 
   sidebar.querySelectorAll('.idea-item').forEach((el) => {
-    el.addEventListener('click', () => selectIdea(el.dataset.ideaId));
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('.idea-delete-btn')) return;
+      selectIdea(el.dataset.ideaId);
+    });
+  });
+
+  sidebar.querySelectorAll('.idea-delete-btn').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const ideaId = btn.dataset.ideaId;
+      if (!confirm('Delete this content idea?')) return;
+      try {
+        const res = await authFetch(`/api/content-ideas/${ideaId}?brand=${currentBrand}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        if (selectedIdea === ideaId) {
+          selectedIdea = null;
+          slideEdits = [];
+          generatedImages = {};
+          currentSlideIndex = 0;
+          editorArea.style.display = 'none';
+          emptyState.style.display = 'flex';
+        }
+        await loadContentIdeas();
+      } catch (err) {
+        alert('Failed to delete idea: ' + err.message);
+      }
+    });
   });
 
   // Add "Generate Ideas" / "Generate More" section

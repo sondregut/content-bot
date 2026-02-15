@@ -2684,6 +2684,9 @@ app.delete('/api/brands/:id', requireAuth, async (req, res) => {
         try { await bucket.file(photo.storagePath).delete(); } catch (e) { /* ignore */ }
       }
     }
+    // Clean up background images from disk
+    const brandBgDir = path.join(backgroundsDir, req.params.id);
+    try { await fs.rm(brandBgDir, { recursive: true, force: true }); } catch (e) { /* ignore */ }
     res.json({ ok: true });
   } catch (err) {
     console.error('[Delete Brand]', err);
@@ -3726,6 +3729,24 @@ app.get('/api/content-ideas', requireAuth, async (req, res) => {
     }
   } catch (error) {
     console.error('[Content Ideas]', error);
+    res.status(500).json({ error: safeErrorMessage(error) });
+  }
+});
+
+// Delete a content idea
+app.delete('/api/content-ideas/:ideaId', requireAuth, async (req, res) => {
+  try {
+    const brandId = req.query.brand;
+    if (!brandId) return res.status(400).json({ error: 'brand is required' });
+    const brand = await getBrandAsync(brandId, req.user?.uid);
+    if (brand.id === 'generic') return res.status(403).json({ error: 'Cannot modify generic brand' });
+    const stored = brand.contentIdeas || [];
+    const filtered = stored.filter(idea => idea.id !== req.params.ideaId);
+    if (filtered.length === stored.length) return res.status(404).json({ error: 'Idea not found' });
+    await updateBrandFields(brandId, { contentIdeas: filtered });
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('[Delete Content Idea]', error);
     res.status(500).json({ error: safeErrorMessage(error) });
   }
 });
