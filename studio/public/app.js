@@ -4086,6 +4086,10 @@ function buildSlidePayload(slide, slideIndex) {
       payload.mood = slide.kbMood || form.elements.kbMood?.value || '';
       payload.duration = slide.duration || parseInt(form.elements.kbDuration?.value) || 5;
       payload.videoTextOverlay = form.elements.kbTextOverlay?.checked ?? true;
+      payload.imageModel = getSelectedImageModel();
+      payload.textModel = getSelectedTextModel();
+      payload.includeOwl = true;
+      payload.owlPosition = 'bottom-right';
     } else {
       payload.videoModel = getSelectedVideoModel();
       payload.scene = slide.scene || form.elements.videoScene?.value || '';
