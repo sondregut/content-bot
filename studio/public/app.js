@@ -4096,32 +4096,71 @@ form.addEventListener('submit', async (e) => {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Generation failed');
 
-    generatedImages[slideIndex] = { url: data.url, filename: data.filename, isVideo: data.isVideo || false, textPositions: data.textPositions };
-
-    // Only update UI if still viewing this slide
-    if (currentSlideIndex === slideIndex) {
-      if (data.isVideo) {
-        previewImg.style.display = 'none';
-        previewVideo.src = data.url;
-        previewVideo.style.display = 'block';
-      } else {
-        previewVideo.style.display = 'none';
-        previewImg.src = data.url;
-        previewImg.style.display = 'block';
+    // Async video generation — poll for completion
+    if (data.async && data.videoJobId) {
+      const jobId = data.videoJobId;
+      let elapsed = 0;
+      while (true) {
+        if (signal.aborted) return;
+        await new Promise(r => setTimeout(r, 3000));
+        elapsed += 3;
+        if (currentSlideIndex === slideIndex) {
+          spinnerText.textContent = `Generating video... (${elapsed}s)`;
+        }
+        const pollRes = await authFetch(`/api/video-status/${jobId}`, { signal });
+        if (!pollRes.ok) continue;
+        const job = await pollRes.json();
+        if (job.status === 'done') {
+          generatedImages[slideIndex] = { url: job.url, filename: job.filename, isVideo: true };
+          if (currentSlideIndex === slideIndex) {
+            previewImg.style.display = 'none';
+            previewVideo.src = job.url;
+            previewVideo.style.display = 'block';
+            downloadButtons.style.display = 'flex';
+            statusEl.textContent = job.refinedPrompt
+              ? `Video done (Claude-refined).`
+              : `Video done.`;
+            setPreviewMode('generated');
+          }
+          renderSlideTabs();
+          updateGallery();
+          updateEditSection();
+          saveSession();
+          invalidateMediaLibrary();
+          break;
+        }
+        if (job.status === 'error') {
+          throw new Error(job.error || 'Video generation failed');
+        }
       }
-      downloadButtons.style.display = 'flex';
-      statusEl.textContent = data.usedRefined
-        ? `Slide ${slideIndex + 1} done (Claude-refined).`
-        : `Slide ${slideIndex + 1} done.`;
-      setPreviewMode('generated');
-      updatePreviewDragOverlay();
-    }
+    } else {
+      // Synchronous result (images, ken-burns, etc.)
+      generatedImages[slideIndex] = { url: data.url, filename: data.filename, isVideo: data.isVideo || false, textPositions: data.textPositions };
 
-    renderSlideTabs();
-    updateGallery();
-    updateEditSection();
-    saveSession();
-    invalidateMediaLibrary();
+      if (currentSlideIndex === slideIndex) {
+        if (data.isVideo) {
+          previewImg.style.display = 'none';
+          previewVideo.src = data.url;
+          previewVideo.style.display = 'block';
+        } else {
+          previewVideo.style.display = 'none';
+          previewImg.src = data.url;
+          previewImg.style.display = 'block';
+        }
+        downloadButtons.style.display = 'flex';
+        statusEl.textContent = data.usedRefined
+          ? `Slide ${slideIndex + 1} done (Claude-refined).`
+          : `Slide ${slideIndex + 1} done.`;
+        setPreviewMode('generated');
+        updatePreviewDragOverlay();
+      }
+
+      renderSlideTabs();
+      updateGallery();
+      updateEditSection();
+      saveSession();
+      invalidateMediaLibrary();
+    }
   } catch (err) {
     if (err.name === 'AbortError') return;
     statusEl.textContent = `Error: ${err.message}`;
@@ -4847,10 +4886,10 @@ document.getElementById('preview-meme-prompt-btn').addEventListener('click', asy
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Preview failed');
 
-    const displayPrompt = data.usedRefined
-      ? `--- Refined Prompt ---\n${data.refinedPrompt}\n\n--- Original Prompt ---\n${data.prompt}`
-      : data.prompt;
-    memePromptText.textContent = displayPrompt;
+    const parts = [];
+    if (data.concept) parts.push(`--- Meme Concept ---\n${data.concept}`);
+    parts.push(`--- Image Prompt ---\n${data.prompt}`);
+    memePromptText.textContent = parts.join('\n\n');
     memePromptPreview.style.display = 'block';
     cachedMemePayload = { ...payload };
     delete cachedMemePayload.previewOnly;

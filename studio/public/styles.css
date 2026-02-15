@@ -1653,7 +1653,8 @@ input:focus, select:focus, textarea:focus {
   max-height: none;
 }
 
-.preview-frame.expanded img {
+.preview-frame.expanded img,
+.preview-frame.expanded video {
   max-height: 95vh;
   max-width: 95vw;
   object-fit: contain;

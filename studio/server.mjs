@@ -3656,19 +3656,21 @@ Pick a DIFFERENT format each time. Do NOT default to two-panel approval.`,
       const openaiSize = sizeMap[data.aspectRatio] || '1024x1024';
 
       const rawPrompt = buildMemePrompt(data, brand);
+
+      // Preview-only: return raw prompt without refinement (saves an LLM call + time)
+      if (data.previewOnly) {
+        console.log(`[Meme] ${brand.name} | preview-only | ${data.aspectRatio || '1:1'}`);
+        return res.json({
+          ok: true, previewOnly: true,
+          prompt: rawPrompt,
+          concept: data.description,
+        });
+      }
+
       const refinedPrompt = await refinePromptWithClaude(rawPrompt, 'meme', data, brand, req);
       const prompt = refinedPrompt || rawPrompt;
 
       console.log(`[Meme] ${brand.name} | ${refinedPrompt ? 'refined' : 'raw'} | ${data.aspectRatio || '1:1'}`);
-
-      if (data.previewOnly) {
-        return res.json({
-          ok: true, previewOnly: true,
-          prompt: rawPrompt,
-          refinedPrompt: refinedPrompt || null,
-          usedRefined: Boolean(refinedPrompt),
-        });
-      }
 
       let buffer;
       try {
@@ -3766,7 +3768,7 @@ Pick a DIFFERENT format each time. Do NOT default to two-panel approval.`,
         });
       }
 
-      // AI Video generation (Kling/Veo)
+      // AI Video generation (Kling/Veo) — async with polling
       const videoModel = resolveVideoModel(data);
       const isVeo = Boolean(VEO_API_MODELS[videoModel]);
       if (!isVeo && !isFalEnabled(req)) return res.status(400).json({ error: 'Fal.ai API key required for Kling video generation. Add it in Settings.' });
@@ -3777,42 +3779,70 @@ Pick a DIFFERENT format each time. Do NOT default to two-panel approval.`,
       const refinedPrompt = await refinePromptWithClaude(rawPrompt, 'video', data, brand, req);
       const prompt = refinedPrompt || rawPrompt;
 
-      const videoUrl = await generateVideoSlide(prompt, {
-        videoModel,
-        duration: data.duration || 5,
-        aspectRatio: '9:16',
-        audio: data.audio || false,
-        falKey: req.headers['x-fal-key'],
-        gemini: isVeo ? getGemini(req) : null,
-        geminiKey: req.headers['x-gemini-key'],
-      });
+      // Create async job and return immediately
+      const videoJobId = crypto.randomUUID().slice(0, 12);
+      const videoJob = {
+        id: videoJobId,
+        userId: req.user?.uid || null,
+        status: 'running',
+        prompt: rawPrompt,
+        refinedPrompt: refinedPrompt || null,
+        url: null,
+        filename: null,
+        error: null,
+      };
+      videoJobs.set(videoJobId, videoJob);
 
-      const videoRes = await fetch(videoUrl);
-      if (!videoRes.ok) throw new Error('Failed to download generated video');
-      let videoBuffer = Buffer.from(await videoRes.arrayBuffer());
+      // Process video in background
+      (async () => {
+        try {
+          const videoUrl = await generateVideoSlide(prompt, {
+            videoModel,
+            duration: data.duration || 5,
+            aspectRatio: '9:16',
+            audio: data.audio || false,
+            falKey: req.headers['x-fal-key'],
+            gemini: isVeo ? getGemini(req) : null,
+            geminiKey: req.headers['x-gemini-key'],
+          });
 
-      // Apply text overlay if enabled
-      try {
-        const overlayPng = await generateVideoTextOverlay(data, brand);
-        if (overlayPng) {
-          let overlay = overlayPng;
-          if (data.includeOwl) overlay = await addAppIconOverlay(overlay, data.owlPosition, brand);
-          const outPath = path.join(outputDir, `tmp_final_${crypto.randomUUID().slice(0, 8)}.mp4`);
-          await overlayPngOnVideo(videoBuffer, overlay, outPath);
-          videoBuffer = await fs.readFile(outPath);
-          await fs.unlink(outPath).catch(() => {});
+          const videoRes = await fetch(videoUrl);
+          if (!videoRes.ok) throw new Error('Failed to download generated video');
+          let videoBuffer = Buffer.from(await videoRes.arrayBuffer());
+
+          // Apply text overlay if enabled
+          try {
+            const overlayPng = await generateVideoTextOverlay(data, brand);
+            if (overlayPng) {
+              let overlay = overlayPng;
+              if (data.includeOwl) overlay = await addAppIconOverlay(overlay, data.owlPosition, brand);
+              const outPath = path.join(outputDir, `tmp_final_${crypto.randomUUID().slice(0, 8)}.mp4`);
+              await overlayPngOnVideo(videoBuffer, overlay, outPath);
+              videoBuffer = await fs.readFile(outPath);
+              await fs.unlink(outPath).catch(() => {});
+            }
+          } catch (overlayErr) {
+            console.error('[Video overlay] Failed, returning raw video:', overlayErr.message);
+          }
+
+          const slug = crypto.randomUUID().slice(0, 8);
+          const filename = `video_${brandId}_${Date.now()}_${slug}.mp4`;
+          const url = await uploadVideoToStorage(videoBuffer, filename);
+          saveImageRecord({ userId: req.user?.uid, brandId, filename, type: 'video', prompt: rawPrompt, refinedPrompt, model: modelName, brandName: brand.name });
+
+          videoJob.status = 'done';
+          videoJob.url = url;
+          videoJob.filename = filename;
+        } catch (err) {
+          videoJob.status = 'error';
+          videoJob.error = err.message;
+          console.error('[Video Job] Failed:', err.message);
         }
-      } catch (overlayErr) {
-        console.error('[Video overlay] Failed, returning raw video:', overlayErr.message);
-      }
-
-      const slug = crypto.randomUUID().slice(0, 8);
-      const filename = `video_${brandId}_${Date.now()}_${slug}.mp4`;
-      const url = await uploadVideoToStorage(videoBuffer, filename);
-      saveImageRecord({ userId: req.user?.uid, brandId, filename, type: 'video', prompt: rawPrompt, refinedPrompt, model: modelName, brandName: brand.name });
+        setTimeout(() => videoJobs.delete(videoJobId), 30 * 60 * 1000);
+      })();
 
       return res.json({
-        ok: true, filename, url, isVideo: true,
+        ok: true, isVideo: true, async: true, videoJobId,
         prompt: rawPrompt,
         refinedPrompt: refinedPrompt || null,
         usedRefined: Boolean(refinedPrompt),
@@ -4021,6 +4051,7 @@ app.post('/api/edit-slide', requireAuth, async (req, res) => {
 
 // Batch carousel generation
 const carouselJobs = new Map();
+const videoJobs = new Map();
 
 app.post('/api/generate-carousel', requireAuth, generationLimiter, async (req, res) => {
   const { slides, includeOwl, owlPosition, quality, brand: brandId, imageModel, referenceImage, referenceUsage, referenceInstructions } = req.body || {};
@@ -4343,6 +4374,22 @@ app.get('/api/carousel-status/:jobId', requireAuth, (req, res) => {
     completed: job.completed,
     current: job.current,
     slides: job.slides,
+  });
+});
+
+app.get('/api/video-status/:jobId', requireAuth, (req, res) => {
+  const job = videoJobs.get(req.params.jobId);
+  if (!job || (job.userId && job.userId !== req.user?.uid)) {
+    return res.status(404).json({ error: 'Job not found' });
+  }
+  res.json({
+    jobId: job.id,
+    status: job.status,
+    url: job.url,
+    filename: job.filename,
+    prompt: job.prompt,
+    refinedPrompt: job.refinedPrompt,
+    error: job.error,
   });
 });
 
