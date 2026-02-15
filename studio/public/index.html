@@ -322,8 +322,16 @@
                   </div>
                 </div>
 
-                <button type="button" class="btn primary" id="generate-meme-btn" style="margin-top:12px">Generate Meme</button>
+                <div style="display:flex;gap:8px;margin-top:12px">
+                  <button type="button" class="btn primary" id="generate-meme-btn" style="flex:1">Generate Meme</button>
+                  <button type="button" class="btn small" id="preview-meme-prompt-btn" title="Preview the prompt before generating">Preview Prompt</button>
+                </div>
                 <div class="freeform-status" id="meme-status"></div>
+                <div class="meme-prompt-preview" id="meme-prompt-preview" style="display:none">
+                  <label class="label" style="margin-bottom:4px">Prompt Preview</label>
+                  <pre id="meme-prompt-text" style="white-space:pre-wrap;font-size:12px;background:var(--bg-secondary,#f5f5f5);border-radius:8px;padding:12px;max-height:300px;overflow-y:auto;margin:0"></pre>
+                  <button type="button" class="btn primary" id="generate-from-preview-btn" style="margin-top:8px">Generate with this prompt</button>
+                </div>
               </div>
 
               <!-- Right column: Preview -->

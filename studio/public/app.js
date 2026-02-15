@@ -4812,6 +4812,87 @@ document.getElementById('generate-meme-btn').addEventListener('click', async () 
   }
 });
 
+// Meme prompt preview
+const memePromptPreview = document.getElementById('meme-prompt-preview');
+const memePromptText = document.getElementById('meme-prompt-text');
+let cachedMemePayload = null;
+
+document.getElementById('preview-meme-prompt-btn').addEventListener('click', async () => {
+  const description = memeDescription.value.trim();
+  if (!currentBrand) {
+    memeStatus.textContent = 'Please select a brand first.';
+    return;
+  }
+  const btn = document.getElementById('preview-meme-prompt-btn');
+  btn.disabled = true;
+  memeStatus.textContent = 'Building prompt...';
+
+  try {
+    const payload = {
+      slideType: 'meme',
+      description,
+      aspectRatio: memeAspectRatio.value,
+      brand: currentBrand,
+      imageModel: memeModelSelect ? memeModelSelect.value : getSelectedImageModel(),
+      textModel: getSelectedTextModel(),
+      includeOwl: true,
+      owlPosition: 'bottom-right',
+      previewOnly: true,
+    };
+    const res = await authFetch('/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Preview failed');
+
+    const displayPrompt = data.usedRefined
+      ? `--- Refined Prompt ---\n${data.refinedPrompt}\n\n--- Original Prompt ---\n${data.prompt}`
+      : data.prompt;
+    memePromptText.textContent = displayPrompt;
+    memePromptPreview.style.display = 'block';
+    cachedMemePayload = { ...payload };
+    delete cachedMemePayload.previewOnly;
+    memeStatus.textContent = '';
+  } catch (err) {
+    memeStatus.textContent = err.message || 'Preview failed';
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+document.getElementById('generate-from-preview-btn').addEventListener('click', async () => {
+  if (!cachedMemePayload) return;
+  const generateBtn = document.getElementById('generate-from-preview-btn');
+  generateBtn.disabled = true;
+  memeStatus.textContent = 'Generating meme...';
+  downloadMemeBtn.style.display = 'none';
+
+  try {
+    const res = await authFetch('/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(cachedMemePayload),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Generation failed');
+
+    memePreviewImg.src = data.url;
+    memePreviewImg.style.display = 'block';
+    if (memePlaceholder) memePlaceholder.style.display = 'none';
+    memeFilename = data.filename;
+    downloadMemeBtn.style.display = 'inline-block';
+    memePromptPreview.style.display = 'none';
+    memeStatus.textContent = '';
+    invalidateMediaLibrary();
+  } catch (err) {
+    memeStatus.textContent = err.message || 'Generation failed';
+  } finally {
+    generateBtn.disabled = false;
+  }
+});
+
 downloadMemeBtn.addEventListener('click', () => {
   if (!memeFilename) return;
   const a = document.createElement('a');

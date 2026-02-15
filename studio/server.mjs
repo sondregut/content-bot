@@ -3661,6 +3661,15 @@ Pick a DIFFERENT format each time. Do NOT default to two-panel approval.`,
 
       console.log(`[Meme] ${brand.name} | ${refinedPrompt ? 'refined' : 'raw'} | ${data.aspectRatio || '1:1'}`);
 
+      if (data.previewOnly) {
+        return res.json({
+          ok: true, previewOnly: true,
+          prompt: rawPrompt,
+          refinedPrompt: refinedPrompt || null,
+          usedRefined: Boolean(refinedPrompt),
+        });
+      }
+
       let buffer;
       try {
         buffer = await generateImage({
