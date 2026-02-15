@@ -269,7 +269,8 @@ let generatedImagesCache = {}; // { ideaId: { slideIndex: { url, filename, isVid
 let batchJobId = null;
 let pollTimer = null;
 let referenceImageFilename = null;
-let screenshotImageFilename = null;
+let bgImageFilename = null;      // Background image
+let fgImageFilename = null;      // Foreground (phone/figure) image
 let slideReferenceImages = {}; // { slideIndex: { filename, displayName } }
 let generateAbort = null; // AbortController for in-flight single-slide generation
 let userPersons = []; // User-level persons for face-consistent photo generation
@@ -306,7 +307,8 @@ function resetAppState() {
 
   // Reference images
   referenceImageFilename = null;
-  screenshotImageFilename = null;
+  bgImageFilename = null;
+  fgImageFilename = null;
   slideReferenceImages = {};
 
   // Brand creation/editing
@@ -363,14 +365,20 @@ const mockupLayoutSelect = document.getElementById('mockupLayout');
 const mockupThemeSelect = document.getElementById('mockupTheme');
 const mockupPhoneOptions = document.getElementById('mockup-phone-options');
 const mockupFigureOptions = document.getElementById('mockup-figure-options');
-const mockupBgOptions = document.getElementById('mockup-bg-options');
-const mockupImageUploadSection = document.getElementById('mockup-image-upload-section');
-const imageUsageSelect = document.getElementById('imageUsage');
-const screenshotImageInput = document.getElementById('screenshot-image-input');
-const screenshotUploadBtn = document.getElementById('screenshot-upload-btn');
-const screenshotFilename = document.getElementById('screenshot-filename');
-const screenshotClearBtn = document.getElementById('screenshot-clear-btn');
-const screenshotPreview = document.getElementById('screenshot-preview');
+const foregroundModeSelect = document.getElementById('foregroundMode');
+const bgEnabledCheckbox = document.getElementById('bgEnabled');
+const mockupBgUpload = document.getElementById('mockup-bg-upload');
+const bgImageInput = document.getElementById('bg-image-input');
+const bgUploadBtn = document.getElementById('bg-upload-btn');
+const bgFilenameEl = document.getElementById('bg-filename');
+const bgClearBtn = document.getElementById('bg-clear-btn');
+const bgPreviewImg = document.getElementById('bg-preview');
+const fgUploadSection = document.getElementById('mockup-fg-upload-section');
+const fgImageInput = document.getElementById('fg-image-input');
+const fgUploadBtn = document.getElementById('fg-upload-btn');
+const fgFilenameEl = document.getElementById('fg-filename');
+const fgClearBtn = document.getElementById('fg-clear-btn');
+const fgPreviewImg = document.getElementById('fg-preview');
 const screenshotWarning = document.getElementById('screenshot-warning');
 const statusEl = document.getElementById('status');
 const previewImg = document.getElementById('preview-image');
@@ -526,7 +534,7 @@ function setPreviewMode(mode) {
   if (submitBtn) {
     const slide = slideEdits[currentSlideIndex];
     const type = slideTypeSelect.value || slide?.type || 'text';
-    const usage = imageUsageSelect.value || slide?.imageUsage || 'phone';
+    const usage = slide?.imageUsage || 'phone';
     const isVideoMode = slideEdits.length === 1 && slideEdits[0].type === 'video';
     submitBtn.textContent = isVideoMode ? 'Generate Video' : (slideNeedsAI(type, usage) ? 'Generate This Slide' : 'Render Preview');
   }
@@ -2158,7 +2166,8 @@ brandDeleteBtn.addEventListener('click', async () => {
     currentSlideIndex = 0;
     contentData = null;
     referenceImageFilename = null;
-    screenshotImageFilename = null;
+    bgImageFilename = null;
+    fgImageFilename = null;
     slideReferenceImages = {};
     editorArea.style.display = 'none';
     document.getElementById('content-plan-view').style.display = 'none';
@@ -2502,7 +2511,13 @@ function loadSlideIntoForm(index) {
   // Mockup fields
   mockupLayoutSelect.value = slide.mockupLayout || 'phone-right';
   mockupThemeSelect.value = slide.mockupTheme || 'dark';
-  imageUsageSelect.value = slide.imageUsage || 'phone';
+  // Restore dual image state (with backward compat from old imageUsage)
+  if (slide.bgEnabled !== undefined) {
+    bgEnabledCheckbox.checked = !!slide.bgEnabled;
+  } else {
+    bgEnabledCheckbox.checked = slide.imageUsage === 'background';
+  }
+  foregroundModeSelect.value = slide.foregroundMode || (slide.imageUsage === 'background' ? 'none' : (slide.imageUsage === 'none' ? 'none' : (slide.imageUsage || 'phone')));
   if (form.elements.phoneAngle) form.elements.phoneAngle.value = slide.phoneAngle || '-8';
   if (form.elements.phoneSize) form.elements.phoneSize.value = slide.phoneSize || 'medium';
   if (form.elements.highlightStyle) form.elements.highlightStyle.value = slide.highlightStyle || 'subtle';
@@ -2569,16 +2584,34 @@ function loadSlideIntoForm(index) {
   applyTextOffset();
   updateAspectRatioPreview();
 
-  // Restore screenshot state
-  if (slide.screenshotImage) {
-    screenshotImageFilename = slide.screenshotImage;
-    screenshotFilename.textContent = slide.screenshotImage;
-    screenshotClearBtn.style.display = 'inline-block';
+  // Restore dual image state (backward compat: migrate old screenshotImage)
+  if (slide.bgImage) {
+    bgImageFilename = slide.bgImage;
+    bgFilenameEl.textContent = slide.bgImage;
+    bgClearBtn.style.display = 'inline-block';
+  } else if (slide.screenshotImage && slide.imageUsage === 'background') {
+    bgImageFilename = slide.screenshotImage;
+    bgFilenameEl.textContent = slide.screenshotImage;
+    bgClearBtn.style.display = 'inline-block';
   } else {
-    screenshotImageFilename = null;
-    screenshotFilename.textContent = 'No screenshot';
-    screenshotPreview.style.display = 'none';
-    screenshotClearBtn.style.display = 'none';
+    bgImageFilename = null;
+    bgFilenameEl.textContent = 'No image';
+    bgPreviewImg.style.display = 'none';
+    bgClearBtn.style.display = 'none';
+  }
+  if (slide.fgImage) {
+    fgImageFilename = slide.fgImage;
+    fgFilenameEl.textContent = slide.fgImage;
+    fgClearBtn.style.display = 'inline-block';
+  } else if (slide.screenshotImage && slide.imageUsage !== 'background' && slide.imageUsage !== 'none') {
+    fgImageFilename = slide.screenshotImage;
+    fgFilenameEl.textContent = slide.screenshotImage;
+    fgClearBtn.style.display = 'inline-block';
+  } else {
+    fgImageFilename = null;
+    fgFilenameEl.textContent = 'No image';
+    fgPreviewImg.style.display = 'none';
+    fgClearBtn.style.display = 'none';
   }
 
   // Restore per-slide reference image state
@@ -2652,7 +2685,13 @@ function saveCurrentSlideEdits() {
   } else if (slide.type === 'mockup') {
     slide.mockupLayout = mockupLayoutSelect.value;
     slide.mockupTheme = mockupThemeSelect.value;
-    slide.imageUsage = imageUsageSelect.value;
+    slide.bgEnabled = bgEnabledCheckbox.checked;
+    slide.foregroundMode = foregroundModeSelect.value;
+    slide.bgImage = bgImageFilename || null;
+    slide.fgImage = fgImageFilename || null;
+    // Backward compat: derive imageUsage + screenshotImage for server
+    slide.imageUsage = slide.bgEnabled ? 'background' : (slide.foregroundMode === 'none' ? 'none' : slide.foregroundMode);
+    slide.screenshotImage = fgImageFilename || bgImageFilename || null;
     slide.phoneAngle = form.elements.phoneAngle?.value || '-8';
     slide.phoneSize = form.elements.phoneSize?.value || 'medium';
     slide.highlightStyle = form.elements.highlightStyle?.value || 'subtle';
@@ -2660,7 +2699,6 @@ function saveCurrentSlideEdits() {
     slide.figureSize = form.elements.figureSize?.value || 'medium';
     slide.figureBorderRadius = form.elements.figureBorderRadius?.value || '24';
     slide.bgOverlayOpacity = (parseInt(form.elements.bgOverlayOpacity?.value) || 55) / 100;
-    slide.screenshotImage = screenshotImageFilename || null;
     slide.aiBgSetting = form.elements.aiBgSetting?.value || '';
     slide.aiBgMood = form.elements.aiBgMood?.value || '';
     // Per-element offsets
@@ -2745,10 +2783,6 @@ function toggleTypeFields() {
   videoFields.style.display = type === 'video' ? 'block' : 'none';
   if (type === 'mockup') {
     toggleMockupPhoneOptions();
-    // Show image upload section for mockup type
-    mockupImageUploadSection.style.display = '';
-  } else {
-    mockupImageUploadSection.style.display = 'none';
   }
   screenshotWarning.style.display = 'none';
 
@@ -2789,7 +2823,6 @@ function toggleTypeFields() {
   updatePreviewImageOverlay();
 
   // Switch preview mode based on whether this type needs AI
-  const usage = imageUsageSelect.value;
   const hasGenerated = !!generatedImages[currentSlideIndex];
   if (hasGenerated) {
     setPreviewMode('generated');
@@ -2799,13 +2832,19 @@ function toggleTypeFields() {
 }
 
 function toggleMockupPhoneOptions() {
-  const usage = imageUsageSelect.value;
+  const fgMode = foregroundModeSelect.value;
+  const bgOn = bgEnabledCheckbox.checked;
 
-  mockupPhoneOptions.style.display = usage === 'phone' ? 'block' : 'none';
-  mockupFigureOptions.style.display = usage === 'figure' ? 'block' : 'none';
-  mockupBgOptions.style.display = (usage === 'background' || usage === 'ai-background') ? 'block' : 'none';
+  // Background section
+  mockupBgUpload.style.display = bgOn ? 'block' : 'none';
+
+  // Foreground section
+  mockupPhoneOptions.style.display = fgMode === 'phone' ? 'block' : 'none';
+  mockupFigureOptions.style.display = fgMode === 'figure' ? 'block' : 'none';
+  fgUploadSection.style.display = fgMode !== 'none' ? 'block' : 'none';
+
   const aiBgOptions = document.getElementById('mockup-ai-bg-options');
-  if (aiBgOptions) aiBgOptions.style.display = usage === 'ai-background' ? 'block' : 'none';
+  if (aiBgOptions) aiBgOptions.style.display = 'none';
   updatePreviewImageOverlay();
 }
 
@@ -2843,18 +2882,16 @@ mockupLayoutSelect.addEventListener('change', () => {
 
 mockupThemeSelect.addEventListener('change', updatePreviewMockup);
 
-imageUsageSelect.addEventListener('change', () => {
+foregroundModeSelect.addEventListener('change', () => {
   toggleMockupPhoneOptions();
   updatePreviewMockup();
-  // Update preview mode — ai-background needs AI, others don't
-  const type = slideTypeSelect.value;
-  const usage = imageUsageSelect.value;
-  const hasGenerated = !!generatedImages[currentSlideIndex];
-  if (hasGenerated) {
-    setPreviewMode('generated');
-  } else {
-    setPreviewMode('live');
-  }
+  setPreviewMode(generatedImages[currentSlideIndex] ? 'generated' : 'live');
+});
+
+bgEnabledCheckbox.addEventListener('change', () => {
+  toggleMockupPhoneOptions();
+  updatePreviewMockup();
+  setPreviewMode(generatedImages[currentSlideIndex] ? 'generated' : 'live');
 });
 
 document.getElementById('bgOverlayOpacity').addEventListener('input', () => {
@@ -2968,21 +3005,15 @@ function updatePreviewMockup() {
   } else if (isMockup) {
     previewMockup.classList.remove('photo-type');
     const mockupTheme = mockupThemeSelect.value || 'dark';
-    const usage = imageUsageSelect.value;
-    const isBackground = usage === 'background';
-    const isAiBg = usage === 'ai-background';
-    if (isBackground && screenshotImageFilename) {
+    const bgOn = bgEnabledCheckbox.checked;
+    if (bgOn && bgImageFilename) {
       const o = (parseInt(form.elements.bgOverlayOpacity?.value) || 55) / 100;
-      previewMockup.style.background = `linear-gradient(to bottom, rgba(0,0,0,0) 0%, rgba(0,0,0,${o*0.3}) 40%, rgba(0,0,0,${o*0.7}) 70%, rgba(0,0,0,${o}) 100%), url('/uploads/${screenshotImageFilename}') center/cover no-repeat`;
+      previewMockup.style.background = `linear-gradient(to bottom, rgba(0,0,0,0) 0%, rgba(0,0,0,${o*0.3}) 40%, rgba(0,0,0,${o*0.7}) 70%, rgba(0,0,0,${o}) 100%), url('/uploads/${bgImageFilename}') center/cover no-repeat`;
       mockupPhotoPlaceholder.style.display = 'none';
-    } else if (isAiBg) {
-      previewMockup.style.background = `linear-gradient(135deg, #0f172a 0%, #1e3a5f 50%, #0f172a 100%)`;
-      mockupPhotoPlaceholder.style.display = 'flex';
-      mockupPhotoPlaceholder.querySelector('span').textContent = 'AI will generate background';
-    } else if (isBackground && !screenshotImageFilename) {
+    } else if (bgOn && !bgImageFilename) {
       previewMockup.style.background = `linear-gradient(135deg, #1e293b 0%, #334155 100%)`;
       mockupPhotoPlaceholder.style.display = 'flex';
-      mockupPhotoPlaceholder.querySelector('span').textContent = ''; // overlay handles prompt
+      mockupPhotoPlaceholder.querySelector('span').textContent = '';
     } else {
       previewMockup.style.background = mockupTheme === 'light' ? '#F5F3EF' : primaryColor;
       mockupPhotoPlaceholder.style.display = 'none';
@@ -3040,16 +3071,16 @@ function updatePreviewMockup() {
     previewMockup.style.paddingTop = '';
   }
 
-  if (isMockup && screenshotImageFilename) {
-    const usage = imageUsageSelect.value;
+  if (isMockup && fgImageFilename) {
+    const fgMode = foregroundModeSelect.value;
     const layout = mockupLayoutSelect.value;
 
-    if (usage === 'phone') {
+    if (fgMode === 'phone') {
       const size = form.elements.phoneSize?.value || 'medium';
       const angle = form.elements.phoneAngle?.value || '-8';
 
       phoneFrame.style.display = 'block';
-      phoneImg.src = `/uploads/${screenshotImageFilename}`;
+      phoneImg.src = `/uploads/${fgImageFilename}`;
       phoneFrame.className = 'mockup-phone-frame phone-' + size;
 
       if (layout === 'phone-right') {
@@ -3063,13 +3094,13 @@ function updatePreviewMockup() {
       }
 
       phoneFrame.style.transform = `rotate(${angle}deg)`;
-    } else if (usage === 'figure') {
+    } else if (fgMode === 'figure') {
       const figSize = form.elements.figureSize?.value || 'medium';
       const figPos = form.elements.figurePosition?.value || 'center-right';
       const figRadius = form.elements.figureBorderRadius?.value || '24';
 
       figureImg.style.display = 'block';
-      figureImg.src = `/uploads/${screenshotImageFilename}`;
+      figureImg.src = `/uploads/${fgImageFilename}`;
       figureImg.className = 'mockup-figure-img fig-' + figSize;
       figureImg.style.borderRadius = figRadius + 'px';
 
@@ -3182,9 +3213,9 @@ function updatePreviewMockup() {
 // --- Preview Image Overlay ---
 function updatePreviewImageOverlay() {
   const type = slideTypeSelect.value;
-  const usage = imageUsageSelect.value;
   const isMockup = type === 'mockup';
-  const hasScreenshot = !!screenshotImageFilename;
+  const hasBg = bgEnabledCheckbox.checked && !!bgImageFilename;
+  const hasFg = !!fgImageFilename && foregroundModeSelect.value !== 'none';
   const hasSlideRef = !!slideReferenceImages[currentSlideIndex];
 
   // Reset all states
@@ -3196,26 +3227,31 @@ function updatePreviewImageOverlay() {
   previewOverlayLibrary.style.display = 'none';
 
   if (isMockup) {
-    if (usage === 'none' || usage === 'ai-background') return;
+    const fgMode = foregroundModeSelect.value;
+    const bgOn = bgEnabledCheckbox.checked;
 
-    const isBackground = usage === 'background';
-    const isPhoneOrFigure = usage === 'phone' || usage === 'figure';
+    // Show background overlay actions if bg enabled with image
+    if (bgOn && hasBg) {
+      previewImageOverlay.style.display = 'flex';
+      previewOverlayActions.style.display = 'flex';
+      previewOverlayLibrary.style.display = 'inline-block';
+    } else if (bgOn && !hasBg) {
+      previewImageOverlay.style.display = 'flex';
+      previewOverlayEmpty.style.display = 'flex';
+      previewOverlayLabel.textContent = 'Click to add background';
+      previewOverlayLibraryLink.style.display = 'inline';
+    }
 
-    if (!hasScreenshot) {
-      // Empty state — show overlay with upload prompt
+    // Show foreground badge if phone/figure with image
+    if (hasFg) {
+      previewImageBadge.style.display = 'block';
+      previewBadgeImg.src = `/uploads/${fgImageFilename}`;
+    } else if (fgMode !== 'none' && !hasFg && !bgOn) {
+      // No bg, no fg — show empty prompt for fg
       previewImageOverlay.style.display = 'flex';
       previewOverlayEmpty.style.display = 'flex';
       previewOverlayLabel.textContent = 'Click to add image';
       previewOverlayLibraryLink.style.display = 'inline';
-    } else if (isBackground) {
-      // Background mode with image — show hover actions
-      previewImageOverlay.style.display = 'flex';
-      previewOverlayActions.style.display = 'flex';
-      previewOverlayLibrary.style.display = 'inline-block';
-    } else if (isPhoneOrFigure) {
-      // Phone/figure mode with image — show badge thumbnail
-      previewImageBadge.style.display = 'block';
-      previewBadgeImg.src = `/uploads/${screenshotImageFilename}`;
     }
   } else {
     // Photo or text slide — reference image
@@ -3237,7 +3273,8 @@ previewImageOverlay.addEventListener('click', (e) => {
   if (e.target.closest('.preview-overlay-btn') || e.target.closest('.preview-overlay-library-link')) return;
   const type = slideTypeSelect.value;
   if (type === 'mockup') {
-    screenshotImageInput.click();
+    if (bgEnabledCheckbox.checked && !bgImageFilename) bgImageInput.click();
+    else fgImageInput.click();
   } else {
     slideRefInput.click();
   }
@@ -3245,14 +3282,15 @@ previewImageOverlay.addEventListener('click', (e) => {
 
 previewOverlayLibraryLink.addEventListener('click', (e) => {
   e.stopPropagation();
-  openBgLibrary();
+  openBgLibrary('bg');
 });
 
 previewOverlayReplace.addEventListener('click', (e) => {
   e.stopPropagation();
   const type = slideTypeSelect.value;
   if (type === 'mockup') {
-    screenshotImageInput.click();
+    if (bgEnabledCheckbox.checked) bgImageInput.click();
+    else fgImageInput.click();
   } else {
     slideRefInput.click();
   }
@@ -3260,22 +3298,23 @@ previewOverlayReplace.addEventListener('click', (e) => {
 
 previewOverlayLibrary.addEventListener('click', (e) => {
   e.stopPropagation();
-  openBgLibrary();
+  openBgLibrary('bg');
 });
 
 previewOverlayRemove.addEventListener('click', (e) => {
   e.stopPropagation();
   const type = slideTypeSelect.value;
   if (type === 'mockup') {
-    screenshotClearBtn.click();
+    if (bgEnabledCheckbox.checked) bgClearBtn.click();
+    else fgClearBtn.click();
   } else {
     slideRefClear.click();
   }
 });
 
-// Badge click — trigger replace
+// Badge click — trigger replace (foreground)
 previewImageBadge.addEventListener('click', () => {
-  screenshotImageInput.click();
+  fgImageInput.click();
 });
 
 // --- Drag to Move Text (per-element) ---
@@ -3477,7 +3516,6 @@ function getCanvasHeight(slide) {
 }
 
 function positionPreviewEditGroup() {
-  // The preview image maps canvas to its display size
   const slide = slideEdits[currentSlideIndex];
   if (!previewImg.naturalWidth) return;
   const imgRect = previewImg.getBoundingClientRect();
@@ -3488,9 +3526,39 @@ function positionPreviewEditGroup() {
   const scaleX = imgRect.width / 1080;
   const scaleY = imgRect.height / canvasH;
 
-  // Approximate text position in canvas-space based on layout
+  // Use exact server-provided text positions when available
+  const gen = generatedImages[currentSlideIndex];
+  const tp = gen?.textPositions;
+
+  if (tp) {
+    previewEditGroup.style.left = '0';
+    previewEditGroup.style.top = '0';
+    previewEditGroup.style.maxWidth = 'none';
+    previewEditGroup.style.padding = '0';
+
+    previewEditMicro.style.position = 'absolute';
+    previewEditMicro.style.left = (imgLeft + tp.micro.x * scaleX) + 'px';
+    previewEditMicro.style.top = (imgTop + tp.micro.y * scaleY) + 'px';
+    previewEditMicro.style.fontSize = (tp.micro.fontSize * scaleY) + 'px';
+    previewEditMicro.style.transform = 'none';
+
+    previewEditHeadline.style.position = 'absolute';
+    previewEditHeadline.style.left = (imgLeft + tp.headline.x * scaleX) + 'px';
+    previewEditHeadline.style.top = (imgTop + tp.headline.y * scaleY) + 'px';
+    previewEditHeadline.style.fontSize = (tp.headline.fontSize * scaleY) + 'px';
+    previewEditHeadline.style.transform = 'none';
+
+    previewEditBody.style.position = 'absolute';
+    previewEditBody.style.left = (imgLeft + tp.body.x * scaleX) + 'px';
+    previewEditBody.style.top = (imgTop + tp.body.y * scaleY) + 'px';
+    previewEditBody.style.fontSize = (tp.body.fontSize * scaleY) + 'px';
+    previewEditBody.style.transform = 'none';
+    return;
+  }
+
+  // Fallback: approximate positions when no server data
   const layout = slide?.mockupLayout || 'phone-right';
-  let canvasTextX = 90; // safe.left
+  let canvasTextX = 90;
   let canvasTextY = Math.round(120 * (canvasH / 1920)) + 60;
   if (layout === 'phone-left') {
     canvasTextX = 500;
@@ -3499,15 +3567,28 @@ function positionPreviewEditGroup() {
     canvasTextY = Math.round(canvasH * 0.3);
   }
 
-  // Apply headline offset (used for group positioning)
   const ox = slide?.headlineOffsetX || 0;
   const oy = slide?.headlineOffsetY || 0;
+
+  // Reset absolute positioning from server mode
+  previewEditMicro.style.position = '';
+  previewEditMicro.style.left = '';
+  previewEditMicro.style.top = '';
+  previewEditMicro.style.fontSize = '';
+  previewEditHeadline.style.position = '';
+  previewEditHeadline.style.left = '';
+  previewEditHeadline.style.top = '';
+  previewEditHeadline.style.fontSize = '';
+  previewEditBody.style.position = '';
+  previewEditBody.style.left = '';
+  previewEditBody.style.top = '';
+  previewEditBody.style.fontSize = '';
 
   previewEditGroup.style.left = (imgLeft + (canvasTextX + ox) * scaleX) + 'px';
   previewEditGroup.style.top = (imgTop + (canvasTextY + oy) * scaleY) + 'px';
   previewEditGroup.style.maxWidth = (imgRect.width * 0.6) + 'px';
+  previewEditGroup.style.padding = '12px 16px';
 
-  // Position individual elements with their own offsets
   const microOx = (slide?.microOffsetX || 0) - ox;
   const microOy = (slide?.microOffsetY || 0) - oy;
   previewEditMicro.style.transform = `translate(${microOx * scaleX}px, ${microOy * scaleY}px)`;
@@ -3542,7 +3623,7 @@ async function regenerateMockup() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Generation failed');
 
-    generatedImages[currentSlideIndex] = { url: data.url, filename: data.filename };
+    generatedImages[currentSlideIndex] = { url: data.url, filename: data.filename, textPositions: data.textPositions };
     previewImg.src = data.url;
     previewImg.style.display = 'block';
     statusEl.textContent = `Slide ${currentSlideIndex + 1} done.`;
@@ -3900,7 +3981,14 @@ function buildSlidePayload(slide, slideIndex) {
   } else if (payload.slideType === 'mockup') {
     payload.mockupLayout = slide.mockupLayout || mockupLayoutSelect.value || 'phone-right';
     payload.mockupTheme = slide.mockupTheme || mockupThemeSelect.value || 'dark';
-    payload.imageUsage = slide.imageUsage || imageUsageSelect.value || 'phone';
+    // Dual image slots
+    payload.bgImage = slide.bgImage || bgImageFilename || null;
+    payload.fgImage = slide.fgImage || fgImageFilename || null;
+    payload.bgEnabled = slide.bgEnabled ?? bgEnabledCheckbox.checked;
+    payload.foregroundMode = slide.foregroundMode || foregroundModeSelect.value || 'phone';
+    // Backward compat: derive imageUsage + screenshotImage for server
+    payload.imageUsage = slide.imageUsage || (payload.bgEnabled ? 'background' : (payload.foregroundMode === 'none' ? 'none' : payload.foregroundMode));
+    payload.screenshotImage = slide.screenshotImage || fgImageFilename || bgImageFilename || null;
     payload.phoneAngle = slide.phoneAngle || form.elements.phoneAngle?.value || '-8';
     payload.phoneSize = slide.phoneSize || form.elements.phoneSize?.value || 'medium';
     payload.highlightStyle = slide.highlightStyle || form.elements.highlightStyle?.value || 'subtle';
@@ -3908,7 +3996,6 @@ function buildSlidePayload(slide, slideIndex) {
     payload.figureSize = slide.figureSize || form.elements.figureSize?.value || 'medium';
     payload.figureBorderRadius = slide.figureBorderRadius || form.elements.figureBorderRadius?.value || '24';
     payload.bgOverlayOpacity = slide.bgOverlayOpacity || ((parseInt(form.elements.bgOverlayOpacity?.value) || 55) / 100);
-    payload.screenshotImage = slide.screenshotImage || screenshotImageFilename || null;
     // AI background prompt fields
     if (payload.imageUsage === 'ai-background') {
       payload.aiBgSetting = slide.aiBgSetting || form.elements.aiBgSetting?.value || '';
@@ -4006,7 +4093,7 @@ form.addEventListener('submit', async (e) => {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Generation failed');
 
-    generatedImages[slideIndex] = { url: data.url, filename: data.filename, isVideo: data.isVideo || false };
+    generatedImages[slideIndex] = { url: data.url, filename: data.filename, isVideo: data.isVideo || false, textPositions: data.textPositions };
 
     // Only update UI if still viewing this slide
     if (currentSlideIndex === slideIndex) {
@@ -4142,7 +4229,7 @@ downloadSingleBtn.addEventListener('click', async () => {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Render failed');
 
-    generatedImages[slideIndex] = { url: data.url, filename: data.filename, isVideo: false };
+    generatedImages[slideIndex] = { url: data.url, filename: data.filename, isVideo: false, textPositions: data.textPositions };
     renderSlideTabs();
 
     const a = document.createElement('a');
@@ -4252,7 +4339,7 @@ async function pollBatchStatus() {
       if (slide.ok && slide.url) {
         const idx = slide.slideNumber - 1;
         if (!generatedImages[idx]) invalidateMediaLibrary();
-        generatedImages[idx] = { url: slide.url, filename: slide.filename, isVideo: slide.isVideo || false };
+        generatedImages[idx] = { url: slide.url, filename: slide.filename, isVideo: slide.isVideo || false, textPositions: slide.textPositions };
       }
     }
     renderSlideTabs();
@@ -4349,45 +4436,82 @@ function updateGallery() {
   if (typeof updateTikTokUI === 'function') updateTikTokUI();
 }
 
-// --- Screenshot Upload (Mockup) ---
-screenshotUploadBtn.addEventListener('click', () => screenshotImageInput.click());
+// --- Background Image Upload ---
+bgUploadBtn.addEventListener('click', () => bgImageInput.click());
 
-screenshotImageInput.addEventListener('change', async () => {
-  const file = screenshotImageInput.files[0];
+bgImageInput.addEventListener('change', async () => {
+  const file = bgImageInput.files[0];
   if (!file) return;
-
-  screenshotUploadBtn.disabled = true;
-  screenshotFilename.textContent = 'Uploading...';
+  bgUploadBtn.disabled = true;
+  bgFilenameEl.textContent = 'Uploading...';
   const fd = new FormData();
   fd.append('image', file);
-
   try {
     const res = await authFetch('/api/upload-reference', { method: 'POST', body: fd });
     const data = await res.json();
     if (data.ok) {
-      screenshotImageFilename = data.filename;
-      screenshotFilename.textContent = file.name;
-      screenshotPreview.src = data.url;
-      screenshotPreview.style.display = 'block';
-      screenshotClearBtn.style.display = 'inline-block';
-      screenshotWarning.style.display = 'none';
+      bgImageFilename = data.filename;
+      bgFilenameEl.textContent = file.name;
+      bgPreviewImg.src = data.url;
+      bgPreviewImg.style.display = 'block';
+      bgClearBtn.style.display = 'inline-block';
       updatePreviewMockup();
     } else {
-      screenshotFilename.textContent = 'Upload failed';
+      bgFilenameEl.textContent = 'Upload failed';
     }
   } catch {
-    screenshotFilename.textContent = 'Upload error';
+    bgFilenameEl.textContent = 'Upload error';
   } finally {
-    screenshotUploadBtn.disabled = false;
+    bgUploadBtn.disabled = false;
   }
 });
 
-screenshotClearBtn.addEventListener('click', () => {
-  screenshotImageFilename = null;
-  screenshotFilename.textContent = 'No screenshot';
-  screenshotPreview.style.display = 'none';
-  screenshotClearBtn.style.display = 'none';
-  screenshotImageInput.value = '';
+bgClearBtn.addEventListener('click', () => {
+  bgImageFilename = null;
+  bgFilenameEl.textContent = 'No image';
+  bgPreviewImg.style.display = 'none';
+  bgClearBtn.style.display = 'none';
+  bgImageInput.value = '';
+  updatePreviewMockup();
+});
+
+// --- Foreground Image Upload ---
+fgUploadBtn.addEventListener('click', () => fgImageInput.click());
+
+fgImageInput.addEventListener('change', async () => {
+  const file = fgImageInput.files[0];
+  if (!file) return;
+  fgUploadBtn.disabled = true;
+  fgFilenameEl.textContent = 'Uploading...';
+  const fd = new FormData();
+  fd.append('image', file);
+  try {
+    const res = await authFetch('/api/upload-reference', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (data.ok) {
+      fgImageFilename = data.filename;
+      fgFilenameEl.textContent = file.name;
+      fgPreviewImg.src = data.url;
+      fgPreviewImg.style.display = 'block';
+      fgClearBtn.style.display = 'inline-block';
+      screenshotWarning.style.display = 'none';
+      updatePreviewMockup();
+    } else {
+      fgFilenameEl.textContent = 'Upload failed';
+    }
+  } catch {
+    fgFilenameEl.textContent = 'Upload error';
+  } finally {
+    fgUploadBtn.disabled = false;
+  }
+});
+
+fgClearBtn.addEventListener('click', () => {
+  fgImageFilename = null;
+  fgFilenameEl.textContent = 'No image';
+  fgPreviewImg.style.display = 'none';
+  fgClearBtn.style.display = 'none';
+  fgImageInput.value = '';
   toggleMockupPhoneOptions();
   updatePreviewMockup();
 });
@@ -5016,7 +5140,8 @@ function saveSession() {
       currentSlideIndex,
       slideReferenceImages,
       referenceImageFilename,
-      screenshotImageFilename,
+      bgImageFilename,
+      fgImageFilename,
     };
     localStorage.setItem(SESSION_KEY, JSON.stringify(session));
   } catch { /* quota exceeded — ignore */ }
@@ -5039,7 +5164,12 @@ function restoreSession(rawSession) {
     }
     if (session.slideReferenceImages) slideReferenceImages = session.slideReferenceImages;
     if (session.referenceImageFilename) referenceImageFilename = session.referenceImageFilename;
-    if (session.screenshotImageFilename) screenshotImageFilename = session.screenshotImageFilename;
+    if (session.bgImageFilename) bgImageFilename = session.bgImageFilename;
+    if (session.fgImageFilename) fgImageFilename = session.fgImageFilename;
+    // Backward compat: migrate old screenshotImageFilename
+    if (session.screenshotImageFilename && !session.bgImageFilename && !session.fgImageFilename) {
+      fgImageFilename = session.screenshotImageFilename;
+    }
     if (session.slideEdits && session.slideEdits.length > 0) {
       slideEdits = session.slideEdits;
       // Reconstruct selectedIdea from saved data
@@ -5473,7 +5603,10 @@ const bgThumbnailGrid = document.getElementById('bg-thumbnail-grid');
 const bgDownloadThumbnails = document.getElementById('bg-download-thumbnails');
 const bgCategoryTabs = document.getElementById('bg-category-tabs');
 
-function openBgLibrary() {
+let bgLibraryTargetSlot = 'bg'; // 'bg' or 'fg'
+
+function openBgLibrary(targetSlot) {
+  bgLibraryTargetSlot = targetSlot || 'bg';
   bgLibraryOverlay.style.display = 'flex';
   _activeFocusTrap = trapFocus(bgLibraryOverlay);
   loadBgLibrary();
@@ -5485,7 +5618,8 @@ function closeBgLibrary() {
   if (bgPollTimer) { clearInterval(bgPollTimer); bgPollTimer = null; }
 }
 
-document.getElementById('bg-library-btn').addEventListener('click', openBgLibrary);
+document.getElementById('bg-browse-library-btn').addEventListener('click', () => openBgLibrary('bg'));
+document.getElementById('fg-library-btn').addEventListener('click', () => openBgLibrary('fg'));
 bgLibraryClose.addEventListener('click', closeBgLibrary);
 bgLibraryOverlay.addEventListener('click', (e) => { if (e.target === bgLibraryOverlay) closeBgLibrary(); });
 
@@ -5706,11 +5840,19 @@ async function selectBackground(imgUrl) {
     });
     const data = await res.json();
     if (data.ok) {
-      screenshotImageFilename = data.filename;
-      screenshotFilename.textContent = data.filename;
-      screenshotPreview.src = data.url;
-      screenshotPreview.style.display = 'block';
-      screenshotClearBtn.style.display = 'inline-block';
+      if (bgLibraryTargetSlot === 'fg') {
+        fgImageFilename = data.filename;
+        fgFilenameEl.textContent = data.filename;
+        fgPreviewImg.src = data.url;
+        fgPreviewImg.style.display = 'block';
+        fgClearBtn.style.display = 'inline-block';
+      } else {
+        bgImageFilename = data.filename;
+        bgFilenameEl.textContent = data.filename;
+        bgPreviewImg.src = data.url;
+        bgPreviewImg.style.display = 'block';
+        bgClearBtn.style.display = 'inline-block';
+      }
       closeBgLibrary();
       updatePreviewMockup();
     }

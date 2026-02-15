@@ -1084,13 +1084,20 @@ async function renderPhoneRight(data, brand, theme) {
   const highlight = data.highlightPhrase || '';
   const highlightOpacity = data.highlightStyle === 'bold' ? 0.4 : 0.28;
 
+  // Resolve dual image slots (new format) with backward compat (old format)
+  const bgFile = data.bgImage || (imageUsage === 'background' ? data.screenshotImage : null);
+  const hasBg = data.bgEnabled !== undefined ? data.bgEnabled : (imageUsage === 'background');
+  const fgMode = data.foregroundMode || (imageUsage === 'background' || imageUsage === 'none' ? 'none' : imageUsage);
+  const fgFile = data.fgImage || (fgMode !== 'none' && imageUsage !== 'background' ? data.screenshotImage : null);
+  const hasBgImage = hasBg && !!bgFile;
+
   // Color overrides
   const microColor = data.microColor || theme.microColor;
-  const textFill = data.textColor || (imageUsage === 'background' ? '#FFFFFF' : theme.textColor);
-  const subtextFill = data.subtextColor || (imageUsage === 'background' ? 'rgba(255,255,255,0.75)' : theme.subtextColor);
+  const textFill = data.textColor || (hasBgImage ? '#FFFFFF' : theme.textColor);
+  const subtextFill = data.subtextColor || (hasBgImage ? 'rgba(255,255,255,0.75)' : theme.subtextColor);
   const highlightColor = data.microColor || theme.highlightColor;
 
-  // Determine base layer + composites based on imageUsage
+  // Step 1: Background layer
   let baseBuffer = null;
   let imageComposite = null;
   let textMaxWidth;
@@ -1098,14 +1105,16 @@ async function renderPhoneRight(data, brand, theme) {
   const bodyFontSize = parseInt(data.bodyFontSize) || 32;
   const microFontSize = 24;
 
-  if (imageUsage === 'background' && data.screenshotImage) {
-    baseBuffer = await createBackgroundImage(data.screenshotImage, parseFloat(data.bgOverlayOpacity) || 0.55, width, height);
-    textMaxWidth = width - safe.left - safe.right;
-  } else if (imageUsage === 'figure' && data.screenshotImage) {
+  if (hasBgImage) {
+    baseBuffer = await createBackgroundImage(bgFile, parseFloat(data.bgOverlayOpacity) || 0.55, width, height);
+  }
+
+  // Step 2: Foreground (phone or figure)
+  if (fgMode === 'figure' && fgFile) {
     const figSizeMap = { small: 280, medium: 380, large: 500 };
     const maxW = figSizeMap[data.figureSize] || 380;
     const figBuf = await createFigureElement({
-      imagePath: data.screenshotImage,
+      imagePath: fgFile,
       maxWidth: maxW,
       maxHeight: Math.round(maxW * 1.5),
       borderRadius: parseInt(data.figureBorderRadius) || 24,
@@ -1117,15 +1126,14 @@ async function renderPhoneRight(data, brand, theme) {
       imageComposite = { input: clippedFig, left: pos.left, top: pos.top };
     }
     textMaxWidth = Math.round(width * 0.65) - safe.left;
-  } else {
-    // Phone frame (default)
+  } else if (fgMode === 'phone' && fgFile) {
     const phoneSizeMap = { small: 360, medium: 420, large: 500 };
     const pw = phoneSizeMap[data.phoneSize] || 420;
     const ph = Math.round(pw * 2.05);
     const phoneAngle = parseInt(data.phoneAngle) || -8;
 
     const phoneMockup = await createPhoneMockup({
-      screenshotPath: data.screenshotImage,
+      screenshotPath: fgFile,
       brandId: brand.id,
       phoneWidth: pw,
       phoneHeight: ph,
@@ -1137,6 +1145,11 @@ async function renderPhoneRight(data, brand, theme) {
     const clippedPhone = await clipToCanvas(phoneMockup, phoneLeft, phoneTop, width, height);
     imageComposite = { input: clippedPhone, left: phoneLeft, top: phoneTop };
     textMaxWidth = Math.round(width * 0.65) - safe.left;
+  } else if (fgMode === 'phone' || fgMode === 'figure') {
+    // phone/figure mode but no file — still adjust text width
+    textMaxWidth = Math.round(width * 0.65) - safe.left;
+  } else {
+    textMaxWidth = hasBgImage ? (width - safe.left - safe.right) : (width - safe.left - safe.right);
   }
 
   const headlineLines = wrapText(headline, headlineFontSize, textMaxWidth, true);
@@ -1175,6 +1188,13 @@ async function renderPhoneRight(data, brand, theme) {
   const overlayDarken = parseFloat(data.overlayDarken) || 0;
   const darkenRect = (!baseBuffer && overlayDarken > 0) ? `<rect width="${width}" height="${height}" fill="#000" opacity="${overlayDarken}"/>` : '';
 
+  const textPositions = {
+    micro: { x: microX, y: microY, fontSize: microFontSize },
+    headline: { x: headlineX, y: headlineY, fontSize: headlineFontSize, lineCount: headlineLines.length },
+    body: { x: bodyX, y: bodyY, fontSize: bodyFontSize, lineCount: bodyLines.length },
+    canvasWidth: width, canvasHeight: height,
+  };
+
   if (baseBuffer) {
     const composites = [];
     if (overlayDarken > 0) {
@@ -1188,7 +1208,8 @@ async function renderPhoneRight(data, brand, theme) {
       ${bodySvg}
     </svg>`;
     composites.push({ input: Buffer.from(textSvg) });
-    return sharp(baseBuffer).composite(composites).png().toBuffer();
+    if (imageComposite) composites.push(imageComposite);
+    return { buffer: await sharp(baseBuffer).composite(composites).png().toBuffer(), textPositions };
   }
 
   const svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
@@ -1201,9 +1222,9 @@ async function renderPhoneRight(data, brand, theme) {
   </svg>`;
 
   if (imageComposite) {
-    return sharp(Buffer.from(svg)).composite([imageComposite]).png().toBuffer();
+    return { buffer: await sharp(Buffer.from(svg)).composite([imageComposite]).png().toBuffer(), textPositions };
   }
-  return sharp(Buffer.from(svg)).png().toBuffer();
+  return { buffer: await sharp(Buffer.from(svg)).png().toBuffer(), textPositions };
 }
 
 async function renderPhoneLeft(data, brand, theme) {
@@ -1308,6 +1329,13 @@ async function renderPhoneLeft(data, brand, theme) {
   const overlayDarken = parseFloat(data.overlayDarken) || 0;
   const darkenRect = (!baseBuffer && overlayDarken > 0) ? `<rect width="${width}" height="${height}" fill="#000" opacity="${overlayDarken}"/>` : '';
 
+  const textPositions = {
+    micro: { x: microX, y: microY, fontSize: microFontSize },
+    headline: { x: headlineX, y: headlineY, fontSize: headlineFontSize, lineCount: headlineLines.length },
+    body: { x: bodyX, y: bodyY, fontSize: bodyFontSize, lineCount: bodyLines.length },
+    canvasWidth: width, canvasHeight: height,
+  };
+
   if (baseBuffer) {
     const composites = [];
     if (overlayDarken > 0) {
@@ -1321,7 +1349,7 @@ async function renderPhoneLeft(data, brand, theme) {
       ${bodySvg}
     </svg>`;
     composites.push({ input: Buffer.from(textSvg) });
-    return sharp(baseBuffer).composite(composites).png().toBuffer();
+    return { buffer: await sharp(baseBuffer).composite(composites).png().toBuffer(), textPositions };
   }
 
   const svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
@@ -1334,9 +1362,9 @@ async function renderPhoneLeft(data, brand, theme) {
   </svg>`;
 
   if (imageComposite) {
-    return sharp(Buffer.from(svg)).composite([imageComposite]).png().toBuffer();
+    return { buffer: await sharp(Buffer.from(svg)).composite([imageComposite]).png().toBuffer(), textPositions };
   }
-  return sharp(Buffer.from(svg)).png().toBuffer();
+  return { buffer: await sharp(Buffer.from(svg)).png().toBuffer(), textPositions };
 }
 
 async function renderTextStatement(data, brand, theme) {
@@ -1420,6 +1448,13 @@ async function renderTextStatement(data, brand, theme) {
   const overlayDarken = parseFloat(data.overlayDarken) || 0;
   const darkenRect = (!baseBuffer && overlayDarken > 0) ? `<rect width="${width}" height="${height}" fill="#000" opacity="${overlayDarken}"/>` : '';
 
+  const textPositions = {
+    micro: { x: microX, y: microY, fontSize: microFontSize },
+    headline: { x: headlineX, y: headlineY, fontSize: headlineFontSize, lineCount: headlineLines.length },
+    body: { x: bodyX, y: bodyY, fontSize: bodyFontSize, lineCount: bodyLines.length },
+    canvasWidth: width, canvasHeight: height,
+  };
+
   if (baseBuffer) {
     const composites = [];
     if (overlayDarken > 0) {
@@ -1434,7 +1469,7 @@ async function renderTextStatement(data, brand, theme) {
     </svg>`;
     composites.push({ input: Buffer.from(textSvg) });
     if (imageComposite) composites.push(imageComposite);
-    return sharp(baseBuffer).composite(composites).png().toBuffer();
+    return { buffer: await sharp(baseBuffer).composite(composites).png().toBuffer(), textPositions };
   }
 
   const svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
@@ -1447,9 +1482,9 @@ async function renderTextStatement(data, brand, theme) {
   </svg>`;
 
   if (imageComposite) {
-    return sharp(Buffer.from(svg)).composite([imageComposite]).png().toBuffer();
+    return { buffer: await sharp(Buffer.from(svg)).composite([imageComposite]).png().toBuffer(), textPositions };
   }
-  return sharp(Buffer.from(svg)).png().toBuffer();
+  return { buffer: await sharp(Buffer.from(svg)).png().toBuffer(), textPositions };
 }
 
 // Composite text overlay onto an existing image buffer (for hybrid photo slides)
@@ -1717,19 +1752,21 @@ async function generateMockupSlide(data, brand) {
   const theme = themeFn(brand);
   const layout = data.mockupLayout || 'text-statement';
 
-  let buffer;
+  let result;
   switch (layout) {
     case 'phone-right':
-      buffer = await renderPhoneRight(data, brand, theme);
+      result = await renderPhoneRight(data, brand, theme);
       break;
     case 'phone-left':
-      buffer = await renderPhoneLeft(data, brand, theme);
+      result = await renderPhoneLeft(data, brand, theme);
       break;
     case 'text-statement':
     default:
-      buffer = await renderTextStatement(data, brand, theme);
+      result = await renderTextStatement(data, brand, theme);
       break;
   }
+
+  let { buffer, textPositions } = result;
 
   if (data.includeOwl) {
     buffer = await addAppIconOverlay(buffer, data.owlPosition, brand, {
@@ -1738,7 +1775,7 @@ async function generateMockupSlide(data, brand) {
     });
   }
 
-  return buffer;
+  return { buffer, textPositions };
 }
 
 // --- End Mockup Helpers ---
@@ -3077,7 +3114,7 @@ app.post('/api/brands/full-setup', requireAuth, async (req, res) => {
               includeOwl: true,
               owlPosition: 'bottom-right',
             };
-            const mockupBuffer = await generateMockupSlide(mockupData, brand);
+            const { buffer: mockupBuffer } = await generateMockupSlide(mockupData, brand);
             const slug = crypto.randomUUID().slice(0, 8);
             const filename = `carousel_${brandId}_setup_s${i + 1}_${slug}.png`;
             const slideUrl = await uploadToStorage(mockupBuffer, filename);
@@ -3503,24 +3540,24 @@ app.post('/api/generate', requireAuth, generationLimiter, async (req, res) => {
         data.imageUsage = 'background';
 
         try {
-          const buffer = await generateMockupSlide(data, brand);
+          const { buffer, textPositions } = await generateMockupSlide(data, brand);
           const slug = crypto.randomUUID().slice(0, 8);
           const filename = `slide_${brandId}_mockup_${Date.now()}_${slug}.png`;
           const url = await uploadToStorage(buffer, filename);
           saveImageRecord({ userId: req.user?.uid, brandId, filename, type: 'slide', prompt: bgPrompt, refinedPrompt: refinedBgPrompt, model: data.imageModel, brandName: brand.name, width: 1080, height: 1920 });
-          return res.json({ ok: true, filename, url, prompt: bgPrompt, refinedPrompt: refinedBgPrompt, usedRefined: Boolean(refinedBgPrompt) });
+          return res.json({ ok: true, filename, url, prompt: bgPrompt, refinedPrompt: refinedBgPrompt, usedRefined: Boolean(refinedBgPrompt), textPositions });
         } finally {
           // Clean up temp AI background file
           await fs.unlink(tempPath).catch(() => {});
         }
       }
 
-      const buffer = await generateMockupSlide(data, brand);
+      const { buffer, textPositions } = await generateMockupSlide(data, brand);
       const slug = crypto.randomUUID().slice(0, 8);
       const filename = `slide_${brandId}_mockup_${Date.now()}_${slug}.png`;
       const url = await uploadToStorage(buffer, filename);
       saveImageRecord({ userId: req.user?.uid, brandId, filename, type: 'slide', brandName: brand.name, width: 1080, height: 1920 });
-      return res.json({ ok: true, filename, url, prompt: null, refinedPrompt: null, usedRefined: false });
+      return res.json({ ok: true, filename, url, prompt: null, refinedPrompt: null, usedRefined: false, textPositions });
     }
 
     // Meme generation
@@ -4007,23 +4044,23 @@ app.post('/api/generate-carousel', requireAuth, generationLimiter, async (req, r
             slideData.screenshotImage = tempName;
             slideData.imageUsage = 'background';
             try {
-              const mockupBuffer = await generateMockupSlide(slideData, brand);
+              const { buffer: mockupBuffer, textPositions } = await generateMockupSlide(slideData, brand);
               const slug = crypto.randomUUID().slice(0, 8);
               const filename = `carousel_${brand.id}_${jobId}_s${i + 1}_${slug}.png`;
               const slideUrl = await uploadToStorage(mockupBuffer, filename);
               saveImageRecord({ userId: req.user?.uid, brandId: brand.id, filename, type: 'carousel', prompt: bgPrompt, refinedPrompt: refined, model: slideData.imageModel, brandName: brand.name, width: 1080, height: 1920 });
-              job.slides.push({ slideNumber: i + 1, url: slideUrl, filename, ok: true });
+              job.slides.push({ slideNumber: i + 1, url: slideUrl, filename, ok: true, textPositions });
             } finally {
               await fs.unlink(tempPath).catch(() => {});
             }
           } else {
             console.log(`[Carousel ${jobId}] ${brand.name} | Slide ${i + 1}/${slides.length} (mockup)`);
-            const mockupBuffer = await generateMockupSlide(slideData, brand);
+            const { buffer: mockupBuffer, textPositions } = await generateMockupSlide(slideData, brand);
             const slug = crypto.randomUUID().slice(0, 8);
             const filename = `carousel_${brand.id}_${jobId}_s${i + 1}_${slug}.png`;
             const slideUrl = await uploadToStorage(mockupBuffer, filename);
             saveImageRecord({ userId: req.user?.uid, brandId: brand.id, filename, type: 'carousel', brandName: brand.name, width: 1080, height: 1920 });
-            job.slides.push({ slideNumber: i + 1, url: slideUrl, filename, ok: true });
+            job.slides.push({ slideNumber: i + 1, url: slideUrl, filename, ok: true, textPositions });
           }
           job.completed = i + 1;
           continue;

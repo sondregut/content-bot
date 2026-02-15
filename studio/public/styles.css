@@ -770,6 +770,7 @@ body {
   margin-bottom: 6px;
   z-index: 1;
   position: relative;
+  cursor: grab;
 }
 
 .mockup-headline {
@@ -779,6 +780,7 @@ body {
   margin-bottom: 6px;
   z-index: 1;
   position: relative;
+  cursor: grab;
 }
 
 .mockup-headline .highlight {
@@ -793,6 +795,13 @@ body {
   font-family: 'DM Sans', sans-serif;
   z-index: 1;
   position: relative;
+  cursor: grab;
+}
+
+.mockup-micro:hover, .mockup-headline:hover, .mockup-body:hover {
+  outline: 1px dashed rgba(115,166,209,0.5);
+  outline-offset: 2px;
+  border-radius: 2px;
 }
 
 .mockup-icon {
@@ -1078,11 +1087,6 @@ body {
   pointer-events: auto;
 }
 
-.preview-drag-overlay:hover .preview-edit-group {
-  outline: 1.5px dashed rgba(115,166,209,0.6);
-  outline-offset: 6px;
-}
-
 .preview-drag-overlay.dragging .preview-edit-group {
   outline: 1.5px dashed rgba(115,166,209,0.8);
   outline-offset: 6px;
@@ -1095,7 +1099,16 @@ body {
   user-select: none;
   line-height: 1.25;
   font-family: 'Space Grotesk', sans-serif;
-  pointer-events: none;
+  pointer-events: auto;
+  cursor: grab;
+}
+
+.preview-edit-micro:hover,
+.preview-edit-headline:hover,
+.preview-edit-body:hover {
+  outline: 1px dashed rgba(115,166,209,0.5);
+  outline-offset: 2px;
+  border-radius: 2px;
 }
 
 .preview-edit-micro {
