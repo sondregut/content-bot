@@ -373,17 +373,33 @@ async function generateVideoSlide(prompt, options = {}) {
       const reasons = op.response?.raiMediaFilteredReasons?.join(', ') || 'unknown';
       throw new Error(`Video blocked by safety filters (${reasons}). Try different reference photos or adjust the prompt.`);
     }
-    const videoData = op.response?.generatedVideos?.[0]?.video;
-    if (!videoData?.uri) throw new Error(`${modelLabel} returned no video`);
-    // Download the video from the URI
-    const dlRes = await fetch(videoData.uri, { headers: { 'Authorization': `Bearer ${options.geminiKey}` } });
-    if (!dlRes.ok) {
-      // Try fetching without auth (public URI)
-      const dlRes2 = await fetch(videoData.uri);
-      if (!dlRes2.ok) throw new Error(`Failed to download ${modelLabel} video`);
-      return videoData.uri;
+    const generatedVideo = op.response?.generatedVideos?.[0];
+    if (!generatedVideo?.video) throw new Error(`${modelLabel} returned no video`);
+    console.log(`[Veo] Video URI: ${generatedVideo.video.uri?.slice(0, 120)}...`);
+    // Download using SDK's files.download method
+    try {
+      const downloadResult = await gemini.files.download({ file: generatedVideo.video });
+      // Save to temp file and return local path as URL
+      const tmpFilename = `veo_${crypto.randomUUID().slice(0, 8)}.mp4`;
+      const tmpPath = path.join(outputDir, tmpFilename);
+      const arrayBuf = await downloadResult.arrayBuffer();
+      await fs.writeFile(tmpPath, Buffer.from(arrayBuf));
+      console.log(`[Veo] Downloaded ${(arrayBuf.byteLength / 1024 / 1024).toFixed(1)}MB to ${tmpPath}`);
+      return tmpPath;
+    } catch (sdkErr) {
+      console.log(`[Veo] SDK download failed: ${sdkErr.message}, trying direct fetch...`);
+      // Fallback: direct fetch with API key header
+      const apiKey = options.geminiKey;
+      const uri = generatedVideo.video.uri;
+      const dlRes = await fetch(uri, { headers: { 'x-goog-api-key': apiKey } });
+      if (!dlRes.ok) {
+        // Try without auth
+        const dlRes2 = await fetch(uri);
+        if (!dlRes2.ok) throw new Error(`Failed to download ${modelLabel} video (${dlRes.status}, ${dlRes2.status})`);
+        return uri;
+      }
+      return uri;
     }
-    return videoData.uri;
   }
 
   // Kling models via fal.ai
@@ -4402,9 +4418,16 @@ Return ONLY the meme description (no explanation, no preamble).`,
             referenceImages: personRefImages,
           });
 
-          const videoRes = await fetch(videoUrl);
-          if (!videoRes.ok) throw new Error('Failed to download generated video');
-          const rawVideoBuffer = Buffer.from(await videoRes.arrayBuffer());
+          let rawVideoBuffer;
+          if (videoUrl.startsWith('/') || videoUrl.startsWith('.')) {
+            // Local file path (from SDK download)
+            rawVideoBuffer = await fs.readFile(videoUrl);
+            await fs.unlink(videoUrl).catch(() => {});
+          } else {
+            const videoRes = await fetch(videoUrl);
+            if (!videoRes.ok) throw new Error('Failed to download generated video');
+            rawVideoBuffer = Buffer.from(await videoRes.arrayBuffer());
+          }
           let videoBuffer = rawVideoBuffer;
 
           // Save raw video (without overlay) for optional clean download
@@ -4816,9 +4839,15 @@ app.post('/api/generate-carousel', requireAuth, generationLimiter, async (req, r
           });
 
           // Download video to local storage
-          const videoRes = await fetch(videoUrl);
-          if (!videoRes.ok) throw new Error('Failed to download generated video');
-          const rawVideoBuffer = Buffer.from(await videoRes.arrayBuffer());
+          let rawVideoBuffer;
+          if (videoUrl.startsWith('/') || videoUrl.startsWith('.')) {
+            rawVideoBuffer = await fs.readFile(videoUrl);
+            await fs.unlink(videoUrl).catch(() => {});
+          } else {
+            const videoRes = await fetch(videoUrl);
+            if (!videoRes.ok) throw new Error('Failed to download generated video');
+            rawVideoBuffer = Buffer.from(await videoRes.arrayBuffer());
+          }
           let videoBuffer = rawVideoBuffer;
 
           // Save raw video for clean download
