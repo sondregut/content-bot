@@ -4638,10 +4638,9 @@ app.post('/api/generate-carousel', requireAuth, generationLimiter, async (req, r
 
   (async () => {
     for (let i = 0; i < slides.length; i++) {
-      job.current = i + 1;
-      const slideData = { ...slides[i], includeOwl, owlPosition, quality: quality || 'high' };
-
       try {
+        job.current = i + 1;
+        const slideData = { ...slides[i], includeOwl, owlPosition, quality: quality || 'high' };
         // Mockup slides: render with Sharp (optionally with AI background)
         if (slideData.slideType === 'mockup') {
           if (slideData.imageUsage === 'ai-background') {
@@ -4932,7 +4931,19 @@ app.post('/api/generate-carousel', requireAuth, generationLimiter, async (req, r
     console.log(`[Carousel ${jobId}] Complete — ${job.slides.filter((s) => s.ok).length}/${job.total} succeeded`);
 
     setTimeout(() => carouselJobs.delete(jobId), 30 * 60 * 1000);
-  })().catch(err => { job.status = 'error'; job.error = err.message; });
+  })().catch(err => {
+    console.error(`[Carousel ${jobId}] Batch loop crashed:`, err.message);
+    // Mark any remaining unprocessed slides as failed
+    const processedNums = new Set(job.slides.map(s => s.slideNumber));
+    for (let i = 1; i <= job.total; i++) {
+      if (!processedNums.has(i)) {
+        job.slides.push({ slideNumber: i, url: null, error: err.message || 'Batch generation interrupted', ok: false });
+      }
+    }
+    job.completed = job.total;
+    job.status = 'done';
+    job.error = err.message;
+  });
 });
 
 app.get('/api/carousel-status/:jobId', requireAuth, (req, res) => {
@@ -4947,6 +4958,7 @@ app.get('/api/carousel-status/:jobId', requireAuth, (req, res) => {
     completed: job.completed,
     current: job.current,
     slides: job.slides,
+    error: job.error || null,
   });
 });
 
@@ -5487,7 +5499,16 @@ app.post('/api/generate-personalized-carousel', requireAuth, upload.array('faceI
     console.log(`[Personalized Carousel ${jobId}] Complete — ${job.slides.filter((s) => s.ok).length}/${job.total} succeeded`);
     setTimeout(() => carouselJobs.delete(jobId), 30 * 60 * 1000);
   })().catch(err => {
-    job.status = 'error'; job.error = err.message;
+    console.error(`[Personalized Carousel ${jobId}] Batch loop crashed:`, err.message);
+    const processedNums = new Set(job.slides.map(s => s.slideNumber));
+    for (let i = 1; i <= job.total; i++) {
+      if (!processedNums.has(i)) {
+        job.slides.push({ slideNumber: i, url: null, error: err.message || 'Batch generation interrupted', ok: false });
+      }
+    }
+    job.completed = job.total;
+    job.status = 'done';
+    job.error = err.message;
     if (downloadedTempFiles.length > 0) cleanupTempFiles(downloadedTempFiles);
   });
 });

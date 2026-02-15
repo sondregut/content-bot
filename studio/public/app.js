@@ -5035,14 +5035,22 @@ async function pollBatchStatus() {
       downloadButtons.style.display = 'flex'; updateRawVideoButton();
     }
 
-    if (job.status === 'done') {
+    if (job.status === 'done' || job.status === 'error') {
       clearInterval(pollTimer);
       pollTimer = null;
       generateAllBtn.disabled = false;
 
       const succeeded = job.slides.filter((s) => s.ok).length;
-      progressLabel.textContent = `Done! ${succeeded}/${job.total} slides generated.`;
-      statusEl.textContent = `Batch complete: ${succeeded}/${job.total} slides.`;
+      if (job.status === 'error' || succeeded < job.total) {
+        const failed = job.total - succeeded;
+        progressLabel.textContent = `Done — ${succeeded}/${job.total} slides generated (${failed} failed).`;
+        statusEl.textContent = job.error
+          ? `Batch error: ${job.error}`
+          : `${failed} slide${failed > 1 ? 's' : ''} failed. Click the retry button on failed slides.`;
+      } else {
+        progressLabel.textContent = `Done! ${succeeded}/${job.total} slides generated.`;
+        statusEl.textContent = `Batch complete: ${succeeded}/${job.total} slides.`;
+      }
 
       setTimeout(() => { progressSection.style.display = 'none'; }, 5000);
     }
