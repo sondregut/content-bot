@@ -168,6 +168,12 @@ async function _generateImageInner({ model, prompt, size, quality, referenceImag
   const openai = getOpenAI(req);
   if (!openai) throw new Error('Add your OpenAI API key in Settings to generate images.');
 
+  // Truncate prompt to stay within API limits
+  if (prompt.length > 1500) {
+    console.warn(`[generateImage] Prompt truncated from ${prompt.length} to 1500 chars`);
+    prompt = prompt.slice(0, 1500);
+  }
+
   if (referenceImage) {
     const imageFile = new File([referenceImage], 'reference.png', { type: 'image/png' });
     const response = await openai.images.edit({
@@ -497,6 +503,9 @@ function isUrlSafe(urlString) {
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
     const host = parsed.hostname.toLowerCase();
     if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '0.0.0.0') return false;
+    // Block cloud metadata endpoints
+    const metadataHosts = ['metadata.google.internal', 'metadata.google', 'metadata', 'metadata.internal'];
+    if (metadataHosts.includes(host)) return false;
     // Block private IP ranges
     const parts = host.split('.').map(Number);
     if (parts.length === 4 && !parts.some(isNaN)) {
@@ -661,7 +670,7 @@ async function downloadScreenshotToTemp(brand, label) {
 
 async function cleanupTempFiles(paths) {
   for (const p of paths) {
-    await fs.unlink(p).catch(() => {});
+    await fs.unlink(p).catch(err => console.warn('[Cleanup]', p, err.message));
   }
 }
 
@@ -2679,7 +2688,7 @@ app.get('/api/brands', requireAuth, async (req, res) => {
     res.json({ brands });
   } catch (err) {
     console.error('[Brands]', err);
-    res.status(200).json({ brands: [] });
+    res.status(500).json({ error: 'Failed to load brands' });
   }
 });
 
@@ -2743,6 +2752,12 @@ app.put('/api/brands/:id', requireAuth, async (req, res) => {
     if (req.body.defaultMicroLabel && req.body.defaultMicroLabel.length > 500) return res.status(400).json({ error: 'Micro label too long (max 500 chars)' });
     if (req.body.defaultBackground && req.body.defaultBackground.length > 500) return res.status(400).json({ error: 'Background description too long (max 500 chars)' });
     if (req.body.iconOverlayText && req.body.iconOverlayText.length > 500) return res.status(400).json({ error: 'Icon overlay text too long (max 500 chars)' });
+    if (req.body.colors && typeof req.body.colors === 'object') {
+      const hexRe = /^#[0-9a-fA-F]{3,8}$/;
+      for (const [key, val] of Object.entries(req.body.colors)) {
+        if (val && !hexRe.test(val)) return res.status(400).json({ error: `Invalid color for ${key}: must be a hex color (e.g. #FF6B35)` });
+      }
+    }
     const allowedKeys = ['name', 'website', 'colors', 'systemPrompt', 'defaultMicroLabel', 'defaultBackground', 'iconOverlayText', 'contentPillars', 'contentIdeaPrompt', 'productKnowledge', 'iconStorageUrl'];
     if (db) {
       const doc = await db.collection('carousel_brands').doc(req.params.id).get();
@@ -4529,6 +4544,18 @@ app.post('/api/generate-carousel', requireAuth, generationLimiter, async (req, r
     return res.status(400).json({ error: 'Maximum 20 slides per batch' });
   }
 
+  // Limit concurrent batch jobs per user
+  const uid = req.user?.uid;
+  if (uid) {
+    let activeCount = 0;
+    for (const j of carouselJobs.values()) {
+      if (j.userId === uid && j.status === 'running') activeCount++;
+    }
+    if (activeCount >= 3) {
+      return res.status(429).json({ error: 'Too many active batch jobs. Please wait for current jobs to finish.' });
+    }
+  }
+
   if (!brandId) return res.status(400).json({ error: 'Missing brand' });
   const brand = await getBrandAsync(brandId, req.user?.uid);
 
@@ -6265,6 +6292,9 @@ app.get('/api/persons/:id/lora-status', requireAuth, async (req, res) => {
 
 // Return 204 for missing brand icons (avoids noisy 404 in console)
 app.get('/brands/:brandId/assets/app-icon.png', async (req, res, next) => {
+  if (!/^[a-zA-Z0-9\-]+$/.test(req.params.brandId)) {
+    return res.status(400).json({ error: 'Invalid brand ID' });
+  }
   const iconPath = path.join(rootDir, 'brands', req.params.brandId, 'assets', 'app-icon.png');
   try {
     await fs.access(iconPath);
@@ -6557,7 +6587,7 @@ app.get('/api/download/:filename', requireAuth, async (req, res) => {
 // Download all carousel images as zip
 app.get('/api/download-carousel/:jobId', requireAuth, async (req, res) => {
   const job = carouselJobs.get(req.params.jobId);
-  if (!job) {
+  if (!job || (job.userId && job.userId !== req.user?.uid)) {
     return res.status(404).json({ error: 'Job not found' });
   }
 

@@ -179,6 +179,9 @@ async function authFetch(url, opts = {}) {
     migrateApiKeys(user.uid);
     // Init app
     loadApiKeysFromStorage();
+    // Show loading state while fetching brands
+    const statusEl = document.getElementById('status');
+    if (statusEl) statusEl.textContent = 'Loading brands...';
     try {
       const res = await authFetch('/api/brands');
       const data = await res.json();
@@ -192,7 +195,10 @@ async function authFetch(url, opts = {}) {
             if (s.currentBrand && brands.some(b => b.id === s.currentBrand)) {
               restoredBrand = s.currentBrand;
             }
-          } catch {}
+          } catch (parseErr) {
+            console.warn('[Session] Failed to parse saved session:', parseErr.message);
+            localStorage.removeItem('carousel-studio-session');
+          }
         }
         currentBrand = restoredBrand || brands[0].id;
       } else {
@@ -209,11 +215,13 @@ async function authFetch(url, opts = {}) {
       currentBrand = null;
     }
     if (currentBrand) {
+      if (statusEl) statusEl.textContent = 'Loading content ideas...';
       await loadContentIdeas();
       restoreSession(savedSessionRaw);
     } else {
       renderEmptySidebar();
     }
+    if (statusEl) statusEl.textContent = '';
     updateIconPreview();
     checkTikTokStatus();
     fetchMLCounts();
@@ -1285,6 +1293,13 @@ function renderBrandSelector() {
 }
 
 brandSelector.addEventListener('change', async () => {
+  // Warn if there are unsaved edits or generated images
+  if (slideEdits.length > 0 && Object.keys(generatedImages).length > 0) {
+    if (!confirm('You have generated slides that will be lost. Switch brand anyway?')) {
+      brandSelector.value = currentBrand;
+      return;
+    }
+  }
   if (generateAbort) generateAbort.abort();
   loadingSpinner.classList.remove('active');
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
@@ -1983,7 +1998,7 @@ function handleCreationEvent(event, data) {
       const section = document.getElementById('creation-section-carousel');
       const strip = document.getElementById('creation-carousel-strip');
       section.style.display = 'block';
-      if (data.imageUrl) {
+      if (data.imageUrl && isValidMediaUrl(data.imageUrl)) {
         const img = document.createElement('img');
         img.src = data.imageUrl;
         img.loading = 'lazy';
@@ -4909,6 +4924,7 @@ downloadAllBtn.addEventListener('click', async () => {
 // --- Generate All Slides (batch) ---
 async function startBatchGeneration() {
   if (!selectedIdea || slideEdits.length === 0) return;
+  if (batchJobId && pollTimer) return; // Already running a batch
   saveCurrentSlideEdits();
 
   const slides = slideEdits.map((s, i) => buildSlidePayload(s, i));
@@ -4947,8 +4963,11 @@ async function startBatchGeneration() {
 
 generateAllBtn.addEventListener('click', () => startBatchGeneration());
 
+let pollErrorCount = 0;
+
 function startPolling() {
   if (pollTimer) clearInterval(pollTimer);
+  pollErrorCount = 0;
   pollTimer = setInterval(pollBatchStatus, 2000);
 }
 
@@ -4957,7 +4976,9 @@ async function pollBatchStatus() {
 
   try {
     const res = await authFetch(`/api/carousel-status/${batchJobId}`);
+    if (!res.ok) throw new Error(`Server error (${res.status})`);
     const job = await res.json();
+    pollErrorCount = 0;
 
     const pct = job.total > 0 ? Math.round((job.completed / job.total) * 100) : 0;
     progressFill.style.width = `${pct}%`;
@@ -5005,6 +5026,14 @@ async function pollBatchStatus() {
     }
   } catch (err) {
     console.error('Poll error:', err);
+    pollErrorCount++;
+    if (pollErrorCount >= 3) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+      generateAllBtn.disabled = false;
+      progressLabel.textContent = 'Generation failed — lost connection to server.';
+      statusEl.textContent = 'Batch polling stopped after repeated errors. Try again.';
+    }
   }
 }
 
@@ -5033,7 +5062,7 @@ function updateGallery() {
       html += `<button class="thumb-download" data-filename="${escapeHtml(gen.filename)}" title="Download">&#8681;</button>`;
       html += `</div>`;
     } else if (failedSlides[i] !== undefined) {
-      html += `<div class="gallery-thumb failed" data-index="${i}" title="${failedSlides[i]}">`;
+      html += `<div class="gallery-thumb failed" data-index="${i}" title="${escapeHtml(failedSlides[i])}">`;
       html += `<span class="thumb-error">!</span>`;
       html += `<span class="thumb-num">${i + 1}</span>`;
       html += `<button class="thumb-retry" data-index="${i}" title="Retry">&#8635;</button>`;
