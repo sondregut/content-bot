@@ -107,7 +107,23 @@ async function generateText({ model, system, messages, maxTokens, req }) {
 }
 
 // --- Unified image generation (OpenAI + Gemini + Imagen) ---
-async function generateImage({ model, prompt, size, quality, referenceImage, req }) {
+async function generateImage({ model, prompt, size, quality, referenceImage, req, _retries = 2 }) {
+  try {
+    return await _generateImageInner({ model, prompt, size, quality, referenceImage, req });
+  } catch (err) {
+    const status = err?.status || err?.response?.status;
+    const isRetryable = status === 429 || status >= 500 || err.code === 'ECONNRESET' || err.code === 'ETIMEDOUT' || /rate.limit|too.many.requests|overloaded|timeout/i.test(err.message);
+    if (isRetryable && _retries > 0) {
+      const delay = (3 - _retries) * 5000 + 3000; // 8s, 13s
+      console.warn(`[generateImage] Retryable error (${_retries} left, waiting ${delay/1000}s): ${err.message}`);
+      await new Promise(r => setTimeout(r, delay));
+      return generateImage({ model, prompt, size, quality, referenceImage, req, _retries: _retries - 1 });
+    }
+    throw err;
+  }
+}
+
+async function _generateImageInner({ model, prompt, size, quality, referenceImage, req }) {
   const resolvedModel = resolveImageModel(model);
 
   // Gemini native image generation (includes Nano Banana models)
