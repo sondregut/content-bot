@@ -1480,10 +1480,11 @@ function renderBrandScreenshots(screenshots) {
     if (!ss.url) return;
     const thumb = document.createElement('div');
     thumb.className = 'screenshot-thumb';
+    const labelTitle = ss.description ? `${ss.description}\nClick to edit label` : 'Click to edit label';
     thumb.innerHTML = `
       <img src="${ss.url}" alt="Screenshot ${idx + 1}" />
       <button class="screenshot-remove" data-idx="${idx}" title="Remove">&times;</button>
-      <span class="screenshot-label" data-idx="${idx}" title="Click to edit label">${ss.label || 'Screenshot'}</span>
+      <span class="screenshot-label" data-idx="${idx}" title="${labelTitle.replace(/"/g, '&quot;')}">${ss.label || 'Screenshot'}</span>
     `;
     grid.insertBefore(thumb, addBtn);
   });
@@ -1557,7 +1558,7 @@ document.getElementById('brand-screenshot-input').addEventListener('change', asy
   if (toUpload.length === 0) return;
 
   const status = document.getElementById('brand-screenshot-status');
-  status.textContent = `Uploading ${toUpload.length} screenshot${toUpload.length > 1 ? 's' : ''}...`;
+  status.textContent = `Uploading & analyzing ${toUpload.length} screenshot${toUpload.length > 1 ? 's' : ''}...`;
 
   const fd = new FormData();
   toUpload.forEach(f => fd.append('screenshots', f));
@@ -1568,8 +1569,8 @@ document.getElementById('brand-screenshot-input').addEventListener('change', asy
     if (!res.ok) throw new Error(data.error || 'Upload failed');
     brandScreenshots = data.screenshots || [];
     renderBrandScreenshots(brandScreenshots);
-    status.textContent = 'Screenshots saved!';
-    setTimeout(() => { if (status.textContent === 'Screenshots saved!') status.textContent = ''; }, 2000);
+    status.textContent = 'Screenshots analyzed & saved!';
+    setTimeout(() => { if (status.textContent === 'Screenshots analyzed & saved!') status.textContent = ''; }, 2000);
   } catch (err) {
     status.textContent = `Error: ${err.message}`;
   }

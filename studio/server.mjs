@@ -1527,7 +1527,7 @@ async function renderTextStatement(data, brand, theme) {
     baseBuffer = await createBackgroundImage(bgFile, parseFloat(data.bgOverlayOpacity) || 0.6, width, height);
   }
 
-  // Step 2: Foreground (figure)
+  // Step 2: Foreground (figure or phone)
   if (fgMode === 'figure' && fgFile) {
     const figSizeMap = { small: 240, medium: 340, large: 460 };
     const maxW = figSizeMap[data.figureSize] || 340;
@@ -1543,6 +1543,24 @@ async function renderTextStatement(data, brand, theme) {
       const clippedFig = await clipToCanvas(figBuf, pos.left, pos.top, width, height);
       imageComposite = { input: clippedFig, left: pos.left, top: pos.top };
     }
+  } else if (fgMode === 'phone' && fgFile) {
+    const phoneSizeMap = { small: 280, medium: 360, large: 440 };
+    const pw = phoneSizeMap[data.phoneSize] || 360;
+    const ph = Math.round(pw * 2.05);
+    const phoneAngle = parseInt(data.phoneAngle) || -5;
+
+    const phoneMockup = await createPhoneMockup({
+      screenshotPath: fgFile,
+      brandId: brand.id,
+      phoneWidth: pw,
+      phoneHeight: ph,
+      angle: phoneAngle,
+    });
+    const phoneMeta = await sharp(phoneMockup).metadata();
+    const phoneLeft = Math.max(0, width - (phoneMeta.width || pw) - 40);
+    const phoneTop = Math.max(0, height - (phoneMeta.height || ph) + Math.round(ph * 0.08));
+    const clippedPhone = await clipToCanvas(phoneMockup, phoneLeft, phoneTop, width, height);
+    imageComposite = { input: clippedPhone, left: phoneLeft, top: phoneTop };
   }
 
   const textMaxWidth = width - safe.left - safe.right;
@@ -2942,7 +2960,9 @@ Rules:
   * HOOK slides (slide 1): Use "photo" for visual impact — choose a compelling subject, setting, and action
   * INFORMATION slides: Use "text" for data/stats/lists, "photo" when emotion matters more than text
 ${brand.screenshots && brand.screenshots.length > 0
-  ? `  * APP SHOWCASE / CTA slides (usually last): Use "mockup" with imageUsage "phone" to show the app. Available screenshot labels: ${brand.screenshots.map(s => `"${s.label}"`).join(', ')}. Pick the most relevant label for each phone mockup slide and include it as "screenshotLabel".
+  ? `  * APP SHOWCASE / CTA slides (usually last): Use "mockup" with imageUsage "phone" to show the app. Available app screenshots for phone mockup slides:
+${brand.screenshots.map(s => `    - "${s.label}"${s.description ? `: ${s.description}` : ''}`).join('\n')}
+    Pick the most relevant screenshot label for each phone mockup slide based on the slide's content and include it as "screenshotLabel".
   * BOLD STATEMENT slides: Use "mockup" with layout "text-statement" and imageUsage "none"
   * You may also use "ai-background" for a premium feel on mockup slides`
   : `  * APP SHOWCASE / CTA slides: Use "mockup" with layout "text-statement" and imageUsage "none" or "ai-background" for a premium feel. Do NOT use imageUsage "phone" — no app screenshots are available.
@@ -5623,12 +5643,40 @@ app.post('/api/brands/:id/screenshots', requireAuth, upload.array('screenshots',
         await fs.writeFile(path.join(outputDir, `${uuid}.png`), processed);
       }
 
-      // Derive label from filename (strip extension, replace separators with spaces)
-      const label = file.originalname.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').trim() || 'Screenshot';
+      // AI-analyze screenshot with Claude Haiku vision (fast + cheap)
+      let label = file.originalname.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').trim() || 'Screenshot';
+      let description = '';
+      const anthropic = getAnthropic(req);
+      if (anthropic) {
+        try {
+          const base64Img = processed.toString('base64');
+          const visionRes = await anthropic.messages.create({
+            model: 'claude-haiku-4-5-20251001',
+            max_tokens: 200,
+            messages: [{
+              role: 'user',
+              content: [
+                { type: 'image', source: { type: 'base64', media_type: 'image/png', data: base64Img } },
+                { type: 'text', text: 'This is an app screenshot. Return JSON only: {"label":"2-3 word screen name","description":"1-2 sentence description of what this screen shows and its key UI elements"}' },
+              ],
+            }],
+          });
+          const text = visionRes.content?.[0]?.text?.trim() || '';
+          const jsonMatch = text.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            const parsed = JSON.parse(jsonMatch[0]);
+            if (parsed.label) label = parsed.label;
+            if (parsed.description) description = parsed.description;
+          }
+        } catch (err) {
+          console.warn('[Screenshot AI] Vision analysis failed, using filename label:', err.message);
+        }
+      }
 
       newScreenshots.push({
         storagePath,
         label,
+        description,
         filename: file.originalname,
         uploadedAt: new Date().toISOString(),
       });
@@ -5769,7 +5817,7 @@ app.put('/api/brands/:id/screenshots/:ssIndex/label', requireAuth, async (req, r
 app.get('/api/persons', requireAuth, async (req, res) => {
   try {
     if (!db) return res.json({ persons: [] });
-    const snap = await db.collection('carousel_persons').where('userId', '==', req.user.uid).orderBy('createdAt', 'desc').get();
+    const snap = await db.collection('carousel_persons').where('userId', '==', req.user.uid).get();
     const persons = [];
     for (const doc of snap.docs) {
       const data = doc.data();
@@ -5781,6 +5829,11 @@ app.get('/api/persons', requireAuth, async (req, res) => {
         loraModel: data.loraModel || null, loraTriggerWord: data.loraTriggerWord || null,
       });
     }
+    persons.sort((a, b) => {
+      const ta = a.createdAt?.toMillis?.() || 0;
+      const tb = b.createdAt?.toMillis?.() || 0;
+      return tb - ta;
+    });
     res.json({ persons });
   } catch (error) {
     console.error('[Persons List]', error);
