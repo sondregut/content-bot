@@ -1627,10 +1627,26 @@ function handleCreationEvent(event, data) {
       const section = document.getElementById('creation-section-colors');
       const container = document.getElementById('creation-color-swatches');
       container.innerHTML = '';
-      (data.extracted || []).forEach(hex => {
+      (data.extracted || []).forEach((hex, i) => {
         const swatch = document.createElement('div');
         swatch.className = 'creation-swatch';
-        swatch.innerHTML = `<div class="creation-swatch-circle" style="background:${hex}"></div><span class="creation-swatch-hex">${hex}</span>`;
+        const circle = document.createElement('div');
+        circle.className = 'creation-swatch-circle';
+        circle.style.background = hex;
+        const colorInput = document.createElement('input');
+        colorInput.type = 'color';
+        colorInput.value = hex;
+        circle.appendChild(colorInput);
+        circle.addEventListener('click', () => colorInput.click());
+        const hexLabel = document.createElement('span');
+        hexLabel.className = 'creation-swatch-hex';
+        hexLabel.textContent = hex;
+        colorInput.addEventListener('input', (e) => {
+          circle.style.background = e.target.value;
+          hexLabel.textContent = e.target.value.toUpperCase();
+        });
+        swatch.appendChild(circle);
+        swatch.appendChild(hexLabel);
         container.appendChild(swatch);
       });
       section.style.display = 'block';
@@ -1675,13 +1691,37 @@ function handleCreationEvent(event, data) {
 
       // Update color swatches with the assigned brand colors
       if (data.colors) {
+        creationColorOverrides = {};
+        creationOriginalColors = { ...data.colors };
         const container = document.getElementById('creation-color-swatches');
         container.innerHTML = '';
         const colorEntries = Object.entries(data.colors);
         colorEntries.forEach(([role, hex]) => {
           const swatch = document.createElement('div');
           swatch.className = 'creation-swatch';
-          swatch.innerHTML = `<div class="creation-swatch-circle" style="background:${hex}"></div><span class="creation-swatch-label">${role}</span><span class="creation-swatch-hex">${hex}</span>`;
+          const circle = document.createElement('div');
+          circle.className = 'creation-swatch-circle';
+          circle.style.background = hex;
+          const colorInput = document.createElement('input');
+          colorInput.type = 'color';
+          colorInput.value = hex;
+          circle.appendChild(colorInput);
+          circle.addEventListener('click', () => colorInput.click());
+          const label = document.createElement('span');
+          label.className = 'creation-swatch-label';
+          label.textContent = role;
+          const hexLabel = document.createElement('span');
+          hexLabel.className = 'creation-swatch-hex';
+          hexLabel.textContent = hex;
+          colorInput.addEventListener('input', (e) => {
+            const newColor = e.target.value.toUpperCase();
+            circle.style.background = newColor;
+            hexLabel.textContent = newColor;
+            creationColorOverrides[role] = newColor;
+          });
+          swatch.appendChild(circle);
+          swatch.appendChild(label);
+          swatch.appendChild(hexLabel);
           container.appendChild(swatch);
         });
       }
@@ -1700,6 +1740,16 @@ function handleCreationEvent(event, data) {
       currentBrand = data.id;
       // Mark config steps done
       setCreationStep('config', 'done');
+      // Apply any color overrides the user made during creation
+      if (Object.keys(creationColorOverrides).length > 0 && data.id) {
+        const updatedColors = { ...creationOriginalColors, ...creationColorOverrides };
+        authFetch(`/api/brands/${data.id}`, {
+          method: 'PUT',
+          body: JSON.stringify({ colors: updatedColors }),
+        }).catch(() => {});
+        creationColorOverrides = {};
+        creationOriginalColors = {};
+      }
       break;
     }
 
@@ -1843,7 +1893,12 @@ function setAnalysisStep(stepName, state) {
   analysisCount.textContent = `${analysisCompleteCount} of 4 completed`;
 }
 
+let creationColorOverrides = {};
+let creationOriginalColors = {};
+
 function resetAnalysisUI() {
+  creationColorOverrides = {};
+  creationOriginalColors = {};
   brandPreviewRow.style.display = 'none';
   brandImagesSection.style.display = 'none';
   brandImagesGrid.innerHTML = '';
