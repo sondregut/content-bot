@@ -2258,16 +2258,30 @@ async function addAppIconOverlay(baseBuffer, configKey = 'bottom-right', brand =
 
   if (!meta.width || !meta.height) return baseBuffer;
 
-  // Look for brand-specific app icon, fall back to studio default
+  // Look for brand-specific app icon: local disk -> Firebase Storage -> skip
   const brandIconPath = path.join(rootDir, 'brands', brandId, 'assets', 'app-icon.png');
-  const defaultIconPath = path.join(__dirname, 'app-icon.png');
 
   let iconPath;
   try {
     await fs.access(brandIconPath);
     iconPath = brandIconPath;
   } catch {
-    iconPath = defaultIconPath;
+    // Not on local disk — try fetching from Firebase Storage
+    if (brand.iconStorageUrl) {
+      try {
+        const resp = await fetch(brand.iconStorageUrl, { signal: AbortSignal.timeout(5000) });
+        if (resp.ok) {
+          const buf = Buffer.from(await resp.arrayBuffer());
+          const dir = path.join(rootDir, 'brands', brandId, 'assets');
+          await fs.mkdir(dir, { recursive: true });
+          await fs.writeFile(brandIconPath, buf);
+          iconPath = brandIconPath;
+        }
+      } catch (e) {
+        console.warn('[Icon Overlay] Failed to fetch icon from storage:', e.message);
+      }
+    }
+    if (!iconPath) return baseBuffer; // No icon available — skip overlay
   }
 
   const iconSize = Math.round(meta.width * (cfg.sizePercent / 100));
@@ -2632,7 +2646,7 @@ app.put('/api/brands/:id', requireAuth, async (req, res) => {
     if (req.body.defaultMicroLabel && req.body.defaultMicroLabel.length > 500) return res.status(400).json({ error: 'Micro label too long (max 500 chars)' });
     if (req.body.defaultBackground && req.body.defaultBackground.length > 500) return res.status(400).json({ error: 'Background description too long (max 500 chars)' });
     if (req.body.iconOverlayText && req.body.iconOverlayText.length > 500) return res.status(400).json({ error: 'Icon overlay text too long (max 500 chars)' });
-    const allowedKeys = ['name', 'website', 'colors', 'systemPrompt', 'defaultMicroLabel', 'defaultBackground', 'iconOverlayText', 'contentPillars', 'contentIdeaPrompt', 'productKnowledge'];
+    const allowedKeys = ['name', 'website', 'colors', 'systemPrompt', 'defaultMicroLabel', 'defaultBackground', 'iconOverlayText', 'contentPillars', 'contentIdeaPrompt', 'productKnowledge', 'iconStorageUrl'];
     if (db) {
       const doc = await db.collection('carousel_brands').doc(req.params.id).get();
       if (!doc.exists) return res.status(404).json({ error: 'Brand not found' });
@@ -3240,15 +3254,34 @@ app.post('/api/brands/full-setup', requireAuth, async (req, res) => {
       await writeLocalBrands(allBrands);
     }
 
-    // Upload icon from website
+    // Upload icon from website — save to local disk + Firebase Storage
     if (iconUrl) {
       try {
         const iconResp = await fetch(iconUrl, { signal: AbortSignal.timeout(3000) });
         if (iconResp.ok) {
           const iconBuffer = Buffer.from(await iconResp.arrayBuffer());
+          // Process to standard size PNG
+          const processedIcon = await sharp(iconBuffer)
+            .resize(512, 512, { fit: 'cover' })
+            .png()
+            .toBuffer();
+          // Save to local disk
           const brandDir = path.join(rootDir, 'brands', brandId, 'assets');
           await fs.mkdir(brandDir, { recursive: true });
-          await fs.writeFile(path.join(brandDir, 'app-icon.png'), iconBuffer);
+          await fs.writeFile(path.join(brandDir, 'app-icon.png'), processedIcon);
+          // Upload to Firebase Storage for persistence
+          if (bucket) {
+            try {
+              const storagePath = `brand-icons/${brandId}/app-icon.png`;
+              const file = bucket.file(storagePath);
+              await file.save(processedIcon, { metadata: { contentType: 'image/png' } });
+              await file.makePublic();
+              const iconStorageUrl = `https://storage.googleapis.com/${bucket.name}/${storagePath}`;
+              await updateBrandFields(brandId, { iconStorageUrl });
+            } catch (e) {
+              console.warn('[Full Setup] Failed to upload icon to storage:', e.message);
+            }
+          }
         }
       } catch { /* skip icon */ }
     }
@@ -5248,13 +5281,31 @@ app.post('/api/upload-icon', requireAuth, upload.single('icon'), async (req, res
     const iconPath = path.join(assetsDir, 'app-icon.png');
 
     // Convert to PNG and resize to standard size
-    await sharp(req.file.path)
+    const processedIcon = await sharp(req.file.path)
       .resize(512, 512, { fit: 'cover' })
       .png()
-      .toFile(iconPath);
+      .toBuffer();
+
+    // Save to local disk
+    await fs.writeFile(iconPath, processedIcon);
 
     // Clean up temp file
     await fs.unlink(req.file.path).catch(() => {});
+
+    // Upload to Firebase Storage for persistence
+    let iconStorageUrl;
+    if (bucket) {
+      try {
+        const storagePath = `brand-icons/${brandId}/app-icon.png`;
+        const file = bucket.file(storagePath);
+        await file.save(processedIcon, { metadata: { contentType: 'image/png' } });
+        await file.makePublic();
+        iconStorageUrl = `https://storage.googleapis.com/${bucket.name}/${storagePath}`;
+        await updateBrandFields(brandId, { iconStorageUrl });
+      } catch (e) {
+        console.warn('[Icon Upload] Failed to upload to storage:', e.message);
+      }
+    }
 
     res.json({
       ok: true,
