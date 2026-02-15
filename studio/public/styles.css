@@ -465,6 +465,29 @@ body {
   flex-shrink: 0;
 }
 
+/* Generate initial ideas (no AI ideas yet) */
+.sidebar-generate-initial {
+  padding: 16px;
+  border-top: 1px solid var(--border);
+}
+.sidebar-generate-hint {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  margin: 0 0 12px;
+  line-height: 1.4;
+}
+.sidebar-generate-btn {
+  flex: 1;
+  font-size: 0.85rem;
+  padding: 10px 14px;
+  font-weight: 600;
+  transition: opacity 0.2s;
+}
+.sidebar-generate-btn.generating {
+  opacity: 0.7;
+  pointer-events: none;
+}
+
 .sidebar-generate-more {
   padding: 12px 16px;
   border-top: 1px solid var(--border);
