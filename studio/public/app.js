@@ -768,7 +768,10 @@ function showAddPersonInline(container, addCard) {
   const input = inputCard.querySelector('input');
   input.focus();
 
+  let submitted = false;
   async function submitName() {
+    if (submitted) return;
+    submitted = true;
     const name = input.value.trim();
     if (!name) { renderFaceStudioPersons(); return; }
     input.disabled = true;
