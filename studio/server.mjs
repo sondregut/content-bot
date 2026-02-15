@@ -29,6 +29,8 @@ const ALLOWED_IMAGE_MODELS = {
   'dall-e-3': 'DALL-E 3',
   'gemini-2.5-flash-preview-image-generation': 'Gemini 2.5 Flash Image',
   'gemini-2.0-flash-preview-image-generation': 'Gemini 2.0 Flash Image',
+  'gemini-2.5-flash-image': 'Nano Banana',
+  'gemini-3-pro-image-preview': 'Nano Banana Pro',
   'imagen-4.0-generate-001': 'Imagen 4.0',
   'imagen-4.0-fast-generate-001': 'Imagen 4.0 Fast',
   'imagen-4.0-ultra-generate-001': 'Imagen 4.0 Ultra',
@@ -108,7 +110,7 @@ async function generateText({ model, system, messages, maxTokens, req }) {
 async function generateImage({ model, prompt, size, quality, referenceImage, req }) {
   const resolvedModel = resolveImageModel(model);
 
-  // Gemini native image generation
+  // Gemini native image generation (includes Nano Banana models)
   if (resolvedModel.startsWith('gemini-')) {
     const gemini = getGemini(req);
     if (!gemini) throw new Error('Add your Google Gemini API key in Settings to use Gemini models.');
@@ -117,10 +119,14 @@ async function generateImage({ model, prompt, size, quality, referenceImage, req
       parts.push({ inlineData: { data: referenceImage.toString('base64'), mimeType: 'image/png' } });
     }
     parts.push({ text: prompt });
+    const aspectMap = { '1024x1536': '9:16', '1536x1024': '16:9', '1024x1024': '1:1' };
     const response = await gemini.models.generateContent({
       model: resolvedModel,
       contents: [{ parts }],
-      config: { responseModalities: ['TEXT', 'IMAGE'] },
+      config: {
+        responseModalities: ['TEXT', 'IMAGE'],
+        imageConfig: { aspectRatio: aspectMap[size] || '9:16' },
+      },
     });
     const imagePart = response.candidates?.[0]?.content?.parts?.find(p => p.inlineData);
     if (!imagePart?.inlineData?.data) throw new Error('No image returned from Gemini');
