@@ -2571,6 +2571,13 @@ BRAND ADAPTATION:
 - Match the brand's energy level and aesthetic (premium vs playful, minimal vs bold)
 - Use the brand's color palette as atmospheric/lighting direction, not literal color instructions
 
+IMPOSSIBLE CONTENT — MUST REWRITE:
+AI video cannot render: readable text, app screens, UI/dashboards, charts, phone displays, logos, branded digital content, or specific numbers/stats.
+If the input prompt describes any of these, rewrite to show the HUMAN EMOTION or REAL-WORLD ACTION instead:
+- "phone showing progress dashboard" → "athlete exhaling with quiet satisfaction, eyes reflecting determination"
+- "notification popping up on screen" → "face lighting up with a subtle smile of recognition"
+- "app showing workout stats" → "hands gripping barbell, chalk dust floating in golden light"
+
 Return ONLY the refined prompt. No preamble, no explanation, no markdown.`;
 
 const VEO_REFINEMENT_INSTRUCTIONS = `Your job: Transform a raw video brief into an optimized prompt for Google Veo AI video generation.
@@ -2606,6 +2613,13 @@ BRAND ADAPTATION:
 - Translate the brand's visual identity into atmospheric and lighting language
 - Match the brand's energy level and aesthetic (premium vs playful, minimal vs bold)
 - Use the brand's color palette as lighting/environmental direction, not literal color instructions
+
+IMPOSSIBLE CONTENT — MUST REWRITE:
+AI video cannot render: readable text, app screens, UI/dashboards, charts, phone displays, logos, branded digital content, or specific numbers/stats.
+If the input prompt describes any of these, rewrite to show the HUMAN EMOTION or REAL-WORLD ACTION instead:
+- "phone showing progress dashboard" → "athlete exhaling with quiet satisfaction, eyes reflecting determination"
+- "notification popping up on screen" → "face lighting up with a subtle smile of recognition"
+- "app showing workout stats" → "hands gripping barbell, chalk dust floating in golden light"
 
 Return ONLY the refined prompt. No preamble, no explanation, no markdown.`;
 
@@ -5237,7 +5251,7 @@ Return ONLY valid JSON (no markdown, no code fences) with this structure:
           "headline": "Bold headline for text overlay (under 10 words)",
           "body": "One supporting sentence",
           "highlight": "key phrase to highlight",
-          "scene": "Vivid 1-2 sentence visual description with motion — what the viewer sees happening",
+          "scene": "Vivid 1-2 sentence FILMABLE visual description — something a real camera could capture. Show human emotion, physical action, or real environments. NEVER mention screens, apps, UI, dashboards, charts, or text displays.",
           "videoMood": "energetic and dynamic, calm and serene, dramatic and intense, etc.",
           "cameraMove": "slow tracking shot, smooth dolly-in, cinematic pan, handheld follow, drone aerial pullback, or static wide angle",
           "duration": "5 or 10"
@@ -5249,7 +5263,7 @@ Return ONLY valid JSON (no markdown, no code fences) with this structure:
 
 Rules:
 - EXACTLY 1 slide per idea with type "video" — never more
-- Scene: describe vivid motion and action, not static images. Think cinematic B-roll
+- Scene: describe vivid motion and action a real camera could film — cinematic B-roll. NEVER include app screens, dashboards, UI, charts, notifications, or phone displays — AI video cannot render these. Instead show the REAL EMOTION or ACTION the product enables (e.g. "phone showing confidence stats" → "athlete closing eyes, breathing deep, then opening them with determination")
 - Headline: punchy, under 10 words — this overlays the video
 - Body: 1 short sentence max
 - Caption: hook line first (under 125 chars), then value, then CTA, then 3-5 hashtags
