@@ -293,7 +293,7 @@ const VEO_API_MODELS = {
 };
 
 function buildVideoPrompt(data, brand) {
-  const scene = data.scene || data.headline || 'dynamic product showcase';
+  const scene = data.scene || data.headline || 'brand-inspired action scene';
   const mood = data.mood || 'energetic and professional';
   const cameraMove = data.cameraMove || 'slow tracking shot';
   const isVeo = Boolean(VEO_API_MODELS[data.videoModel]);
@@ -315,7 +315,7 @@ function buildVideoPrompt(data, brand) {
 
     // Brand context
     brand.defaultBackground ? `Brand aesthetic: ${brand.defaultBackground}.` : null,
-    brand.productKnowledge ? `Product: ${brand.productKnowledge.slice(0, 300)}` : null,
+    brand.productKnowledge ? `Brand world (for atmosphere only — do NOT show screens, apps, or UI): ${brand.productKnowledge.slice(0, 300)}` : null,
 
     // Duration
     `Duration: ${data.duration || 5} seconds.`,
