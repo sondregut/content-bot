@@ -5009,21 +5009,24 @@ downloadSingleBtn.addEventListener('click', async () => {
 downloadAllBtn.addEventListener('click', async () => {
   const filenames = [];
   for (let i = 0; i < slideEdits.length; i++) {
-    if (generatedImages[i]?.filename) {
-      filenames.push(generatedImages[i].filename);
+    const gen = generatedImages[i];
+    if (gen?.filename) {
+      filenames.push(gen.filename);
+    } else if (gen?.url) {
+      // Extract filename from URL for session-restored or externally-hosted images
+      const urlParts = gen.url.split('/');
+      const urlFilename = urlParts[urlParts.length - 1]?.split('?')[0];
+      if (urlFilename && urlFilename.includes('.')) filenames.push(urlFilename);
     }
   }
   if (filenames.length === 0) return;
 
-  let res;
-  if (batchJobId) {
-    res = await authFetch(`/api/download-carousel/${batchJobId}`);
-  } else {
-    res = await authFetch('/api/download-selected', {
-      method: 'POST',
-      body: JSON.stringify({ filenames, brandId: currentBrand }),
-    });
-  }
+  // Always use download-selected (reads from Firebase Storage directly)
+  // — more reliable than download-carousel which depends on in-memory batch jobs
+  const res = await authFetch('/api/download-selected', {
+    method: 'POST',
+    body: JSON.stringify({ filenames, brandId: currentBrand }),
+  });
   if (!res.ok) return;
 
   const blob = await res.blob();

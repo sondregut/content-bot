@@ -6843,32 +6843,43 @@ app.post('/api/download-selected', requireAuth, async (req, res) => {
     return res.status(400).json({ error: 'No filenames provided' });
   }
 
-  const zipName = `${brandId || 'brand'}_slides_${Date.now()}.zip`;
+  // Pre-fetch all files in parallel (local disk or Firebase) before streaming ZIP
+  const files = await Promise.all(filenames.map(async (raw, i) => {
+    const fn = path.basename(raw);
+    const filepath = path.join(outputDir, fn);
+    const ext = fn.endsWith('.mp4') ? '.mp4' : '.png';
+    const archiveName = `slide_${i + 1}${ext}`;
+    try {
+      await fs.access(filepath);
+      return { archiveName, filepath, buffer: null }; // local file
+    } catch {
+      if (bucket) {
+        try {
+          const [buffer] = await bucket.file(`carousel-studio/${fn}`).download();
+          return { archiveName, filepath: null, buffer };
+        } catch { /* skip missing */ }
+      }
+    }
+    return null;
+  }));
 
+  const validFiles = files.filter(Boolean);
+  if (validFiles.length === 0) {
+    return res.status(404).json({ error: 'No files found' });
+  }
+
+  const zipName = `${brandId || 'brand'}_slides_${Date.now()}.zip`;
   res.setHeader('Content-Type', 'application/zip');
   res.setHeader('Content-Disposition', `attachment; filename="${zipName}"`);
 
   const archive = archiver('zip', { zlib: { level: 5 } });
   archive.pipe(res);
 
-  for (let i = 0; i < filenames.length; i++) {
-    const fn = path.basename(filenames[i]);
-    const filepath = path.join(outputDir, fn);
-    const ext = fn.endsWith('.mp4') ? '.mp4' : '.png';
-    const archiveName = `slide_${i + 1}${ext}`;
-    try {
-      await fs.access(filepath);
-      archive.file(filepath, { name: archiveName });
-    } catch {
-      // Not on local disk — try Firebase Storage
-      if (bucket) {
-        try {
-          const [buffer] = await bucket.file(`carousel-studio/${fn}`).download();
-          archive.append(buffer, { name: archiveName });
-        } catch {
-          // skip missing files
-        }
-      }
+  for (const file of validFiles) {
+    if (file.filepath) {
+      archive.file(file.filepath, { name: file.archiveName });
+    } else {
+      archive.append(file.buffer, { name: file.archiveName });
     }
   }
 
