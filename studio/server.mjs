@@ -5230,6 +5230,37 @@ app.get('/api/video-status/:jobId', requireAuth, (req, res) => {
   });
 });
 
+// --- Talking Head Script Generator ---
+app.post('/api/generate-talking-head-script', requireAuth, async (req, res) => {
+  try {
+    const { topic, brand: brandId } = req.body || {};
+    if (!brandId) return res.status(400).json({ error: 'Missing brand' });
+
+    const brand = await getBrandAsync(brandId, req.user?.uid);
+    const brandCtx = [brand.systemPrompt, brand.productKnowledge ? `Product knowledge: ${brand.productKnowledge}` : ''].filter(Boolean).join('\n\n');
+    const brandCtxBlock = brandCtx ? `<brand_context>\n${brandCtx}\n</brand_context>\n\n` : '';
+
+    const systemMsg = `${brandCtxBlock}You write scripts for talking-head social media videos for ${brand.name}. Write a punchy, conversational script (30-60 seconds when spoken). Speak directly to camera as the presenter — use "you" to address the viewer. Include a strong hook in the first sentence. Keep it natural and energetic. Return ONLY the script text, no stage directions or formatting.`;
+    const userMsg = topic
+      ? `Write a talking-head video script for ${brand.name} about: ${topic}`
+      : `Write a talking-head video script for ${brand.name}. Pick a compelling, specific topic that would resonate with the brand's audience and showcase what makes the brand unique.`;
+
+    const script = await generateText({
+      model: req.body?.textModel,
+      system: systemMsg,
+      messages: [{ role: 'user', content: userMsg }],
+      maxTokens: 1024,
+      req,
+    });
+
+    if (!script) throw new Error('AI returned no script');
+    res.json({ script });
+  } catch (err) {
+    console.error('[TalkingHead Script]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // --- Voices API (OpenAI built-in + optional ElevenLabs) ---
 app.get('/api/voices', requireAuth, async (req, res) => {
   try {
@@ -5265,7 +5296,6 @@ app.get('/api/voices', requireAuth, async (req, res) => {
 app.post('/api/generate-talking-head', requireAuth, generationLimiter, async (req, res) => {
   try {
     const { script, voice, voiceProvider, personId, avatarSource, uploadedAvatar, lipSyncModel, brand: brandId } = req.body || {};
-    if (!script || !script.trim()) return res.status(400).json({ error: 'Missing script or topic' });
     if (!brandId) return res.status(400).json({ error: 'Missing brand' });
 
     const falKey = req.headers['x-fal-key'];
@@ -5280,7 +5310,7 @@ app.post('/api/generate-talking-head', requireAuth, generationLimiter, async (re
       userId: req.user?.uid || null,
       status: 'running',
       step: 'writing-script',
-      prompt: script.trim(),
+      prompt: (script || '').trim() || '(auto-generated)',
       refinedPrompt: null,
       url: null,
       filename: null,
@@ -5313,15 +5343,18 @@ app.post('/api/generate-talking-head', requireAuth, generationLimiter, async (re
 
         // Step 1: Write/refine script with Claude
         job.step = 'writing-script';
-        let finalScript = script.trim();
+        let finalScript = (script || '').trim();
         try {
-          const isTopicOnly = finalScript.split(/\s+/).length < 20;
+          const isEmpty = !finalScript;
+          const isTopicOnly = isEmpty || finalScript.split(/\s+/).length < 20;
           const systemMsg = isTopicOnly
-            ? `${brandCtxBlock}You write scripts for talking-head social media videos for ${brand.name}. Given a topic or brief, write a punchy, conversational script (30-60 seconds when spoken). Speak directly to camera as if you're the presenter. Include a hook in the first sentence. Return ONLY the script text.`
+            ? `${brandCtxBlock}You write scripts for talking-head social media videos for ${brand.name}. ${isEmpty ? 'Pick an engaging topic relevant to the brand and its audience.' : 'Given a topic or brief,'} Write a punchy, conversational script (30-60 seconds when spoken). Speak directly to camera as if you're the presenter. Include a hook in the first sentence. Return ONLY the script text.`
             : `${brandCtxBlock}You refine scripts for talking-head social media videos. Keep it conversational, punchy, and under 60 seconds when spoken. Preserve the core message but improve flow and hooks. Return ONLY the refined script text, nothing else.`;
-          const userMsg = isTopicOnly
-            ? `Write a talking-head video script for ${brand.name} about: ${finalScript}`
-            : `Refine this talking-head video script for ${brand.name}:\n\n${finalScript}`;
+          const userMsg = isEmpty
+            ? `Write a talking-head video script for ${brand.name}. Pick a compelling topic that would resonate with the brand's audience.`
+            : isTopicOnly
+              ? `Write a talking-head video script for ${brand.name} about: ${finalScript}`
+              : `Refine this talking-head video script for ${brand.name}:\n\n${finalScript}`;
 
           job.step = isTopicOnly ? 'writing-script' : 'refining';
           const refined = await generateText({
@@ -5336,8 +5369,10 @@ app.post('/api/generate-talking-head', requireAuth, generationLimiter, async (re
             finalScript = refined;
           }
         } catch (err) {
-          console.warn('[TalkingHead] Script generation failed, using raw input:', err.message);
+          console.warn('[TalkingHead] Script generation failed:', err.message);
+          if (!finalScript) throw new Error('Failed to generate script. Please write one manually or try again.');
         }
+        if (!finalScript) throw new Error('Failed to generate script. Please write one manually or try again.');
         console.log(`[TalkingHead] Script: ${finalScript.slice(0, 100)}...`);
 
         // Step 2: Generate speech

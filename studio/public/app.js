@@ -6329,9 +6329,32 @@ document.getElementById('open-video-studio-btn').addEventListener('click', openV
 document.getElementById('sidebar-video-studio-btn').addEventListener('click', openVideoStudio);
 document.getElementById('video-studio-back-btn').addEventListener('click', closeVideoStudio);
 
+document.getElementById('video-write-script-btn').addEventListener('click', async () => {
+  if (!currentBrand) { videoStudioStatus.textContent = 'Select a brand first.'; return; }
+  const btn = document.getElementById('video-write-script-btn');
+  btn.disabled = true;
+  btn.textContent = 'Writing...';
+  videoStudioStatus.textContent = '';
+  try {
+    const topic = videoScript.value.trim();
+    const res = await authFetch('/api/generate-talking-head-script', {
+      method: 'POST',
+      body: JSON.stringify({ topic, brand: currentBrand }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Script generation failed');
+    videoScript.value = data.script;
+    videoStudioStatus.textContent = 'Script ready! Edit if you like, then hit Generate.';
+  } catch (err) {
+    videoStudioStatus.textContent = `Error: ${err.message}`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Write script for me';
+  }
+});
+
 generateTalkingHeadBtn.addEventListener('click', async () => {
   const script = videoScript.value.trim();
-  if (!script) { videoStudioStatus.textContent = 'Describe what the video should be about.'; return; }
   if (!currentBrand) { videoStudioStatus.textContent = 'Select a brand first.'; return; }
 
   const avatarVal = videoAvatarSource.value;
