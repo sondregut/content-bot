@@ -455,6 +455,138 @@ async function generateVideoSlide(prompt, options = {}) {
   throw new Error('Video generation timed out after 10 minutes');
 }
 
+// --- Talking Head: TTS + Lip Sync ---
+
+function getElevenLabsKey(req) {
+  return req.headers['x-elevenlabs-key'] || null;
+}
+
+async function generateSpeech(text, { voice, req }) {
+  const openai = getOpenAI(req);
+  if (!openai) throw new Error('Add your OpenAI API key in Settings for voice generation.');
+  const mp3 = await openai.audio.speech.create({
+    model: 'gpt-4o-mini-tts',
+    voice: voice || 'alloy',
+    input: text,
+  });
+  return Buffer.from(await mp3.arrayBuffer());
+}
+
+async function generateSpeechElevenLabs(text, { key, voiceId }) {
+  const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+    method: 'POST',
+    headers: {
+      'xi-api-key': key,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      text,
+      model_id: 'eleven_multilingual_v2',
+    }),
+  });
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`ElevenLabs TTS failed (${res.status}): ${errText}`);
+  }
+  return Buffer.from(await res.arrayBuffer());
+}
+
+async function listElevenLabsVoices(key) {
+  const res = await fetch('https://api.elevenlabs.io/v1/voices', {
+    headers: { 'xi-api-key': key },
+  });
+  if (!res.ok) throw new Error(`ElevenLabs voices fetch failed (${res.status})`);
+  const data = await res.json();
+  return (data.voices || []).map(v => ({
+    id: v.voice_id,
+    name: v.name,
+    provider: 'elevenlabs',
+    preview: v.preview_url || null,
+  }));
+}
+
+async function uploadAudioToStorage(buffer, filename) {
+  if (!bucket) {
+    await fs.writeFile(path.join(outputDir, filename), buffer);
+    return `/output/${filename}`;
+  }
+  try {
+    const file = bucket.file(`carousel-studio/${filename}`);
+    await file.save(buffer, { metadata: { contentType: 'audio/mpeg' } });
+    await file.makePublic();
+    return `https://storage.googleapis.com/${bucket.name}/carousel-studio/${filename}`;
+  } catch (err) {
+    console.error('[Audio Upload] Failed, falling back to local disk:', err.message);
+    await fs.writeFile(path.join(outputDir, filename), buffer);
+    return `/output/${filename}`;
+  }
+}
+
+async function uploadImageForFal(buffer, filename) {
+  // Upload image to storage and return a public URL that fal.ai can access
+  if (!bucket) {
+    await fs.writeFile(path.join(outputDir, filename), buffer);
+    // Local dev: return local path (won't work with fal.ai — user must test with cloud storage)
+    return `http://localhost:${PORT}/output/${filename}`;
+  }
+  const file = bucket.file(`carousel-studio/${filename}`);
+  await file.save(buffer, { metadata: { contentType: 'image/png' } });
+  await file.makePublic();
+  return `https://storage.googleapis.com/${bucket.name}/carousel-studio/${filename}`;
+}
+
+async function generateTalkingFace(imageUrl, audioUrl, { falKey, model }) {
+  const endpoint = model === 'fal-ai/sadtalker'
+    ? 'https://queue.fal.run/fal-ai/sadtalker'
+    : 'https://queue.fal.run/veed/fabric-1.0';
+
+  const input = model === 'fal-ai/sadtalker'
+    ? { source_image_url: imageUrl, driven_audio_url: audioUrl }
+    : { image_url: imageUrl, audio_url: audioUrl, resolution: '720p' };
+
+  const submitRes = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Key ${falKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(input),
+  });
+
+  if (!submitRes.ok) {
+    const errText = await submitRes.text();
+    throw new Error(`fal.ai lip sync submit failed (${submitRes.status}): ${errText}`);
+  }
+
+  const submitData = await submitRes.json();
+  const { request_id, status_url, response_url } = submitData;
+  if (!request_id) throw new Error('fal.ai did not return a request_id for lip sync');
+
+  const deadline = Date.now() + 600_000;
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 5000));
+    const statusRes = await fetch(status_url, {
+      headers: { 'Authorization': `Key ${falKey}` },
+    });
+    if (!statusRes.ok) continue;
+    const status = await statusRes.json();
+    if (status.status === 'COMPLETED') {
+      const resultRes = await fetch(response_url, {
+        headers: { 'Authorization': `Key ${falKey}` },
+      });
+      if (!resultRes.ok) throw new Error(`fal.ai lip sync result fetch failed (${resultRes.status})`);
+      const result = await resultRes.json();
+      const videoUrl = result.video?.url;
+      if (!videoUrl) throw new Error('fal.ai returned success but no video URL for lip sync');
+      return videoUrl;
+    }
+    if (status.status === 'FAILED') {
+      throw new Error(`Lip sync generation failed: ${status.error || 'unknown error'}`);
+    }
+  }
+  throw new Error('Lip sync generation timed out after 10 minutes');
+}
+
 // --- Firebase Admin ---
 let bucket = null;
 let db = null;
@@ -5087,6 +5219,7 @@ app.get('/api/video-status/:jobId', requireAuth, (req, res) => {
   res.json({
     jobId: job.id,
     status: job.status,
+    step: job.step || null,
     url: job.url,
     filename: job.filename,
     rawFilename: job.rawFilename || null,
@@ -5095,6 +5228,196 @@ app.get('/api/video-status/:jobId', requireAuth, (req, res) => {
     refinedPrompt: job.refinedPrompt,
     error: job.error,
   });
+});
+
+// --- Voices API (OpenAI built-in + optional ElevenLabs) ---
+app.get('/api/voices', requireAuth, async (req, res) => {
+  try {
+    const voices = [
+      { id: 'alloy', name: 'Alloy', provider: 'openai' },
+      { id: 'ash', name: 'Ash', provider: 'openai' },
+      { id: 'coral', name: 'Coral', provider: 'openai' },
+      { id: 'echo', name: 'Echo', provider: 'openai' },
+      { id: 'fable', name: 'Fable', provider: 'openai' },
+      { id: 'onyx', name: 'Onyx', provider: 'openai' },
+      { id: 'nova', name: 'Nova', provider: 'openai' },
+      { id: 'sage', name: 'Sage', provider: 'openai' },
+      { id: 'shimmer', name: 'Shimmer', provider: 'openai' },
+    ];
+
+    const elevenLabsKey = getElevenLabsKey(req);
+    if (elevenLabsKey) {
+      try {
+        const elVoices = await listElevenLabsVoices(elevenLabsKey);
+        voices.push(...elVoices);
+      } catch (err) {
+        console.warn('[Voices] ElevenLabs fetch failed:', err.message);
+      }
+    }
+
+    res.json({ voices });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- Talking Head Pipeline ---
+app.post('/api/generate-talking-head', requireAuth, generationLimiter, async (req, res) => {
+  try {
+    const { script, voice, voiceProvider, personId, lipSyncModel, brand: brandId } = req.body || {};
+    if (!script || !script.trim()) return res.status(400).json({ error: 'Missing script text' });
+    if (!brandId) return res.status(400).json({ error: 'Missing brand' });
+
+    const falKey = req.headers['x-fal-key'];
+    if (!falKey) return res.status(400).json({ error: 'Add your Fal.ai API key in Settings for talking-head video generation.' });
+
+    const brand = await getBrandAsync(brandId, req.user?.uid);
+    const model = lipSyncModel === 'fal-ai/sadtalker' ? 'fal-ai/sadtalker' : 'veed/fabric-1.0';
+
+    const jobId = crypto.randomUUID().slice(0, 12);
+    const job = {
+      id: jobId,
+      userId: req.user?.uid || null,
+      status: 'running',
+      step: 'refining',
+      prompt: script.trim(),
+      refinedPrompt: null,
+      url: null,
+      filename: null,
+      error: null,
+    };
+    videoJobs.set(jobId, job);
+
+    // Resolve person before entering background (needs req.user)
+    let person = null;
+    if (personId) {
+      person = await getPersonById(personId, req.user?.uid);
+      if (!person || !person.photos?.length) {
+        videoJobs.delete(jobId);
+        return res.status(400).json({ error: 'Person not found or has no photos' });
+      }
+    }
+
+    // Capture headers needed in background
+    const capturedReq = {
+      headers: { ...req.headers },
+      body: req.body,
+      user: req.user,
+    };
+
+    // Process in background
+    (async () => {
+      try {
+        // Step 1: Refine script with Claude
+        job.step = 'refining';
+        let finalScript = script.trim();
+        try {
+          const brandCtx = [brand.systemPrompt, brand.productKnowledge ? `Product knowledge: ${brand.productKnowledge}` : ''].filter(Boolean).join('\n\n');
+          const refined = await generateText({
+            model: capturedReq.body?.textModel,
+            system: `${brandCtx ? `<brand_context>\n${brandCtx}\n</brand_context>\n\n` : ''}You refine scripts for talking-head social media videos. Keep it conversational, punchy, and under 60 seconds when spoken. Preserve the core message but improve flow and hooks. Return ONLY the refined script text, nothing else.`,
+            messages: [{ role: 'user', content: `Refine this talking-head video script for ${brand.name}:\n\n${finalScript}` }],
+            maxTokens: 1024,
+            req: capturedReq,
+          });
+          if (refined) {
+            job.refinedPrompt = refined;
+            finalScript = refined;
+          }
+        } catch (err) {
+          console.warn('[TalkingHead] Script refinement failed, using raw script:', err.message);
+        }
+
+        // Step 2: Generate speech
+        job.step = 'generating-voice';
+        let audioBuffer;
+        const elevenLabsKey = getElevenLabsKey(capturedReq);
+        if (voiceProvider === 'elevenlabs' && elevenLabsKey) {
+          audioBuffer = await generateSpeechElevenLabs(finalScript, { key: elevenLabsKey, voiceId: voice });
+        } else {
+          audioBuffer = await generateSpeech(finalScript, { voice: voice || 'alloy', req: capturedReq });
+        }
+        const audioSlug = crypto.randomUUID().slice(0, 8);
+        const audioFilename = `tts_${brandId}_${Date.now()}_${audioSlug}.mp3`;
+        const audioUrl = await uploadAudioToStorage(audioBuffer, audioFilename);
+        console.log(`[TalkingHead] Audio generated: ${audioFilename} (${(audioBuffer.length / 1024).toFixed(1)}KB)`);
+
+        // Step 3: Prepare avatar
+        job.step = 'preparing-avatar';
+        let avatarUrl;
+        if (person) {
+          const photo = person.photos[0];
+          let avatarBuffer;
+          if (bucket) {
+            const file = bucket.file(photo.storagePath);
+            [avatarBuffer] = await file.download();
+          } else {
+            const src = path.join(outputDir, path.basename(photo.storagePath));
+            avatarBuffer = await fs.readFile(src);
+          }
+          // Resize for lip sync (max 1024px)
+          avatarBuffer = await sharp(avatarBuffer)
+            .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
+            .png()
+            .toBuffer();
+          const avatarFilename = `avatar_${crypto.randomUUID().slice(0, 8)}.png`;
+          avatarUrl = await uploadImageForFal(avatarBuffer, avatarFilename);
+        } else {
+          throw new Error('Please select a person for the talking-head video.');
+        }
+        console.log(`[TalkingHead] Avatar prepared: ${avatarUrl.slice(0, 80)}...`);
+
+        // Step 4: Generate talking face via fal.ai
+        job.step = 'generating-video';
+        // Ensure audioUrl is absolute for fal.ai
+        let absoluteAudioUrl = audioUrl;
+        if (audioUrl.startsWith('/')) {
+          const proto = capturedReq.headers['x-forwarded-proto'] || 'http';
+          const host = capturedReq.headers['x-forwarded-host'] || capturedReq.headers.host || `localhost:${PORT}`;
+          absoluteAudioUrl = `${proto}://${host}${audioUrl}`;
+        }
+        const videoResultUrl = await generateTalkingFace(avatarUrl, absoluteAudioUrl, { falKey, model });
+        console.log(`[TalkingHead] Video generated: ${videoResultUrl.slice(0, 80)}...`);
+
+        // Step 5: Download + finalize
+        job.step = 'finalizing';
+        const videoRes = await fetch(videoResultUrl);
+        if (!videoRes.ok) throw new Error('Failed to download lip sync video');
+        let videoBuffer = Buffer.from(await videoRes.arrayBuffer());
+
+        const slug = crypto.randomUUID().slice(0, 8);
+        const ts = Date.now();
+        const filename = `talking_${brandId}_${ts}_${slug}.mp4`;
+        const url = await uploadVideoToStorage(videoBuffer, filename);
+
+        saveImageRecord({
+          userId: capturedReq.user?.uid,
+          brandId,
+          filename,
+          type: 'talking-head',
+          prompt: script.trim(),
+          refinedPrompt: job.refinedPrompt,
+          model: model,
+          brandName: brand.name,
+        });
+
+        job.status = 'done';
+        job.url = url;
+        job.filename = filename;
+        console.log(`[TalkingHead] Complete: ${filename}`);
+      } catch (err) {
+        job.status = 'error';
+        job.error = err.message;
+        console.error('[TalkingHead] Failed:', err.message);
+      }
+      setTimeout(() => videoJobs.delete(jobId), 30 * 60 * 1000);
+    })();
+
+    return res.json({ ok: true, videoJobId: jobId });
+  } catch (err) {
+    console.error('[TalkingHead] Route error:', err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // --- Freeform AI Content Generation ---

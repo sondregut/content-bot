@@ -145,12 +145,14 @@ async function authFetch(url, opts = {}) {
   const anthropicKey = localStorage.getItem(_prefix + 'anthropic_key');
   const geminiKey = localStorage.getItem(_prefix + 'gemini_key');
   const falKey = localStorage.getItem(_prefix + 'fal_key');
+  const elevenLabsKey = localStorage.getItem(_prefix + 'elevenlabs_key');
   const tiktokClientKey = localStorage.getItem(_prefix + 'tiktok_client_key');
   const tiktokClientSecret = localStorage.getItem(_prefix + 'tiktok_client_secret');
   if (openaiKey) opts.headers['X-OpenAI-Key'] = openaiKey;
   if (anthropicKey) opts.headers['X-Anthropic-Key'] = anthropicKey;
   if (geminiKey) opts.headers['X-Gemini-Key'] = geminiKey;
   if (falKey) opts.headers['X-Fal-Key'] = falKey;
+  if (elevenLabsKey) opts.headers['X-ElevenLabs-Key'] = elevenLabsKey;
   if (tiktokClientKey) opts.headers['X-TikTok-Client-Key'] = tiktokClientKey;
   if (tiktokClientSecret) opts.headers['X-TikTok-Client-Secret'] = tiktokClientSecret;
   return fetch(url, opts);
@@ -711,6 +713,7 @@ let selectedElement = 'headline'; // which element is selected for dragging
 // --- API Key Settings ---
 const settingsGeminiKey = document.getElementById('settings-gemini-key');
 const settingsFalKey = document.getElementById('settings-fal-key');
+const settingsElevenLabsKey = document.getElementById('settings-elevenlabs-key');
 const settingsTiktokClientKey = document.getElementById('settings-tiktok-client-key');
 const settingsTiktokClientSecret = document.getElementById('settings-tiktok-client-secret');
 
@@ -742,12 +745,14 @@ function loadApiKeysFromStorage() {
   const anthropic = localStorage.getItem(prefix + 'anthropic_key') || '';
   const gemini = localStorage.getItem(prefix + 'gemini_key') || '';
   const fal = localStorage.getItem(prefix + 'fal_key') || '';
+  const elevenLabs = localStorage.getItem(prefix + 'elevenlabs_key') || '';
   const tiktokKey = localStorage.getItem(prefix + 'tiktok_client_key') || '';
   const tiktokSecret = localStorage.getItem(prefix + 'tiktok_client_secret') || '';
   settingsOpenaiKey.value = openai;
   settingsAnthropicKey.value = anthropic;
   if (settingsGeminiKey) settingsGeminiKey.value = gemini;
   if (settingsFalKey) settingsFalKey.value = fal;
+  if (settingsElevenLabsKey) settingsElevenLabsKey.value = elevenLabs;
   if (settingsTiktokClientKey) settingsTiktokClientKey.value = tiktokKey;
   if (settingsTiktokClientSecret) settingsTiktokClientSecret.value = tiktokSecret;
 }
@@ -810,6 +815,10 @@ settingsSaveBtn.addEventListener('click', async () => {
 
   if (falKey) localStorage.setItem(prefix + 'fal_key', falKey);
   else localStorage.removeItem(prefix + 'fal_key');
+
+  const elevenLabsKey = settingsElevenLabsKey ? settingsElevenLabsKey.value.trim() : '';
+  if (elevenLabsKey) localStorage.setItem(prefix + 'elevenlabs_key', elevenLabsKey);
+  else localStorage.removeItem(prefix + 'elevenlabs_key');
 
   const tiktokKey = settingsTiktokClientKey ? settingsTiktokClientKey.value.trim() : '';
   const tiktokSecret = settingsTiktokClientSecret ? settingsTiktokClientSecret.value.trim() : '';
@@ -1225,6 +1234,7 @@ function populatePersonSelectors() {
   const selectors = [
     { el: document.getElementById('person-select'), requireLora: true },
     { el: document.getElementById('video-person-select'), requireLora: false },
+    { el: document.getElementById('video-studio-person-select'), requireLora: false },
   ];
   for (const { el: select, requireLora } of selectors) {
     if (!select) continue;
@@ -1697,6 +1707,7 @@ function openBrandCreationSidebar() {
   try { document.getElementById('content-plan-view').style.display = 'none'; } catch {}
   try { document.getElementById('personalize-view').style.display = 'none'; } catch {}
   try { document.getElementById('meme-view').style.display = 'none'; } catch {}
+  try { document.getElementById('video-studio-view').style.display = 'none'; } catch {}
   try { document.getElementById('media-library-view').style.display = 'none'; } catch {}
   // Reset form state
   document.getElementById('brand-creation-url').value = '';
@@ -2840,6 +2851,7 @@ function selectIdea(ideaId) {
   emptyState.style.display = 'none';
   personalizeView.style.display = 'none';
   if (document.getElementById('meme-view')) document.getElementById('meme-view').style.display = 'none';
+  if (document.getElementById('video-studio-view')) document.getElementById('video-studio-view').style.display = 'none';
   if (document.getElementById('media-library-view')) document.getElementById('media-library-view').style.display = 'none';
   document.getElementById('content-plan-view').style.display = 'none';
   editorArea.style.display = 'block';
@@ -2899,6 +2911,7 @@ function loadFreeformContent(data) {
   emptyState.style.display = 'none';
   personalizeView.style.display = 'none';
   if (document.getElementById('meme-view')) document.getElementById('meme-view').style.display = 'none';
+  if (document.getElementById('video-studio-view')) document.getElementById('video-studio-view').style.display = 'none';
   if (document.getElementById('media-library-view')) document.getElementById('media-library-view').style.display = 'none';
   editorArea.style.display = 'block';
 
@@ -5506,7 +5519,8 @@ autoGenerateBtn.addEventListener('click', async () => {
     editorArea.style.display = 'none';
     personalizeView.style.display = 'none';
     if (document.getElementById('meme-view')) document.getElementById('meme-view').style.display = 'none';
-  if (document.getElementById('media-library-view')) document.getElementById('media-library-view').style.display = 'none';
+    if (document.getElementById('video-studio-view')) document.getElementById('video-studio-view').style.display = 'none';
+    if (document.getElementById('media-library-view')) document.getElementById('media-library-view').style.display = 'none';
     const contentPlanView = document.getElementById('content-plan-view');
     contentPlanView.style.display = 'block';
     document.getElementById('content-plan-subtitle').textContent =
@@ -5533,6 +5547,7 @@ function openPersonalizeView() {
   emptyState.style.display = 'none';
   editorArea.style.display = 'none';
   if (document.getElementById('meme-view')) document.getElementById('meme-view').style.display = 'none';
+  if (document.getElementById('video-studio-view')) document.getElementById('video-studio-view').style.display = 'none';
   if (document.getElementById('media-library-view')) document.getElementById('media-library-view').style.display = 'none';
   personalizeView.style.display = 'block';
   renderFaceStudioPersons();
@@ -5630,6 +5645,7 @@ function openMemeView() {
   editorArea.style.display = 'none';
   personalizeView.style.display = 'none';
   document.getElementById('content-plan-view').style.display = 'none';
+  if (document.getElementById('video-studio-view')) document.getElementById('video-studio-view').style.display = 'none';
   if (document.getElementById('media-library-view')) document.getElementById('media-library-view').style.display = 'none';
   memeView.style.display = 'block';
   updateMemePreviewAspect();
@@ -6176,6 +6192,223 @@ function clearSession() {
   localStorage.removeItem(SESSION_KEY);
 }
 
+// --- Video Studio ---
+// =============================================
+
+const videoStudioView = document.getElementById('video-studio-view');
+const videoScript = document.getElementById('video-script');
+const videoVoiceSelect = document.getElementById('video-voice-select');
+const videoLipsyncModel = document.getElementById('video-lipsync-model');
+const videoStudioPersonSelect = document.getElementById('video-studio-person-select');
+const generateTalkingHeadBtn = document.getElementById('generate-talking-head-btn');
+const videoStudioStatus = document.getElementById('video-studio-status');
+const videoStudioProgress = document.getElementById('video-studio-progress');
+const videoStudioProgressFill = document.getElementById('video-studio-progress-fill');
+const videoStudioProgressLabel = document.getElementById('video-studio-progress-label');
+const videoStudioPreviewVideo = document.getElementById('video-studio-preview-video');
+const downloadTalkingHeadBtn = document.getElementById('download-talking-head-btn');
+const videoRefineBtn = document.getElementById('video-refine-btn');
+
+let videoStudioResult = null;
+
+function openVideoStudio() {
+  emptyState.style.display = 'none';
+  editorArea.style.display = 'none';
+  personalizeView.style.display = 'none';
+  if (memeView) memeView.style.display = 'none';
+  document.getElementById('content-plan-view').style.display = 'none';
+  if (document.getElementById('media-library-view')) document.getElementById('media-library-view').style.display = 'none';
+  videoStudioView.style.display = 'block';
+  populatePersonSelectors();
+  loadVideoStudioVoices();
+}
+
+function closeVideoStudio() {
+  videoStudioView.style.display = 'none';
+  if (selectedIdea) {
+    editorArea.style.display = 'block';
+  } else {
+    emptyState.style.display = 'flex';
+  }
+}
+
+async function loadVideoStudioVoices() {
+  try {
+    const res = await authFetch('/api/voices');
+    if (!res.ok) return;
+    const data = await res.json();
+    const currentVal = videoVoiceSelect.value;
+    videoVoiceSelect.innerHTML = '';
+    const openaiGroup = document.createElement('optgroup');
+    openaiGroup.label = 'OpenAI';
+    let elevenGroup = null;
+    for (const v of data.voices) {
+      const opt = document.createElement('option');
+      opt.value = v.id;
+      opt.textContent = v.name;
+      opt.dataset.provider = v.provider;
+      if (v.provider === 'elevenlabs') {
+        if (!elevenGroup) {
+          elevenGroup = document.createElement('optgroup');
+          elevenGroup.label = 'ElevenLabs';
+        }
+        elevenGroup.appendChild(opt);
+      } else {
+        openaiGroup.appendChild(opt);
+      }
+    }
+    videoVoiceSelect.appendChild(openaiGroup);
+    if (elevenGroup) videoVoiceSelect.appendChild(elevenGroup);
+    // Restore previous selection
+    if (currentVal && videoVoiceSelect.querySelector(`option[value="${currentVal}"]`)) {
+      videoVoiceSelect.value = currentVal;
+    } else {
+      videoVoiceSelect.value = 'nova';
+    }
+  } catch (err) {
+    console.warn('[VideoStudio] Failed to load voices:', err.message);
+  }
+}
+
+const VIDEO_STEP_PROGRESS = {
+  'refining': { pct: 10, label: 'Refining script...' },
+  'generating-voice': { pct: 25, label: 'Generating voice...' },
+  'preparing-avatar': { pct: 40, label: 'Preparing avatar...' },
+  'generating-video': { pct: 60, label: 'Generating lip sync video...' },
+  'finalizing': { pct: 90, label: 'Finalizing...' },
+};
+
+document.getElementById('open-video-studio-btn').addEventListener('click', openVideoStudio);
+document.getElementById('sidebar-video-studio-btn').addEventListener('click', openVideoStudio);
+document.getElementById('video-studio-back-btn').addEventListener('click', closeVideoStudio);
+
+videoRefineBtn.addEventListener('click', async () => {
+  const script = videoScript.value.trim();
+  if (!script) { videoStudioStatus.textContent = 'Write a script first.'; return; }
+  if (!currentBrand) { videoStudioStatus.textContent = 'Select a brand first.'; return; }
+  videoRefineBtn.disabled = true;
+  videoStudioStatus.textContent = 'Refining script with AI...';
+  try {
+    const brand = brands.find(b => b.id === currentBrand);
+    const res = await authFetch('/api/generate-freeform', {
+      method: 'POST',
+      body: JSON.stringify({
+        prompt: `Rewrite this as a punchy, conversational talking-head video script (under 60 seconds when spoken). Keep the core message. Return ONLY the script text:\n\n${script}`,
+        brand: currentBrand,
+        slideCount: 1,
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'Refinement failed');
+    }
+    const data = await res.json();
+    // The freeform endpoint returns slides — extract text from first slide
+    if (data.slides && data.slides[0]) {
+      const slide = data.slides[0];
+      const parts = [slide.headline, slide.body].filter(Boolean);
+      videoScript.value = parts.join('\n\n') || script;
+    }
+    videoStudioStatus.textContent = 'Script refined!';
+  } catch (err) {
+    videoStudioStatus.textContent = `Refinement failed: ${err.message}`;
+  } finally {
+    videoRefineBtn.disabled = false;
+  }
+});
+
+generateTalkingHeadBtn.addEventListener('click', async () => {
+  const script = videoScript.value.trim();
+  if (!script) { videoStudioStatus.textContent = 'Write a script first.'; return; }
+  if (!currentBrand) { videoStudioStatus.textContent = 'Select a brand first.'; return; }
+  const personId = videoStudioPersonSelect.value;
+  if (!personId) { videoStudioStatus.textContent = 'Select a person avatar.'; return; }
+
+  const selectedVoiceOpt = videoVoiceSelect.selectedOptions[0];
+  const voiceProvider = selectedVoiceOpt?.dataset?.provider || 'openai';
+  const voice = videoVoiceSelect.value;
+
+  generateTalkingHeadBtn.disabled = true;
+  videoStudioStatus.textContent = '';
+  videoStudioProgress.style.display = 'flex';
+  videoStudioProgressFill.style.width = '5%';
+  videoStudioProgressLabel.textContent = 'Starting...';
+  downloadTalkingHeadBtn.style.display = 'none';
+  videoStudioPreviewVideo.style.display = 'none';
+  document.querySelector('.video-placeholder').style.display = '';
+
+  try {
+    const res = await authFetch('/api/generate-talking-head', {
+      method: 'POST',
+      body: JSON.stringify({
+        script,
+        voice,
+        voiceProvider,
+        personId,
+        lipSyncModel: videoLipsyncModel.value,
+        brand: currentBrand,
+      }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Generation failed');
+
+    const jobId = data.videoJobId;
+    let elapsed = 0;
+
+    while (true) {
+      await new Promise(r => setTimeout(r, 3000));
+      elapsed += 3;
+      const pollRes = await authFetch(`/api/video-status/${jobId}`);
+      if (!pollRes.ok) continue;
+      const job = await pollRes.json();
+
+      // Update progress bar based on step
+      const stepInfo = VIDEO_STEP_PROGRESS[job.step] || { pct: 50, label: `Processing... (${elapsed}s)` };
+      videoStudioProgressFill.style.width = stepInfo.pct + '%';
+      videoStudioProgressLabel.textContent = `${stepInfo.label} (${elapsed}s)`;
+
+      if (job.status === 'done') {
+        videoStudioProgressFill.style.width = '100%';
+        videoStudioProgressLabel.textContent = 'Done!';
+        videoStudioResult = { url: job.url, filename: job.filename };
+        document.querySelector('.video-placeholder').style.display = 'none';
+        videoStudioPreviewVideo.src = job.url;
+        videoStudioPreviewVideo.style.display = 'block';
+        downloadTalkingHeadBtn.style.display = '';
+        videoStudioStatus.textContent = job.refinedPrompt ? 'Video generated (script refined by AI).' : 'Video generated!';
+        setTimeout(() => { videoStudioProgress.style.display = 'none'; }, 2000);
+        break;
+      }
+      if (job.status === 'error') {
+        throw new Error(job.error || 'Video generation failed');
+      }
+    }
+  } catch (err) {
+    videoStudioStatus.textContent = `Error: ${err.message}`;
+    videoStudioProgress.style.display = 'none';
+  } finally {
+    generateTalkingHeadBtn.disabled = false;
+  }
+});
+
+downloadTalkingHeadBtn.addEventListener('click', async () => {
+  if (!videoStudioResult) return;
+  try {
+    const res = await fetch(videoStudioResult.url);
+    const blob = await res.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = videoStudioResult.filename || 'talking-head.mp4';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
+  } catch (err) {
+    videoStudioStatus.textContent = `Download failed: ${err.message}`;
+  }
+});
+
 // --- Media Library ---
 // =============================================
 
@@ -6468,6 +6701,7 @@ async function openMediaLibrary() {
   editorArea.style.display = 'none';
   personalizeView.style.display = 'none';
   if (document.getElementById('meme-view')) document.getElementById('meme-view').style.display = 'none';
+  if (document.getElementById('video-studio-view')) document.getElementById('video-studio-view').style.display = 'none';
   document.getElementById('content-plan-view').style.display = 'none';
   mediaLibraryView.style.display = 'block';
 

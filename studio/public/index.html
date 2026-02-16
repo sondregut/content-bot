@@ -123,6 +123,7 @@
             <div class="sidebar-footer">
               <button type="button" class="sidebar-face-btn" id="sidebar-face-btn">&#128247; Face Studio</button>
               <button type="button" class="sidebar-face-btn" id="sidebar-meme-btn">&#127912; Meme Studio</button>
+              <button type="button" class="sidebar-face-btn" id="sidebar-video-studio-btn">&#127908; Video Studio</button>
               <button type="button" class="sidebar-face-btn" id="sidebar-media-btn">&#128194; Media Library</button>
             </div>
           </div>
@@ -239,6 +240,14 @@
               <h3>Generate a Meme</h3>
               <p>Describe a meme concept and AI generates a shareable image for your brand.</p>
               <button type="button" class="btn primary" id="open-meme-btn">Open Meme Studio</button>
+            </div>
+
+            <!-- Video Studio CTA -->
+            <div class="personalize-cta" id="video-studio-cta">
+              <div class="personalize-cta-icon">&#127908;</div>
+              <h3>Talking Head Video</h3>
+              <p>Turn a script into a talking-head reel. AI generates voice + lip sync on a person's photo.</p>
+              <button type="button" class="btn primary" id="open-video-studio-btn">Open Video Studio</button>
             </div>
           </div>
 
@@ -413,6 +422,74 @@
                   </div>
                 </div>
                 <button type="button" class="btn small" id="download-meme-btn" style="display:none;margin-top:8px">Download Meme</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Video Studio View -->
+          <div class="video-studio-view" id="video-studio-view" style="display:none">
+            <div class="personalize-header">
+              <button type="button" class="btn small" id="video-studio-back-btn">&larr; Back</button>
+              <h2>Video Studio</h2>
+            </div>
+
+            <div class="video-studio-layout">
+              <!-- Left column: Controls -->
+              <div class="video-studio-controls">
+                <label class="label">Script</label>
+                <textarea class="freeform-input" id="video-script" rows="6" placeholder="Write what the person should say. E.g. 'Hey! Did you know that our app helps athletes track their performance in real-time?'"></textarea>
+                <button type="button" class="btn small" id="video-refine-btn" style="margin-top:6px;align-self:flex-start">Refine with AI</button>
+
+                <div class="form-group" style="margin-top:12px">
+                  <label class="label">Avatar (Person)</label>
+                  <select id="video-studio-person-select">
+                    <option value="">Select a person...</option>
+                  </select>
+                  <span class="field-hint">Add persons in Face Studio. No LoRA needed &mdash; just photos.</span>
+                </div>
+
+                <div class="form-row" style="margin-top:12px">
+                  <div class="form-group" style="flex:1">
+                    <label class="label">Voice</label>
+                    <select id="video-voice-select">
+                      <option value="alloy">Alloy</option>
+                      <option value="ash">Ash</option>
+                      <option value="coral">Coral</option>
+                      <option value="echo">Echo</option>
+                      <option value="fable">Fable</option>
+                      <option value="onyx">Onyx</option>
+                      <option value="nova" selected>Nova</option>
+                      <option value="sage">Sage</option>
+                      <option value="shimmer">Shimmer</option>
+                    </select>
+                  </div>
+                  <div class="form-group" style="flex:1">
+                    <label class="label">Lip Sync Model</label>
+                    <select id="video-lipsync-model">
+                      <option value="veed/fabric-1.0">VEED Fabric 1.0</option>
+                      <option value="fal-ai/sadtalker">SadTalker (budget)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <button type="button" class="btn primary" id="generate-talking-head-btn" style="margin-top:16px">Generate Talking Head</button>
+                <div class="freeform-status" id="video-studio-status"></div>
+                <div class="video-studio-progress" id="video-studio-progress" style="display:none">
+                  <div class="video-studio-progress-bar">
+                    <div class="video-studio-progress-fill" id="video-studio-progress-fill"></div>
+                  </div>
+                  <span class="video-studio-progress-label" id="video-studio-progress-label">Preparing...</span>
+                </div>
+              </div>
+
+              <!-- Right column: Preview -->
+              <div class="video-studio-preview">
+                <label class="label">Preview</label>
+                <div class="video-preview-container" id="video-preview-container">
+                  <div class="video-placeholder">Your talking-head video will appear here</div>
+                  <video id="video-studio-preview-video" controls style="display:none" playsinline></video>
+                </div>
+                <button type="button" class="btn small" id="download-talking-head-btn" style="display:none;margin-top:8px">Download Video</button>
               </div>
             </div>
           </div>
@@ -1392,6 +1469,16 @@
               </button>
             </div>
             <span class="field-hint">Used for Kling video generation and Flux Kontext Pro face-consistent images. Get one at <a href="https://fal.ai/dashboard/keys" target="_blank" style="color:var(--cyan)">fal.ai/dashboard/keys</a></span>
+          </div>
+          <div class="form-group full">
+            <label class="label" for="settings-elevenlabs-key">ElevenLabs API Key (optional &mdash; voice cloning)</label>
+            <div class="api-key-input-wrap">
+              <input type="password" id="settings-elevenlabs-key" placeholder="sk_..." />
+              <button type="button" class="api-key-toggle" data-target="settings-elevenlabs-key" title="Show/hide key">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path class="eye-open" d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle class="eye-open" cx="12" cy="12" r="3"/><line class="eye-closed" style="display:none" x1="1" y1="1" x2="23" y2="23"/><path class="eye-closed" style="display:none" d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/></svg>
+              </button>
+            </div>
+            <span class="field-hint">Optional. Enables ElevenLabs voices (voice cloning, 32+ languages) in Video Studio. Get one at <a href="https://elevenlabs.io" target="_blank" style="color:var(--cyan)">elevenlabs.io</a></span>
           </div>
           <div class="settings-divider"></div>
           <p class="field-hint" style="margin-bottom:12px">To post carousels to TikTok, create a TikTok Developer App at <a href="https://developers.tiktok.com" target="_blank" style="color:var(--cyan)">developers.tiktok.com</a> and add this callback URL: <code style="color:var(--cyan);font-size:0.85em">&lt;your-domain&gt;/api/tiktok/callback</code></p>
