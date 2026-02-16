@@ -1234,7 +1234,6 @@ function populatePersonSelectors() {
   const selectors = [
     { el: document.getElementById('person-select'), requireLora: true },
     { el: document.getElementById('video-person-select'), requireLora: false },
-    { el: document.getElementById('video-studio-person-select'), requireLora: false },
   ];
   for (const { el: select, requireLora } of selectors) {
     if (!select) continue;
@@ -6199,7 +6198,10 @@ const videoStudioView = document.getElementById('video-studio-view');
 const videoScript = document.getElementById('video-script');
 const videoVoiceSelect = document.getElementById('video-voice-select');
 const videoLipsyncModel = document.getElementById('video-lipsync-model');
-const videoStudioPersonSelect = document.getElementById('video-studio-person-select');
+const videoAvatarSource = document.getElementById('video-studio-avatar-source');
+const videoAvatarFile = document.getElementById('video-studio-avatar-file');
+const videoAvatarFilename = document.getElementById('video-studio-avatar-filename');
+const videoUploadArea = document.getElementById('video-studio-upload-area');
 const generateTalkingHeadBtn = document.getElementById('generate-talking-head-btn');
 const videoStudioStatus = document.getElementById('video-studio-status');
 const videoStudioProgress = document.getElementById('video-studio-progress');
@@ -6207,7 +6209,6 @@ const videoStudioProgressFill = document.getElementById('video-studio-progress-f
 const videoStudioProgressLabel = document.getElementById('video-studio-progress-label');
 const videoStudioPreviewVideo = document.getElementById('video-studio-preview-video');
 const downloadTalkingHeadBtn = document.getElementById('download-talking-head-btn');
-const videoRefineBtn = document.getElementById('video-refine-btn');
 
 let videoStudioResult = null;
 
@@ -6219,7 +6220,7 @@ function openVideoStudio() {
   document.getElementById('content-plan-view').style.display = 'none';
   if (document.getElementById('media-library-view')) document.getElementById('media-library-view').style.display = 'none';
   videoStudioView.style.display = 'block';
-  populatePersonSelectors();
+  populateVideoStudioAvatarDropdown();
   loadVideoStudioVoices();
 }
 
@@ -6231,6 +6232,50 @@ function closeVideoStudio() {
     emptyState.style.display = 'flex';
   }
 }
+
+function populateVideoStudioAvatarDropdown() {
+  const currentVal = videoAvatarSource.value;
+  videoAvatarSource.innerHTML = '';
+  // Default: AI-generated
+  const aiOpt = document.createElement('option');
+  aiOpt.value = 'ai';
+  aiOpt.textContent = 'AI-generated face (automatic)';
+  videoAvatarSource.appendChild(aiOpt);
+  // Upload option
+  const uploadOpt = document.createElement('option');
+  uploadOpt.value = 'upload';
+  uploadOpt.textContent = 'Upload a photo';
+  videoAvatarSource.appendChild(uploadOpt);
+  // Persons from Face Studio
+  if (userPersons.length > 0) {
+    const group = document.createElement('optgroup');
+    group.label = 'Face Studio Persons';
+    for (const person of userPersons) {
+      if (!person.photos?.length) continue;
+      const opt = document.createElement('option');
+      opt.value = `person:${person.id}`;
+      opt.textContent = person.name;
+      group.appendChild(opt);
+    }
+    if (group.children.length > 0) videoAvatarSource.appendChild(group);
+  }
+  if (currentVal && videoAvatarSource.querySelector(`option[value="${currentVal}"]`)) {
+    videoAvatarSource.value = currentVal;
+  }
+  updateVideoAvatarUI();
+}
+
+function updateVideoAvatarUI() {
+  const val = videoAvatarSource.value;
+  videoUploadArea.style.display = val === 'upload' ? '' : 'none';
+}
+
+videoAvatarSource.addEventListener('change', updateVideoAvatarUI);
+
+videoAvatarFile.addEventListener('change', () => {
+  const file = videoAvatarFile.files[0];
+  videoAvatarFilename.textContent = file ? file.name : '';
+});
 
 async function loadVideoStudioVoices() {
   try {
@@ -6259,7 +6304,6 @@ async function loadVideoStudioVoices() {
     }
     videoVoiceSelect.appendChild(openaiGroup);
     if (elevenGroup) videoVoiceSelect.appendChild(elevenGroup);
-    // Restore previous selection
     if (currentVal && videoVoiceSelect.querySelector(`option[value="${currentVal}"]`)) {
       videoVoiceSelect.value = currentVal;
     } else {
@@ -6271,9 +6315,12 @@ async function loadVideoStudioVoices() {
 }
 
 const VIDEO_STEP_PROGRESS = {
-  'refining': { pct: 10, label: 'Refining script...' },
+  'writing-script': { pct: 5, label: 'Writing script...' },
+  'refining': { pct: 12, label: 'Refining script...' },
   'generating-voice': { pct: 25, label: 'Generating voice...' },
-  'preparing-avatar': { pct: 40, label: 'Preparing avatar...' },
+  'generating-avatar': { pct: 35, label: 'Generating avatar face...' },
+  'preparing-avatar': { pct: 45, label: 'Preparing avatar...' },
+  'uploading-avatar': { pct: 50, label: 'Uploading avatar...' },
   'generating-video': { pct: 60, label: 'Generating lip sync video...' },
   'finalizing': { pct: 90, label: 'Finalizing...' },
 };
@@ -6282,47 +6329,17 @@ document.getElementById('open-video-studio-btn').addEventListener('click', openV
 document.getElementById('sidebar-video-studio-btn').addEventListener('click', openVideoStudio);
 document.getElementById('video-studio-back-btn').addEventListener('click', closeVideoStudio);
 
-videoRefineBtn.addEventListener('click', async () => {
-  const script = videoScript.value.trim();
-  if (!script) { videoStudioStatus.textContent = 'Write a script first.'; return; }
-  if (!currentBrand) { videoStudioStatus.textContent = 'Select a brand first.'; return; }
-  videoRefineBtn.disabled = true;
-  videoStudioStatus.textContent = 'Refining script with AI...';
-  try {
-    const brand = brands.find(b => b.id === currentBrand);
-    const res = await authFetch('/api/generate-freeform', {
-      method: 'POST',
-      body: JSON.stringify({
-        prompt: `Rewrite this as a punchy, conversational talking-head video script (under 60 seconds when spoken). Keep the core message. Return ONLY the script text:\n\n${script}`,
-        brand: currentBrand,
-        slideCount: 1,
-      }),
-    });
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.error || 'Refinement failed');
-    }
-    const data = await res.json();
-    // The freeform endpoint returns slides — extract text from first slide
-    if (data.slides && data.slides[0]) {
-      const slide = data.slides[0];
-      const parts = [slide.headline, slide.body].filter(Boolean);
-      videoScript.value = parts.join('\n\n') || script;
-    }
-    videoStudioStatus.textContent = 'Script refined!';
-  } catch (err) {
-    videoStudioStatus.textContent = `Refinement failed: ${err.message}`;
-  } finally {
-    videoRefineBtn.disabled = false;
-  }
-});
-
 generateTalkingHeadBtn.addEventListener('click', async () => {
   const script = videoScript.value.trim();
-  if (!script) { videoStudioStatus.textContent = 'Write a script first.'; return; }
+  if (!script) { videoStudioStatus.textContent = 'Describe what the video should be about.'; return; }
   if (!currentBrand) { videoStudioStatus.textContent = 'Select a brand first.'; return; }
-  const personId = videoStudioPersonSelect.value;
-  if (!personId) { videoStudioStatus.textContent = 'Select a person avatar.'; return; }
+
+  const avatarVal = videoAvatarSource.value;
+  // If upload selected, check file
+  if (avatarVal === 'upload' && (!videoAvatarFile.files || !videoAvatarFile.files[0])) {
+    videoStudioStatus.textContent = 'Choose a photo to upload, or switch to AI-generated.';
+    return;
+  }
 
   const selectedVoiceOpt = videoVoiceSelect.selectedOptions[0];
   const voiceProvider = selectedVoiceOpt?.dataset?.provider || 'openai';
@@ -6338,6 +6355,19 @@ generateTalkingHeadBtn.addEventListener('click', async () => {
   document.querySelector('.video-placeholder').style.display = '';
 
   try {
+    // Upload avatar file if needed
+    let uploadedAvatarFilename = null;
+    if (avatarVal === 'upload') {
+      const formData = new FormData();
+      formData.append('image', videoAvatarFile.files[0]);
+      const uploadRes = await authFetch('/api/upload-reference', { method: 'POST', body: formData });
+      if (!uploadRes.ok) throw new Error('Failed to upload avatar image');
+      const uploadData = await uploadRes.json();
+      uploadedAvatarFilename = uploadData.filename;
+    }
+
+    const personId = avatarVal.startsWith('person:') ? avatarVal.replace('person:', '') : null;
+
     const res = await authFetch('/api/generate-talking-head', {
       method: 'POST',
       body: JSON.stringify({
@@ -6345,6 +6375,8 @@ generateTalkingHeadBtn.addEventListener('click', async () => {
         voice,
         voiceProvider,
         personId,
+        avatarSource: avatarVal === 'upload' ? 'upload' : avatarVal === 'ai' ? 'ai' : 'person',
+        uploadedAvatar: uploadedAvatarFilename,
         lipSyncModel: videoLipsyncModel.value,
         brand: currentBrand,
       }),
@@ -6363,7 +6395,6 @@ generateTalkingHeadBtn.addEventListener('click', async () => {
       if (!pollRes.ok) continue;
       const job = await pollRes.json();
 
-      // Update progress bar based on step
       const stepInfo = VIDEO_STEP_PROGRESS[job.step] || { pct: 50, label: `Processing... (${elapsed}s)` };
       videoStudioProgressFill.style.width = stepInfo.pct + '%';
       videoStudioProgressLabel.textContent = `${stepInfo.label} (${elapsed}s)`;
@@ -6376,8 +6407,9 @@ generateTalkingHeadBtn.addEventListener('click', async () => {
         videoStudioPreviewVideo.src = job.url;
         videoStudioPreviewVideo.style.display = 'block';
         downloadTalkingHeadBtn.style.display = '';
-        videoStudioStatus.textContent = job.refinedPrompt ? 'Video generated (script refined by AI).' : 'Video generated!';
+        videoStudioStatus.textContent = 'Video generated!';
         setTimeout(() => { videoStudioProgress.style.display = 'none'; }, 2000);
+        invalidateMediaLibrary();
         break;
       }
       if (job.status === 'error') {

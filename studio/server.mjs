@@ -5264,8 +5264,8 @@ app.get('/api/voices', requireAuth, async (req, res) => {
 // --- Talking Head Pipeline ---
 app.post('/api/generate-talking-head', requireAuth, generationLimiter, async (req, res) => {
   try {
-    const { script, voice, voiceProvider, personId, lipSyncModel, brand: brandId } = req.body || {};
-    if (!script || !script.trim()) return res.status(400).json({ error: 'Missing script text' });
+    const { script, voice, voiceProvider, personId, avatarSource, uploadedAvatar, lipSyncModel, brand: brandId } = req.body || {};
+    if (!script || !script.trim()) return res.status(400).json({ error: 'Missing script or topic' });
     if (!brandId) return res.status(400).json({ error: 'Missing brand' });
 
     const falKey = req.headers['x-fal-key'];
@@ -5279,7 +5279,7 @@ app.post('/api/generate-talking-head', requireAuth, generationLimiter, async (re
       id: jobId,
       userId: req.user?.uid || null,
       status: 'running',
-      step: 'refining',
+      step: 'writing-script',
       prompt: script.trim(),
       refinedPrompt: null,
       url: null,
@@ -5290,7 +5290,7 @@ app.post('/api/generate-talking-head', requireAuth, generationLimiter, async (re
 
     // Resolve person before entering background (needs req.user)
     let person = null;
-    if (personId) {
+    if (avatarSource === 'person' && personId) {
       person = await getPersonById(personId, req.user?.uid);
       if (!person || !person.photos?.length) {
         videoJobs.delete(jobId);
@@ -5308,15 +5308,26 @@ app.post('/api/generate-talking-head', requireAuth, generationLimiter, async (re
     // Process in background
     (async () => {
       try {
-        // Step 1: Refine script with Claude
-        job.step = 'refining';
+        const brandCtx = [brand.systemPrompt, brand.productKnowledge ? `Product knowledge: ${brand.productKnowledge}` : ''].filter(Boolean).join('\n\n');
+        const brandCtxBlock = brandCtx ? `<brand_context>\n${brandCtx}\n</brand_context>\n\n` : '';
+
+        // Step 1: Write/refine script with Claude
+        job.step = 'writing-script';
         let finalScript = script.trim();
         try {
-          const brandCtx = [brand.systemPrompt, brand.productKnowledge ? `Product knowledge: ${brand.productKnowledge}` : ''].filter(Boolean).join('\n\n');
+          const isTopicOnly = finalScript.split(/\s+/).length < 20;
+          const systemMsg = isTopicOnly
+            ? `${brandCtxBlock}You write scripts for talking-head social media videos for ${brand.name}. Given a topic or brief, write a punchy, conversational script (30-60 seconds when spoken). Speak directly to camera as if you're the presenter. Include a hook in the first sentence. Return ONLY the script text.`
+            : `${brandCtxBlock}You refine scripts for talking-head social media videos. Keep it conversational, punchy, and under 60 seconds when spoken. Preserve the core message but improve flow and hooks. Return ONLY the refined script text, nothing else.`;
+          const userMsg = isTopicOnly
+            ? `Write a talking-head video script for ${brand.name} about: ${finalScript}`
+            : `Refine this talking-head video script for ${brand.name}:\n\n${finalScript}`;
+
+          job.step = isTopicOnly ? 'writing-script' : 'refining';
           const refined = await generateText({
             model: capturedReq.body?.textModel,
-            system: `${brandCtx ? `<brand_context>\n${brandCtx}\n</brand_context>\n\n` : ''}You refine scripts for talking-head social media videos. Keep it conversational, punchy, and under 60 seconds when spoken. Preserve the core message but improve flow and hooks. Return ONLY the refined script text, nothing else.`,
-            messages: [{ role: 'user', content: `Refine this talking-head video script for ${brand.name}:\n\n${finalScript}` }],
+            system: systemMsg,
+            messages: [{ role: 'user', content: userMsg }],
             maxTokens: 1024,
             req: capturedReq,
           });
@@ -5325,8 +5336,9 @@ app.post('/api/generate-talking-head', requireAuth, generationLimiter, async (re
             finalScript = refined;
           }
         } catch (err) {
-          console.warn('[TalkingHead] Script refinement failed, using raw script:', err.message);
+          console.warn('[TalkingHead] Script generation failed, using raw input:', err.message);
         }
+        console.log(`[TalkingHead] Script: ${finalScript.slice(0, 100)}...`);
 
         // Step 2: Generate speech
         job.step = 'generating-voice';
@@ -5343,9 +5355,11 @@ app.post('/api/generate-talking-head', requireAuth, generationLimiter, async (re
         console.log(`[TalkingHead] Audio generated: ${audioFilename} (${(audioBuffer.length / 1024).toFixed(1)}KB)`);
 
         // Step 3: Prepare avatar
-        job.step = 'preparing-avatar';
         let avatarUrl;
-        if (person) {
+
+        if (avatarSource === 'person' && person) {
+          // Use person photo from Face Studio
+          job.step = 'preparing-avatar';
           const photo = person.photos[0];
           let avatarBuffer;
           if (bucket) {
@@ -5355,21 +5369,62 @@ app.post('/api/generate-talking-head', requireAuth, generationLimiter, async (re
             const src = path.join(outputDir, path.basename(photo.storagePath));
             avatarBuffer = await fs.readFile(src);
           }
-          // Resize for lip sync (max 1024px)
           avatarBuffer = await sharp(avatarBuffer)
             .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
             .png()
             .toBuffer();
           const avatarFilename = `avatar_${crypto.randomUUID().slice(0, 8)}.png`;
           avatarUrl = await uploadImageForFal(avatarBuffer, avatarFilename);
+
+        } else if (avatarSource === 'upload' && uploadedAvatar) {
+          // Use uploaded image
+          job.step = 'preparing-avatar';
+          let avatarBuffer;
+          if (bucket) {
+            const file = bucket.file(`carousel-studio/${uploadedAvatar}`);
+            [avatarBuffer] = await file.download();
+          } else {
+            avatarBuffer = await fs.readFile(path.join(uploadsDir, uploadedAvatar));
+          }
+          avatarBuffer = await sharp(avatarBuffer)
+            .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
+            .png()
+            .toBuffer();
+          const avatarFilename = `avatar_${crypto.randomUUID().slice(0, 8)}.png`;
+          avatarUrl = await uploadImageForFal(avatarBuffer, avatarFilename);
+
         } else {
-          throw new Error('Please select a person for the talking-head video.');
+          // AI-generated avatar
+          job.step = 'generating-avatar';
+          const openai = getOpenAI(capturedReq);
+          if (!openai) throw new Error('Add your OpenAI API key in Settings for AI avatar generation.');
+          const avatarPrompt = `Professional headshot portrait photo of a friendly, approachable person looking directly at the camera. Clean background, good lighting, shoulders visible. The person appears to be a brand spokesperson or content creator. Photorealistic, high quality.`;
+          console.log(`[TalkingHead] Generating AI avatar...`);
+          const imgResult = await openai.images.generate({
+            model: 'gpt-image-1',
+            prompt: avatarPrompt,
+            n: 1,
+            size: '1024x1024',
+          });
+          const imgData = imgResult.data?.[0];
+          if (!imgData) throw new Error('AI avatar generation returned no image');
+          let avatarBuffer;
+          if (imgData.b64_json) {
+            avatarBuffer = Buffer.from(imgData.b64_json, 'base64');
+          } else if (imgData.url) {
+            const dlRes = await fetch(imgData.url);
+            avatarBuffer = Buffer.from(await dlRes.arrayBuffer());
+          } else {
+            throw new Error('AI avatar generation returned unexpected format');
+          }
+          job.step = 'uploading-avatar';
+          const avatarFilename = `avatar_ai_${crypto.randomUUID().slice(0, 8)}.png`;
+          avatarUrl = await uploadImageForFal(avatarBuffer, avatarFilename);
         }
-        console.log(`[TalkingHead] Avatar prepared: ${avatarUrl.slice(0, 80)}...`);
+        console.log(`[TalkingHead] Avatar ready: ${avatarUrl.slice(0, 80)}...`);
 
         // Step 4: Generate talking face via fal.ai
         job.step = 'generating-video';
-        // Ensure audioUrl is absolute for fal.ai
         let absoluteAudioUrl = audioUrl;
         if (audioUrl.startsWith('/')) {
           const proto = capturedReq.headers['x-forwarded-proto'] || 'http';

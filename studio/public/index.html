@@ -436,43 +436,54 @@
             <div class="video-studio-layout">
               <!-- Left column: Controls -->
               <div class="video-studio-controls">
-                <label class="label">Script</label>
-                <textarea class="freeform-input" id="video-script" rows="6" placeholder="Write what the person should say. E.g. 'Hey! Did you know that our app helps athletes track their performance in real-time?'"></textarea>
-                <button type="button" class="btn small" id="video-refine-btn" style="margin-top:6px;align-self:flex-start">Refine with AI</button>
+                <label class="label">What should the video be about?</label>
+                <textarea class="freeform-input" id="video-script" rows="4" placeholder="Just describe the topic, e.g. 'explain why morning workouts are better' — or write a full script if you prefer."></textarea>
 
-                <div class="form-group" style="margin-top:12px">
-                  <label class="label">Avatar (Person)</label>
-                  <select id="video-studio-person-select">
-                    <option value="">Select a person...</option>
-                  </select>
-                  <span class="field-hint">Add persons in Face Studio. No LoRA needed &mdash; just photos.</span>
-                </div>
+                <details class="video-studio-advanced" id="video-studio-advanced">
+                  <summary style="cursor:pointer;font-size:13px;color:var(--text-secondary);margin-top:8px">Advanced options</summary>
+                  <div style="margin-top:10px;display:flex;flex-direction:column;gap:10px">
+                    <div class="form-group">
+                      <label class="label">Avatar</label>
+                      <select id="video-studio-avatar-source">
+                        <option value="ai">AI-generated face (automatic)</option>
+                        <option value="upload">Upload a photo</option>
+                      </select>
+                      <div id="video-studio-upload-area" style="display:none;margin-top:8px">
+                        <label class="btn small" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px">
+                          <input type="file" id="video-studio-avatar-file" accept="image/*" style="display:none" />
+                          Choose photo...
+                        </label>
+                        <span class="field-hint" id="video-studio-avatar-filename" style="margin-left:8px"></span>
+                      </div>
+                    </div>
 
-                <div class="form-row" style="margin-top:12px">
-                  <div class="form-group" style="flex:1">
-                    <label class="label">Voice</label>
-                    <select id="video-voice-select">
-                      <option value="alloy">Alloy</option>
-                      <option value="ash">Ash</option>
-                      <option value="coral">Coral</option>
-                      <option value="echo">Echo</option>
-                      <option value="fable">Fable</option>
-                      <option value="onyx">Onyx</option>
-                      <option value="nova" selected>Nova</option>
-                      <option value="sage">Sage</option>
-                      <option value="shimmer">Shimmer</option>
-                    </select>
+                    <div class="form-row">
+                      <div class="form-group" style="flex:1">
+                        <label class="label">Voice</label>
+                        <select id="video-voice-select">
+                          <option value="alloy">Alloy</option>
+                          <option value="ash">Ash</option>
+                          <option value="coral">Coral</option>
+                          <option value="echo">Echo</option>
+                          <option value="fable">Fable</option>
+                          <option value="onyx">Onyx</option>
+                          <option value="nova" selected>Nova</option>
+                          <option value="sage">Sage</option>
+                          <option value="shimmer">Shimmer</option>
+                        </select>
+                      </div>
+                      <div class="form-group" style="flex:1">
+                        <label class="label">Lip Sync Model</label>
+                        <select id="video-lipsync-model">
+                          <option value="veed/fabric-1.0">VEED Fabric 1.0</option>
+                          <option value="fal-ai/sadtalker">SadTalker (budget)</option>
+                        </select>
+                      </div>
+                    </div>
                   </div>
-                  <div class="form-group" style="flex:1">
-                    <label class="label">Lip Sync Model</label>
-                    <select id="video-lipsync-model">
-                      <option value="veed/fabric-1.0">VEED Fabric 1.0</option>
-                      <option value="fal-ai/sadtalker">SadTalker (budget)</option>
-                    </select>
-                  </div>
-                </div>
+                </details>
 
-                <button type="button" class="btn primary" id="generate-talking-head-btn" style="margin-top:16px">Generate Talking Head</button>
+                <button type="button" class="btn primary" id="generate-talking-head-btn" style="margin-top:16px">Generate Video</button>
                 <div class="freeform-status" id="video-studio-status"></div>
                 <div class="video-studio-progress" id="video-studio-progress" style="display:none">
                   <div class="video-studio-progress-bar">
