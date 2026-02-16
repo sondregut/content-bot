@@ -6544,21 +6544,46 @@ app.get('/api/images', requireAuth, async (req, res) => {
     const col = db.collection('generated_images');
     let query = col.where('userId', '==', userId);
 
+    // Type/liked filters need composite indexes (userId + type + createdAt).
+    // If the index doesn't exist yet, fall back to fetching all + filtering in memory.
+    const typeFilter = req.query.type;
+    const likedFilter = req.query.liked === 'true';
+    let useMemoryFilter = false;
+
     if (req.query.brand) query = query.where('brandId', '==', req.query.brand);
-    if (req.query.type === 'video') query = query.where('type', 'in', ['video', 'carousel-video']);
-    else if (req.query.type === 'image') query = query.where('type', 'in', ['slide', 'meme', 'carousel', 'edit', 'personalized']);
-    if (req.query.liked === 'true') query = query.where('liked', '==', true);
 
-    query = query.orderBy('createdAt', 'desc').limit(limit + 1);
+    try {
+      let filteredQuery = query;
+      if (typeFilter === 'video') filteredQuery = filteredQuery.where('type', 'in', ['video', 'carousel-video']);
+      else if (typeFilter === 'image') filteredQuery = filteredQuery.where('type', 'in', ['slide', 'meme', 'carousel', 'edit', 'personalized']);
+      if (likedFilter) filteredQuery = filteredQuery.where('liked', '==', true);
+      filteredQuery = filteredQuery.orderBy('createdAt', 'desc').limit(limit + 1);
 
-    if (req.query.startAfter) {
-      const cursorDoc = await col.doc(req.query.startAfter).get();
-      if (cursorDoc.exists) query = query.startAfter(cursorDoc);
+      if (req.query.startAfter) {
+        const cursorDoc = await col.doc(req.query.startAfter).get();
+        if (cursorDoc.exists) filteredQuery = filteredQuery.startAfter(cursorDoc);
+      }
+
+      var snapshot = await filteredQuery.get();
+    } catch (indexErr) {
+      // Missing composite index — fall back to basic query + in-memory filter
+      console.warn('[Images List] Index missing, using memory filter:', indexErr.message?.slice(0, 100));
+      useMemoryFilter = true;
+      let fallbackQuery = query.orderBy('createdAt', 'desc');
+      var snapshot = await fallbackQuery.get();
     }
 
-    const snapshot = await query.get();
-    const docs = snapshot.docs.slice(0, limit);
-    const hasMore = snapshot.docs.length > limit;
+    let docs = snapshot.docs;
+    if (useMemoryFilter) {
+      const videoTypes = new Set(['video', 'carousel-video']);
+      const imageTypes = new Set(['slide', 'meme', 'carousel', 'edit', 'personalized']);
+      if (typeFilter === 'video') docs = docs.filter(d => videoTypes.has(d.data().type));
+      else if (typeFilter === 'image') docs = docs.filter(d => imageTypes.has(d.data().type));
+      if (likedFilter) docs = docs.filter(d => d.data().liked === true);
+    }
+
+    const hasMore = !useMemoryFilter && snapshot.docs.length > limit;
+    docs = docs.slice(0, limit);
 
     const images = await Promise.all(docs.map(async (doc) => {
       const data = doc.data();

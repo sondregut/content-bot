@@ -6276,6 +6276,8 @@ function renderMLGrid() {
     mediaGridContent.innerHTML = '';
     mediaGridEmpty.style.display = 'block';
     mediaLoadMore.style.display = 'none';
+    const countEl = document.getElementById('media-result-count');
+    if (countEl) countEl.textContent = '0 items';
     return;
   }
   mediaGridEmpty.style.display = 'none';
