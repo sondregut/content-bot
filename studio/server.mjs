@@ -2556,6 +2556,11 @@ KLING 3.0 BEST PRACTICES:
 - Keep to one camera movement per shot — simultaneous complex movements cause warping
 - Describe colors as natural language ("warm amber tones", "deep navy atmosphere") — never use hex codes
 - 50-150 words is the sweet spot — shorter lacks detail, longer introduces conflicts
+- Hands: prefer broad, powerful gestures — gripping, reaching, pressing palms flat, fists clenching. These render cleanly. Fine motor actions (writing, scratching, threading) produce finger artifacts.
+- Faces: establish ALL faces in the first 2 seconds so the model locks identity early. Faces introduced mid-clip look inconsistent.
+- Emotion over information: when the story involves someone learning or discovering something, show the emotional reaction on their face — not the thing being read, revealed, or displayed.
+- Flowing elements: keep flowing hair, loose fabric, or particle effects on one subject at a time for clean physics.
+- Camera movement: gradual, smooth moves (slow dolly, gentle orbit). Extreme zooms warp mid-transition.
 
 AVOID:
 - Hex color codes (#FF6B35) — the model doesn't understand them
@@ -2609,8 +2614,13 @@ VEO BEST PRACTICES:
 - Describe temporal progression within the single take: "starts with... builds to... culminates with..." — these are shifts in energy and framing, NOT transitions between different scenes or locations
 - Separate foreground, midground, and background as distinct depth layers
 - Describe colors as natural atmospheric language — never pass hex codes
-- 100-150 words, 3-6 sentences is optimal
+- 120-200 words, 4-7 sentences is optimal — Veo 3.1 handles longer, richer prompts well
 - One dominant force/action per prompt — conflicting movements create floaty artifacts
+- Hands: prefer broad, powerful gestures — gripping, reaching, pressing palms flat, fists clenching. These render cleanly. Fine motor actions (writing, scratching, threading) produce finger artifacts.
+- Faces: establish ALL faces in the first 2 seconds so the model locks identity early. Faces introduced mid-clip look inconsistent.
+- Emotion over information: when the story involves someone learning or discovering something, show the emotional reaction on their face — not the thing being read, revealed, or displayed.
+- Flowing elements: keep flowing hair, loose fabric, or particle effects on one subject at a time for clean physics.
+- Camera movement: gradual, smooth moves (slow dolly, gentle orbit). Extreme zooms warp mid-transition.
 
 AVOID:
 - Hex color codes — the model doesn't understand them
@@ -2679,8 +2689,9 @@ async function refinePromptWithClaude(rawPrompt, slideType, formData, brand, req
       context += `\n\nIMPORTANT: A reference image will be passed directly to the image model via the edit API. The model can SEE the image — do NOT describe what might be in the reference image. Instead, instruct the model on HOW to use the reference (e.g. "match the color palette", "use the same composition style", "incorporate the background elements").`;
     }
 
+    const videoModel = slideType === 'video' ? 'claude-sonnet-4-5-20250929' : null;
     const refined = await generateText({
-      model: req.body?.textModel,
+      model: videoModel || req.body?.textModel,
       system: systemPrompt,
       messages: [
         {
