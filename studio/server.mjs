@@ -2549,7 +2549,7 @@ KLING 3.0 BEST PRACTICES:
 - Think like a Director of Photography — describe time, space, and intent
 - Use ++double plus++ markers around the most important visual element to emphasize it
 - For multi-character scenes, label them: [Character A: tired coach], [Character B: young athlete]
-- If the scene has natural progression, structure as labeled shots: Shot 1: ..., Shot 2: ...
+- SINGLE SHOT ONLY — never split into labeled shots (Shot 1, Shot 2). For temporal progression within one continuous take, use markers: "initially... then... finally"
 - For spoken lines, describe action first, then attach dialogue with tone markers: [Character A: calm, steady voice] says: "exact words"
 - Add motion/physics details: dust kicked up, hair flowing, fabric rippling, light rays shifting
 - Use speed modifiers for camera: "slowly," "smoothly," "rapidly"
@@ -2571,12 +2571,25 @@ BRAND ADAPTATION:
 - Match the brand's energy level and aesthetic (premium vs playful, minimal vs bold)
 - Use the brand's color palette as atmospheric/lighting direction, not literal color instructions
 
-IMPOSSIBLE CONTENT — MUST REWRITE:
-AI video cannot render: readable text, app screens, UI/dashboards, charts, phone displays, logos, branded digital content, or specific numbers/stats.
-If the input prompt describes any of these, rewrite to show the HUMAN EMOTION or REAL-WORLD ACTION instead:
+UNFEASIBLE CONTENT — MUST REWRITE TO SINGLE-SHOT FORMAT:
+AI video generates ONE continuous shot from ONE camera. It cannot render:
+
+Rendering impossibilities: readable text, app screens, UI/dashboards, charts, phone displays, logos, branded digital content, specific numbers/stats.
+Structural impossibilities: split-screen, side-by-side comparisons, scene transitions/cuts, montage sequences, before/after reveals, same person appearing twice, multiple locations in one clip, multi-character choreography with precise timing, time-lapses with visible jumps.
+
+If the input prompt describes ANY of these, rewrite to a SINGLE continuous shot showing HUMAN EMOTION or REAL-WORLD ACTION:
+
+Rendering rewrites:
 - "phone showing progress dashboard" → "athlete exhaling with quiet satisfaction, eyes reflecting determination"
 - "notification popping up on screen" → "face lighting up with a subtle smile of recognition"
 - "app showing workout stats" → "hands gripping barbell, chalk dust floating in golden light"
+
+Structural rewrites:
+- "split-screen: tired vs energized athlete" → "exhausted athlete slowly rises, shakes off fatigue, and launches into a powerful sprint — energy building through the single take"
+- "montage of morning routine" → "close-up of hands lacing running shoes, camera pulls back to reveal athlete stepping out the door into golden morning light"
+- "before/after transformation" → "athlete mid-rep, sweat dripping, muscles engaged — the effort itself tells the story"
+- "coach high-fiving three different athletes" → "coach extends hand, one athlete meets it with a firm high-five, both grinning with shared pride"
+- "transition from gym to track" → "athlete bursts through gym doors into open daylight, stride never breaking as feet hit the track surface"
 
 Return ONLY the refined prompt. No preamble, no explanation, no markdown.`;
 
@@ -2592,8 +2605,8 @@ PROMPT STRUCTURE — follow the 7-layer formula in this order:
 7. Audio — keep dialogue naturally short (one breath per 8s clip). Format: [Character] says: "exact line." Add ambient sound description separately.
 
 VEO BEST PRACTICES:
-- For pacing control, use timestamp prompting: "0-3s: [setup], 3-6s: [action], 6-8s: [resolution]"
-- Describe temporal progression: "starts with... transitions to... ends with..."
+- For pacing within ONE continuous shot, use timestamp prompting: "0-3s: [setup], 3-6s: [action], 6-8s: [resolution]" — this controls motion/emotion evolution, NOT scene cuts
+- Describe temporal progression within the single take: "starts with... builds to... culminates with..." — these are shifts in energy and framing, NOT transitions between different scenes or locations
 - Separate foreground, midground, and background as distinct depth layers
 - Describe colors as natural atmospheric language — never pass hex codes
 - 100-150 words, 3-6 sentences is optimal
@@ -2614,12 +2627,25 @@ BRAND ADAPTATION:
 - Match the brand's energy level and aesthetic (premium vs playful, minimal vs bold)
 - Use the brand's color palette as lighting/environmental direction, not literal color instructions
 
-IMPOSSIBLE CONTENT — MUST REWRITE:
-AI video cannot render: readable text, app screens, UI/dashboards, charts, phone displays, logos, branded digital content, or specific numbers/stats.
-If the input prompt describes any of these, rewrite to show the HUMAN EMOTION or REAL-WORLD ACTION instead:
+UNFEASIBLE CONTENT — MUST REWRITE TO SINGLE-SHOT FORMAT:
+AI video generates ONE continuous shot from ONE camera. It cannot render:
+
+Rendering impossibilities: readable text, app screens, UI/dashboards, charts, phone displays, logos, branded digital content, specific numbers/stats.
+Structural impossibilities: split-screen, side-by-side comparisons, scene transitions/cuts, montage sequences, before/after reveals, same person appearing twice, multiple locations in one clip, multi-character choreography with precise timing, time-lapses with visible jumps. Veo is especially prone to morphing artifacts when asked to bridge visually distinct scenes — keep the entire shot in one coherent visual world.
+
+If the input prompt describes ANY of these, rewrite to a SINGLE continuous shot showing HUMAN EMOTION or REAL-WORLD ACTION:
+
+Rendering rewrites:
 - "phone showing progress dashboard" → "athlete exhaling with quiet satisfaction, eyes reflecting determination"
 - "notification popping up on screen" → "face lighting up with a subtle smile of recognition"
 - "app showing workout stats" → "hands gripping barbell, chalk dust floating in golden light"
+
+Structural rewrites:
+- "split-screen: tired vs energized athlete" → "exhausted athlete slowly rises, shakes off fatigue, and launches into a powerful sprint — energy building through the single take"
+- "montage of morning routine" → "close-up of hands lacing running shoes, camera pulls back to reveal athlete stepping out the door into golden morning light"
+- "before/after transformation" → "athlete mid-rep, sweat dripping, muscles engaged — the effort itself tells the story"
+- "coach high-fiving three different athletes" → "coach extends hand, one athlete meets it with a firm high-five, both grinning with shared pride"
+- "transition from gym to track" → "athlete bursts through gym doors into open daylight, stride never breaking as feet hit the track surface"
 
 Return ONLY the refined prompt. No preamble, no explanation, no markdown.`;
 
@@ -3057,7 +3083,7 @@ Return ONLY valid JSON (no markdown, no code fences) with this structure:
           "screenshotLabel": "for mockup with imageUsage phone - which app screenshot to show",
           "aiBgSetting": "for mockup with ai-background - scene description",
           "aiBgMood": "for mockup with ai-background - mood/tone",
-          "scene": "for video - describe what happens visually",
+          "scene": "for video - SINGLE SHOT, SINGLE LOCATION, ONE continuous filmable action. Describe what happens visually in one unbroken take. NEVER: split-screen, transitions, before/after, same person twice, multiple locations, montage.",
           "videoMood": "for video - energetic and dynamic, calm and serene, dramatic and intense, etc.",
           "cameraMove": "for video - slow tracking shot, smooth dolly-in, cinematic pan, handheld follow, drone aerial pullback, static wide angle",
           "duration": "for video - 5 or 10"
@@ -3100,7 +3126,8 @@ ${brand.screenshots.map(s => `    - "${s.label}"${s.description ? `: ${s.descrip
 - For photo slides: ALWAYS include sport, setting, action, mood, overlayStyle, overlayPlacement
 - For text slides: ALWAYS include backgroundStyle (a vivid 1-line visual description matching the brand's mood)
 - For mockup slides: ALWAYS include mockupLayout, mockupTheme, imageUsage. If imageUsage is "ai-background", also include aiBgSetting and aiBgMood${brand.screenshots && brand.screenshots.length > 0 ? '. If imageUsage is "phone", also include screenshotLabel (pick from the available labels listed above)' : ''}
-- For video slides: ALWAYS include scene (vivid 1-2 sentence visual description with motion), videoMood, cameraMove, duration. Video slides work best for: hooks, emotional moments, product demos, before/after reveals. A video idea typically has just 1 slide.
+- For video slides: ALWAYS include scene (vivid 1-2 sentence visual description with motion), videoMood, cameraMove, duration. Video slides work best for: hooks, emotional moments, atmosphere/vibe shots, product-in-action scenes. A video idea typically has just 1 slide.
+- VIDEO FILMABILITY: Every video scene MUST be a single continuous shot at one location with one continuous action. ONE version of each person. NEVER write split-screen, before/after, montage, scene transitions, or the same person appearing twice — AI video generates one unbroken take from one camera. If the topic implies comparison or transformation, show the FEELING of the moment instead (e.g. "before/after fitness journey" → "athlete mid-rep, sweat glistening, muscles engaged — raw effort tells the story").
 - Video ideas should have 1 slide (the video clip) with headline/body for optional text overlay
 - NOT every slide needs an AI-generated image — text slides and mockup slides with imageUsage "none"${brand.screenshots && brand.screenshots.length > 0 ? ' or "phone"' : ''} are fast and effective
 - Vary the mix: a typical 7-slide carousel might be photo → text → text → mockup → photo → text → mockup(CTA)
@@ -5251,7 +5278,7 @@ Return ONLY valid JSON (no markdown, no code fences) with this structure:
           "headline": "Bold headline for text overlay (under 10 words)",
           "body": "One supporting sentence",
           "highlight": "key phrase to highlight",
-          "scene": "Vivid 1-2 sentence FILMABLE visual description — something a real camera could capture. Show human emotion, physical action, or real environments. NEVER mention screens, apps, UI, dashboards, charts, or text displays.",
+          "scene": "Vivid 1-2 sentence FILMABLE visual description — SINGLE SHOT, SINGLE LOCATION, ONE continuous action that a real camera could capture in a single take. Show human emotion, physical action, or real environments. NEVER: split-screen, scene transitions, before/after comparisons, same person appearing twice, multiple locations, montage sequences, screens, apps, UI, dashboards, charts, or text displays.",
           "videoMood": "energetic and dynamic, calm and serene, dramatic and intense, etc.",
           "cameraMove": "slow tracking shot, smooth dolly-in, cinematic pan, handheld follow, drone aerial pullback, or static wide angle",
           "duration": "5 or 10"
@@ -5263,7 +5290,12 @@ Return ONLY valid JSON (no markdown, no code fences) with this structure:
 
 Rules:
 - EXACTLY 1 slide per idea with type "video" — never more
-- Scene: describe vivid motion and action a real camera could film — cinematic B-roll. NEVER include app screens, dashboards, UI, charts, notifications, or phone displays — AI video cannot render these. Instead show the REAL EMOTION or ACTION the product enables (e.g. "phone showing confidence stats" → "athlete closing eyes, breathing deep, then opening them with determination")
+- Scene: describe vivid motion and action a real camera could film in ONE CONTINUOUS SHOT at ONE LOCATION — cinematic B-roll. ONE version of each person, ONE continuous action, NO cuts.
+  NEVER include: app screens, dashboards, UI, charts, notifications, phone displays (AI video cannot render these), split-screen, before/after, montage, scene transitions, same person appearing twice, multiple locations (AI video generates a single continuous shot).
+  Instead show the REAL EMOTION or ACTION the product enables:
+  * "phone showing confidence stats" → "athlete closing eyes, breathing deep, then opening them with determination"
+  * "split-screen comparing tired vs focused" → "athlete mid-stride, fatigue visible but eyes locked forward with fierce focus"
+  * "montage of training highlights" → "close-up of chalk-dusted hands gripping the bar, camera slowly pulls back to reveal full deadlift in golden gym light"
 - Headline: punchy, under 10 words — this overlays the video
 - Body: 1 short sentence max
 - Caption: hook line first (under 125 chars), then value, then CTA, then 3-5 hashtags
