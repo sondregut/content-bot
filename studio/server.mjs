@@ -826,7 +826,7 @@ app.use(express.json({ limit: '10mb' }));
 // --- Rate limiting for expensive generation routes ---
 const generationLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 5,
+  max: 30,
   keyGenerator: (req) => req.user?.uid || req.ip,
   message: { error: 'Too many requests, please try again in a minute' },
 });

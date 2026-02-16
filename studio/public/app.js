@@ -5015,15 +5015,15 @@ downloadAllBtn.addEventListener('click', async () => {
   }
   if (filenames.length === 0) return;
 
+  let res;
   if (batchJobId) {
-    window.location.href = `/api/download-carousel/${batchJobId}`;
-    return;
+    res = await authFetch(`/api/download-carousel/${batchJobId}`);
+  } else {
+    res = await authFetch('/api/download-selected', {
+      method: 'POST',
+      body: JSON.stringify({ filenames, brandId: currentBrand }),
+    });
   }
-
-  const res = await authFetch('/api/download-selected', {
-    method: 'POST',
-    body: JSON.stringify({ filenames, brandId: currentBrand }),
-  });
   if (!res.ok) return;
 
   const blob = await res.blob();
