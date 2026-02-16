@@ -5375,14 +5375,37 @@ app.post('/api/generate-talking-head', requireAuth, generationLimiter, async (re
         if (!finalScript) throw new Error('Failed to generate script. Please write one manually or try again.');
         console.log(`[TalkingHead] Script: ${finalScript.slice(0, 100)}...`);
 
-        // Step 2: Generate speech
+        // Step 2: Pick voice + generate speech
         job.step = 'generating-voice';
+        let selectedVoice = voice;
+        if (!voice || voice === 'auto') {
+          // AI picks voice based on script tone
+          try {
+            const voicePick = await generateText({
+              model: capturedReq.body?.textModel,
+              system: 'You are a voice casting director. Given a script, pick the best OpenAI TTS voice. Available voices: alloy (neutral), ash (warm male), coral (warm female), echo (smooth male), fable (expressive), nova (energetic female), onyx (deep male), sage (calm), shimmer (soft female). Reply with ONLY the voice name, nothing else.',
+              messages: [{ role: 'user', content: `Pick the best voice for this script:\n\n${finalScript}` }],
+              maxTokens: 20,
+              req: capturedReq,
+            });
+            const picked = (voicePick || '').trim().toLowerCase();
+            if (['alloy','ash','coral','echo','fable','nova','onyx','sage','shimmer'].includes(picked)) {
+              selectedVoice = picked;
+            } else {
+              selectedVoice = 'nova';
+            }
+          } catch (err) {
+            console.warn('[TalkingHead] Voice auto-pick failed, using nova:', err.message);
+            selectedVoice = 'nova';
+          }
+          console.log(`[TalkingHead] AI picked voice: ${selectedVoice}`);
+        }
         let audioBuffer;
         const elevenLabsKey = getElevenLabsKey(capturedReq);
         if (voiceProvider === 'elevenlabs' && elevenLabsKey) {
-          audioBuffer = await generateSpeechElevenLabs(finalScript, { key: elevenLabsKey, voiceId: voice });
+          audioBuffer = await generateSpeechElevenLabs(finalScript, { key: elevenLabsKey, voiceId: selectedVoice });
         } else {
-          audioBuffer = await generateSpeech(finalScript, { voice: voice || 'alloy', req: capturedReq });
+          audioBuffer = await generateSpeech(finalScript, { voice: selectedVoice, req: capturedReq });
         }
         const audioSlug = crypto.randomUUID().slice(0, 8);
         const audioFilename = `tts_${brandId}_${Date.now()}_${audioSlug}.mp3`;

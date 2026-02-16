@@ -6286,6 +6286,11 @@ async function loadVideoStudioVoices() {
     const data = await res.json();
     const currentVal = videoVoiceSelect.value;
     videoVoiceSelect.innerHTML = '';
+    // Auto option first
+    const autoOpt = document.createElement('option');
+    autoOpt.value = 'auto';
+    autoOpt.textContent = 'Auto (AI picks)';
+    videoVoiceSelect.appendChild(autoOpt);
     const openaiGroup = document.createElement('optgroup');
     openaiGroup.label = 'OpenAI';
     let elevenGroup = null;
@@ -6309,7 +6314,7 @@ async function loadVideoStudioVoices() {
     if (currentVal && videoVoiceSelect.querySelector(`option[value="${currentVal}"]`)) {
       videoVoiceSelect.value = currentVal;
     } else {
-      videoVoiceSelect.value = 'nova';
+      videoVoiceSelect.value = 'auto';
     }
   } catch (err) {
     console.warn('[VideoStudio] Failed to load voices:', err.message);
@@ -6341,7 +6346,7 @@ document.getElementById('video-write-script-btn').addEventListener('click', asyn
     const topic = videoScript.value.trim();
     const res = await authFetch('/api/generate-talking-head-script', {
       method: 'POST',
-      body: JSON.stringify({ topic, brand: currentBrand }),
+      body: JSON.stringify({ topic, brand: currentBrand, textModel: getSelectedTextModel() }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Script generation failed');
@@ -6404,6 +6409,7 @@ generateTalkingHeadBtn.addEventListener('click', async () => {
         uploadedAvatar: uploadedAvatarFilename,
         lipSyncModel: videoLipsyncModel.value,
         brand: currentBrand,
+        textModel: getSelectedTextModel(),
       }),
     });
 
