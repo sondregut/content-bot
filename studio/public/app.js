@@ -1368,6 +1368,8 @@ brandSelector.addEventListener('change', async () => {
   editorArea.style.display = 'none';
   personalizeView.style.display = 'none';
   if (document.getElementById('meme-view')) document.getElementById('meme-view').style.display = 'none';
+  if (document.getElementById('video-studio-view')) document.getElementById('video-studio-view').style.display = 'none';
+  if (document.getElementById('content-plan-view')) document.getElementById('content-plan-view').style.display = 'none';
   if (document.getElementById('media-library-view')) document.getElementById('media-library-view').style.display = 'none';
   emptyState.style.display = 'flex';
   renderBrandSelector(); // update edit button visibility
