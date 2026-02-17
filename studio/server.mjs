@@ -4877,6 +4877,7 @@ app.post('/api/edit-slide', requireAuth, async (req, res) => {
 // Batch carousel generation
 const carouselJobs = new Map();
 const videoJobs = new Map();
+const talkingHeadPreviews = new Map();
 
 app.post('/api/generate-carousel', requireAuth, generationLimiter, async (req, res) => {
   const { slides, includeOwl, owlPosition, quality, brand: brandId, imageModel, referenceImage, referenceUsage, referenceInstructions } = req.body || {};
@@ -5331,7 +5332,296 @@ app.get('/api/voices', requireAuth, async (req, res) => {
   }
 });
 
-// --- Talking Head Pipeline ---
+// --- Talking Head Preview (Phase A: script + avatar, no TTS/lip sync) ---
+app.post('/api/generate-talking-head-preview', requireAuth, generationLimiter, async (req, res) => {
+  try {
+    const { script, voice, voiceProvider, personId, avatarSource, uploadedAvatar, presenterDescription, lipSyncModel, brand: brandId } = req.body || {};
+    if (!brandId) return res.status(400).json({ error: 'Missing brand' });
+
+    const brand = await getBrandAsync(brandId, req.user?.uid);
+    const brandCtx = [brand.systemPrompt, brand.productKnowledge ? `Product knowledge: ${brand.productKnowledge}` : ''].filter(Boolean).join('\n\n');
+    const brandCtxBlock = brandCtx ? `<brand_context>\n${brandCtx}\n</brand_context>\n\n` : '';
+
+    // Step 1: Write/refine script
+    let finalScript = (script || '').trim();
+    const isEmpty = !finalScript;
+    const isTopicOnly = isEmpty || finalScript.split(/\s+/).length < 20;
+    const systemMsg = isTopicOnly
+      ? `${brandCtxBlock}You write scripts for talking-head social media videos for ${brand.name}. ${isEmpty ? 'Pick an engaging topic relevant to the brand and its audience.' : 'Given a topic or brief,'} Write a punchy, conversational script (30-60 seconds when spoken). Speak directly to camera as if you're the presenter. Include a hook in the first sentence. Return ONLY the script text.`
+      : `${brandCtxBlock}You refine scripts for talking-head social media videos. Keep it conversational, punchy, and under 60 seconds when spoken. Preserve the core message but improve flow and hooks. Return ONLY the refined script text, nothing else.`;
+    const userMsg = isEmpty
+      ? `Write a talking-head video script for ${brand.name}. Pick a compelling topic that would resonate with the brand's audience.`
+      : isTopicOnly
+        ? `Write a talking-head video script for ${brand.name} about: ${finalScript}`
+        : `Refine this talking-head video script for ${brand.name}:\n\n${finalScript}`;
+
+    const refined = await generateText({
+      model: req.body?.textModel,
+      system: systemMsg,
+      messages: [{ role: 'user', content: userMsg }],
+      maxTokens: 1024,
+      req,
+    });
+    if (refined) finalScript = refined;
+    if (!finalScript) throw new Error('Failed to generate script.');
+
+    // Step 2: AI voice selection (if auto)
+    let selectedVoice = voice;
+    let selectedVoiceProvider = voiceProvider || 'openai';
+    if (!voice || voice === 'auto') {
+      try {
+        const voicePick = await generateText({
+          model: req.body?.textModel,
+          system: 'You are a voice casting director. Given a script, pick the best OpenAI TTS voice. Available voices: alloy (neutral), ash (warm male), coral (warm female), echo (smooth male), fable (expressive), nova (energetic female), onyx (deep male), sage (calm), shimmer (soft female). Reply with ONLY the voice name, nothing else.',
+          messages: [{ role: 'user', content: `Pick the best voice for this script:\n\n${finalScript}` }],
+          maxTokens: 20,
+          req,
+        });
+        const picked = (voicePick || '').trim().toLowerCase();
+        selectedVoice = ['alloy','ash','coral','echo','fable','nova','onyx','sage','shimmer'].includes(picked) ? picked : 'nova';
+      } catch { selectedVoice = 'nova'; }
+      selectedVoiceProvider = 'openai';
+      console.log(`[TalkingHead Preview] AI picked voice: ${selectedVoice}`);
+    }
+
+    // Step 3: Generate avatar (only for AI-generated; skip for person/upload)
+    let avatarUrl = null;
+    if (avatarSource === 'person' || avatarSource === 'upload') {
+      // No avatar generation needed — will use existing photo in confirm step
+      avatarUrl = null;
+    } else {
+      // Smart avatar prompt via Claude
+      const openai = getOpenAI(req);
+      if (!openai) throw new Error('Add your OpenAI API key in Settings for AI avatar generation.');
+
+      let avatarPrompt;
+      try {
+        const presenterHint = presenterDescription ? `\nPresenter description from user: "${presenterDescription}"` : '';
+        avatarPrompt = await generateText({
+          model: req.body?.textModel,
+          system: `You generate image prompts for AI portrait photos. Given a brand context and script, create a prompt for a portrait photo of a presenter.
+
+Rules:
+- Portrait-style: head + shoulders, face clearly visible, looking directly at camera (required for lip sync)
+- Match the person to the brand's audience (age, style, attire, energy)
+- Simple but contextual background (gym for fitness, office for business, kitchen for food, etc.)
+- No text, logos, overlays, or watermarks
+- Photorealistic, well-lit, high quality
+- Return ONLY the image prompt, nothing else`,
+          messages: [{ role: 'user', content: `Brand: ${brand.name}\n${brand.systemPrompt || ''}\n\nScript: ${finalScript.slice(0, 500)}${presenterHint}` }],
+          maxTokens: 300,
+          req,
+        });
+      } catch (err) {
+        console.warn('[TalkingHead Preview] Smart avatar prompt failed, using fallback:', err.message);
+      }
+      if (!avatarPrompt) {
+        avatarPrompt = 'Professional headshot portrait photo of a friendly, approachable person looking directly at the camera. Clean background, good lighting, shoulders visible. Photorealistic, high quality.';
+      }
+
+      console.log(`[TalkingHead Preview] Avatar prompt: ${avatarPrompt.slice(0, 120)}...`);
+      const imgResult = await openai.images.generate({
+        model: 'gpt-image-1',
+        prompt: avatarPrompt,
+        n: 1,
+        size: '1024x1024',
+      });
+      const imgData = imgResult.data?.[0];
+      if (!imgData) throw new Error('AI avatar generation returned no image');
+      let avatarBuffer;
+      if (imgData.b64_json) {
+        avatarBuffer = Buffer.from(imgData.b64_json, 'base64');
+      } else if (imgData.url) {
+        const dlRes = await fetch(imgData.url);
+        avatarBuffer = Buffer.from(await dlRes.arrayBuffer());
+      } else {
+        throw new Error('AI avatar generation returned unexpected format');
+      }
+      const avatarFilename = `avatar_preview_${crypto.randomUUID().slice(0, 8)}.png`;
+      avatarUrl = await uploadImageForFal(avatarBuffer, avatarFilename);
+      console.log(`[TalkingHead Preview] Avatar uploaded: ${avatarUrl.slice(0, 80)}...`);
+    }
+
+    // Store preview for confirm step
+    const previewId = crypto.randomUUID().slice(0, 12);
+    talkingHeadPreviews.set(previewId, {
+      id: previewId,
+      userId: req.user?.uid || null,
+      brandId,
+      script: finalScript,
+      voice: selectedVoice,
+      voiceProvider: selectedVoiceProvider,
+      avatarUrl,
+      avatarSource: avatarSource || 'ai',
+      personId: personId || null,
+      uploadedAvatar: uploadedAvatar || null,
+      lipSyncModel: lipSyncModel || 'veed/fabric-1.0',
+      presenterDescription: presenterDescription || null,
+      textModel: req.body?.textModel,
+      createdAt: Date.now(),
+    });
+    setTimeout(() => talkingHeadPreviews.delete(previewId), 30 * 60 * 1000);
+
+    res.json({
+      previewId,
+      script: finalScript,
+      avatarUrl,
+      voice: selectedVoice,
+      voiceProvider: selectedVoiceProvider,
+    });
+  } catch (err) {
+    console.error('[TalkingHead Preview]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- Talking Head Confirm (Phase B: TTS + lip sync on approved preview) ---
+app.post('/api/generate-talking-head-confirm', requireAuth, generationLimiter, async (req, res) => {
+  try {
+    const { previewId, script: overrideScript } = req.body || {};
+    if (!previewId) return res.status(400).json({ error: 'Missing previewId' });
+
+    const preview = talkingHeadPreviews.get(previewId);
+    if (!preview || (preview.userId && preview.userId !== req.user?.uid)) {
+      return res.status(404).json({ error: 'Preview not found or expired. Please generate a new preview.' });
+    }
+
+    const falKey = req.headers['x-fal-key'];
+    if (!falKey) return res.status(400).json({ error: 'Add your Fal.ai API key in Settings for talking-head video generation.' });
+
+    const finalScript = (overrideScript || '').trim() || preview.script;
+    const brand = await getBrandAsync(preview.brandId, req.user?.uid);
+    const model = preview.lipSyncModel === 'fal-ai/sadtalker' ? 'fal-ai/sadtalker' : 'veed/fabric-1.0';
+
+    const jobId = crypto.randomUUID().slice(0, 12);
+    const job = {
+      id: jobId,
+      userId: req.user?.uid || null,
+      status: 'running',
+      step: 'generating-voice',
+      prompt: finalScript,
+      refinedPrompt: finalScript,
+      url: null,
+      filename: null,
+      error: null,
+    };
+    videoJobs.set(jobId, job);
+
+    // Resolve person/upload avatar before background
+    let person = null;
+    if (preview.avatarSource === 'person' && preview.personId) {
+      person = await getPersonById(preview.personId, req.user?.uid);
+      if (!person || !person.photos?.length) {
+        videoJobs.delete(jobId);
+        return res.status(400).json({ error: 'Person not found or has no photos' });
+      }
+    }
+
+    const capturedReq = {
+      headers: { ...req.headers },
+      body: req.body,
+      user: req.user,
+    };
+
+    (async () => {
+      try {
+        // Step 1: TTS
+        job.step = 'generating-voice';
+        let audioBuffer;
+        const elevenLabsKey = getElevenLabsKey(capturedReq);
+        if (preview.voiceProvider === 'elevenlabs' && elevenLabsKey) {
+          audioBuffer = await generateSpeechElevenLabs(finalScript, { key: elevenLabsKey, voiceId: preview.voice });
+        } else {
+          audioBuffer = await generateSpeech(finalScript, { voice: preview.voice, req: capturedReq });
+        }
+        const audioSlug = crypto.randomUUID().slice(0, 8);
+        const audioFilename = `tts_${preview.brandId}_${Date.now()}_${audioSlug}.mp3`;
+        const audioUrl = await uploadAudioToStorage(audioBuffer, audioFilename);
+        console.log(`[TalkingHead Confirm] Audio generated: ${audioFilename}`);
+
+        // Step 2: Resolve avatar URL
+        job.step = 'preparing-avatar';
+        let avatarUrl = preview.avatarUrl;
+        if (preview.avatarSource === 'person' && person) {
+          const photo = person.photos[0];
+          let avatarBuffer;
+          if (bucket) {
+            const file = bucket.file(photo.storagePath);
+            [avatarBuffer] = await file.download();
+          } else {
+            const src = path.join(outputDir, path.basename(photo.storagePath));
+            avatarBuffer = await fs.readFile(src);
+          }
+          avatarBuffer = await sharp(avatarBuffer).resize(1024, 1024, { fit: 'inside', withoutEnlargement: true }).png().toBuffer();
+          const avatarFilename = `avatar_${crypto.randomUUID().slice(0, 8)}.png`;
+          avatarUrl = await uploadImageForFal(avatarBuffer, avatarFilename);
+        } else if (preview.avatarSource === 'upload' && preview.uploadedAvatar) {
+          let avatarBuffer;
+          if (bucket) {
+            const file = bucket.file(`carousel-studio/${preview.uploadedAvatar}`);
+            [avatarBuffer] = await file.download();
+          } else {
+            avatarBuffer = await fs.readFile(path.join(uploadsDir, preview.uploadedAvatar));
+          }
+          avatarBuffer = await sharp(avatarBuffer).resize(1024, 1024, { fit: 'inside', withoutEnlargement: true }).png().toBuffer();
+          const avatarFilename = `avatar_${crypto.randomUUID().slice(0, 8)}.png`;
+          avatarUrl = await uploadImageForFal(avatarBuffer, avatarFilename);
+        }
+        if (!avatarUrl) throw new Error('No avatar available for lip sync');
+        console.log(`[TalkingHead Confirm] Avatar ready: ${avatarUrl.slice(0, 80)}...`);
+
+        // Step 3: Lip sync
+        job.step = 'generating-video';
+        let absoluteAudioUrl = audioUrl;
+        if (audioUrl.startsWith('/')) {
+          const proto = capturedReq.headers['x-forwarded-proto'] || 'http';
+          const host = capturedReq.headers['x-forwarded-host'] || capturedReq.headers.host || `localhost:${PORT}`;
+          absoluteAudioUrl = `${proto}://${host}${audioUrl}`;
+        }
+        const videoResultUrl = await generateTalkingFace(avatarUrl, absoluteAudioUrl, { falKey, model });
+        console.log(`[TalkingHead Confirm] Video generated: ${videoResultUrl.slice(0, 80)}...`);
+
+        // Step 4: Download + finalize
+        job.step = 'finalizing';
+        const videoRes = await fetch(videoResultUrl);
+        if (!videoRes.ok) throw new Error('Failed to download lip sync video');
+        let videoBuffer = Buffer.from(await videoRes.arrayBuffer());
+
+        const slug = crypto.randomUUID().slice(0, 8);
+        const filename = `talking_${preview.brandId}_${Date.now()}_${slug}.mp4`;
+        const url = await uploadVideoToStorage(videoBuffer, filename);
+
+        saveImageRecord({
+          userId: capturedReq.user?.uid,
+          brandId: preview.brandId,
+          filename,
+          type: 'talking-head',
+          prompt: finalScript,
+          refinedPrompt: job.refinedPrompt,
+          model: model,
+          brandName: brand.name,
+        });
+
+        job.status = 'done';
+        job.url = url;
+        job.filename = filename;
+        console.log(`[TalkingHead Confirm] Complete: ${filename}`);
+      } catch (err) {
+        job.status = 'error';
+        job.error = err.message;
+        console.error('[TalkingHead Confirm] Failed:', err.message);
+      }
+      setTimeout(() => videoJobs.delete(jobId), 30 * 60 * 1000);
+    })();
+
+    res.json({ ok: true, videoJobId: jobId });
+  } catch (err) {
+    console.error('[TalkingHead Confirm]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- Talking Head Pipeline (legacy single-step) ---
 app.post('/api/generate-talking-head', requireAuth, generationLimiter, async (req, res) => {
   try {
     const { script, voice, voiceProvider, personId, avatarSource, uploadedAvatar, lipSyncModel, brand: brandId } = req.body || {};

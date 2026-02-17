@@ -6213,6 +6213,15 @@ const videoStudioPreviewVideo = document.getElementById('video-studio-preview-vi
 const downloadTalkingHeadBtn = document.getElementById('download-talking-head-btn');
 
 let videoStudioResult = null;
+let currentPreviewId = null;
+const videoPreviewAvatar = document.getElementById('video-studio-preview-avatar');
+const videoPreviewActions = document.getElementById('video-preview-actions');
+const videoVoiceLabel = document.getElementById('video-studio-voice-label');
+const videoPlaceholder = document.getElementById('video-placeholder');
+const confirmTalkingHeadBtn = document.getElementById('confirm-talking-head-btn');
+const regenerateAvatarBtn = document.getElementById('regenerate-avatar-btn');
+const editScriptBtn = document.getElementById('edit-script-btn');
+const videoPresenterDescription = document.getElementById('video-presenter-description');
 
 function openVideoStudio() {
   emptyState.style.display = 'none';
@@ -6228,6 +6237,7 @@ function openVideoStudio() {
 
 function closeVideoStudio() {
   videoStudioView.style.display = 'none';
+  resetVideoPreview();
   if (selectedIdea) {
     editorArea.style.display = 'block';
   } else {
@@ -6324,13 +6334,24 @@ async function loadVideoStudioVoices() {
 const VIDEO_STEP_PROGRESS = {
   'writing-script': { pct: 5, label: 'Writing script...' },
   'refining': { pct: 12, label: 'Refining script...' },
-  'generating-voice': { pct: 25, label: 'Generating voice...' },
+  'generating-voice': { pct: 20, label: 'Generating voice...' },
   'generating-avatar': { pct: 35, label: 'Generating avatar face...' },
   'preparing-avatar': { pct: 45, label: 'Preparing avatar...' },
   'uploading-avatar': { pct: 50, label: 'Uploading avatar...' },
   'generating-video': { pct: 60, label: 'Generating lip sync video...' },
   'finalizing': { pct: 90, label: 'Finalizing...' },
 };
+
+function resetVideoPreview() {
+  currentPreviewId = null;
+  videoPreviewAvatar.style.display = 'none';
+  videoPreviewAvatar.src = '';
+  videoPreviewActions.style.display = 'none';
+  videoVoiceLabel.style.display = 'none';
+  videoPlaceholder.style.display = '';
+  videoStudioPreviewVideo.style.display = 'none';
+  downloadTalkingHeadBtn.style.display = 'none';
+}
 
 document.getElementById('open-video-studio-btn').addEventListener('click', openVideoStudio);
 document.getElementById('sidebar-video-studio-btn').addEventListener('click', openVideoStudio);
@@ -6360,12 +6381,12 @@ document.getElementById('video-write-script-btn').addEventListener('click', asyn
   }
 });
 
-generateTalkingHeadBtn.addEventListener('click', async () => {
+// --- Phase A: Generate preview (script + avatar) ---
+async function generateTalkingHeadPreview() {
   const script = videoScript.value.trim();
   if (!currentBrand) { videoStudioStatus.textContent = 'Select a brand first.'; return; }
 
   const avatarVal = videoAvatarSource.value;
-  // If upload selected, check file
   if (avatarVal === 'upload' && (!videoAvatarFile.files || !videoAvatarFile.files[0])) {
     videoStudioStatus.textContent = 'Choose a photo to upload, or switch to AI-generated.';
     return;
@@ -6377,17 +6398,15 @@ generateTalkingHeadBtn.addEventListener('click', async () => {
 
   generateTalkingHeadBtn.disabled = true;
   videoStudioStatus.textContent = '';
+  resetVideoPreview();
   videoStudioProgress.style.display = 'flex';
-  videoStudioProgressFill.style.width = '5%';
-  videoStudioProgressLabel.textContent = 'Starting...';
-  downloadTalkingHeadBtn.style.display = 'none';
-  videoStudioPreviewVideo.style.display = 'none';
-  document.querySelector('.video-placeholder').style.display = '';
+  videoStudioProgressFill.style.width = '10%';
+  videoStudioProgressLabel.textContent = 'Writing script...';
 
   try {
-    // Upload avatar file if needed
     let uploadedAvatarFilename = null;
     if (avatarVal === 'upload') {
+      videoStudioProgressLabel.textContent = 'Uploading photo...';
       const formData = new FormData();
       formData.append('image', videoAvatarFile.files[0]);
       const uploadRes = await authFetch('/api/upload-reference', { method: 'POST', body: formData });
@@ -6397,19 +6416,81 @@ generateTalkingHeadBtn.addEventListener('click', async () => {
     }
 
     const personId = avatarVal.startsWith('person:') ? avatarVal.replace('person:', '') : null;
+    const avatarSource = avatarVal === 'upload' ? 'upload' : avatarVal === 'ai' ? 'ai' : 'person';
 
-    const res = await authFetch('/api/generate-talking-head', {
+    // For person/upload: skip avatar generation in preview, go straight to confirm
+    if (avatarSource === 'person' || avatarSource === 'upload') {
+      videoStudioProgressLabel.textContent = 'Writing script...';
+    } else {
+      videoStudioProgressFill.style.width = '20%';
+    }
+
+    const res = await authFetch('/api/generate-talking-head-preview', {
       method: 'POST',
       body: JSON.stringify({
         script,
         voice,
         voiceProvider,
         personId,
-        avatarSource: avatarVal === 'upload' ? 'upload' : avatarVal === 'ai' ? 'ai' : 'person',
+        avatarSource,
         uploadedAvatar: uploadedAvatarFilename,
+        presenterDescription: videoPresenterDescription?.value?.trim() || '',
         lipSyncModel: videoLipsyncModel.value,
         brand: currentBrand,
         textModel: getSelectedTextModel(),
+      }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Preview generation failed');
+
+    currentPreviewId = data.previewId;
+
+    // Update script textarea with refined script
+    videoScript.value = data.script;
+
+    // Show avatar preview (if AI-generated)
+    if (data.avatarUrl) {
+      videoPlaceholder.style.display = 'none';
+      videoPreviewAvatar.src = data.avatarUrl;
+      videoPreviewAvatar.style.display = 'block';
+    }
+
+    // Show voice selection
+    const voiceName = data.voice || 'auto';
+    videoVoiceLabel.textContent = `Voice: ${voiceName}${data.voiceProvider === 'elevenlabs' ? ' (ElevenLabs)' : ''}`;
+    videoVoiceLabel.style.display = 'block';
+
+    // Show action buttons
+    videoPreviewActions.style.display = 'flex';
+    videoStudioProgress.style.display = 'none';
+    videoStudioStatus.textContent = 'Preview ready! Review the script and avatar, then generate the video.';
+
+  } catch (err) {
+    videoStudioStatus.textContent = `Error: ${err.message}`;
+    videoStudioProgress.style.display = 'none';
+  } finally {
+    generateTalkingHeadBtn.disabled = false;
+  }
+}
+
+// --- Phase B: Confirm and generate video (TTS + lip sync) ---
+async function confirmTalkingHead() {
+  if (!currentPreviewId) { videoStudioStatus.textContent = 'No preview to confirm. Generate a preview first.'; return; }
+
+  confirmTalkingHeadBtn.disabled = true;
+  regenerateAvatarBtn.disabled = true;
+  videoStudioStatus.textContent = '';
+  videoStudioProgress.style.display = 'flex';
+  videoStudioProgressFill.style.width = '5%';
+  videoStudioProgressLabel.textContent = 'Starting video generation...';
+
+  try {
+    const res = await authFetch('/api/generate-talking-head-confirm', {
+      method: 'POST',
+      body: JSON.stringify({
+        previewId: currentPreviewId,
+        script: videoScript.value.trim(),
       }),
     });
 
@@ -6434,7 +6515,9 @@ generateTalkingHeadBtn.addEventListener('click', async () => {
         videoStudioProgressFill.style.width = '100%';
         videoStudioProgressLabel.textContent = 'Done!';
         videoStudioResult = { url: job.url, filename: job.filename };
-        document.querySelector('.video-placeholder').style.display = 'none';
+        videoPlaceholder.style.display = 'none';
+        videoPreviewAvatar.style.display = 'none';
+        videoPreviewActions.style.display = 'none';
         videoStudioPreviewVideo.src = job.url;
         videoStudioPreviewVideo.style.display = 'block';
         downloadTalkingHeadBtn.style.display = '';
@@ -6451,8 +6534,23 @@ generateTalkingHeadBtn.addEventListener('click', async () => {
     videoStudioStatus.textContent = `Error: ${err.message}`;
     videoStudioProgress.style.display = 'none';
   } finally {
-    generateTalkingHeadBtn.disabled = false;
+    confirmTalkingHeadBtn.disabled = false;
+    regenerateAvatarBtn.disabled = false;
   }
+}
+
+generateTalkingHeadBtn.addEventListener('click', generateTalkingHeadPreview);
+
+confirmTalkingHeadBtn.addEventListener('click', confirmTalkingHead);
+
+regenerateAvatarBtn.addEventListener('click', async () => {
+  // Re-run preview to get a new avatar (keeps current script)
+  generateTalkingHeadPreview();
+});
+
+editScriptBtn.addEventListener('click', () => {
+  videoScript.focus();
+  videoScript.scrollIntoView({ behavior: 'smooth', block: 'center' });
 });
 
 downloadTalkingHeadBtn.addEventListener('click', async () => {

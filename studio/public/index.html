@@ -458,6 +458,12 @@
                       </div>
                     </div>
 
+                    <div class="form-group">
+                      <label class="label">Describe the presenter (optional)</label>
+                      <input type="text" class="freeform-input" id="video-presenter-description" placeholder="e.g. young female athlete in a gym" style="padding:8px 10px;font-size:13px" />
+                      <span class="field-hint">If empty, AI decides based on brand + script</span>
+                    </div>
+
                     <div class="form-row">
                       <div class="form-group" style="flex:1">
                         <label class="label">Voice</label>
@@ -485,7 +491,7 @@
                   </div>
                 </details>
 
-                <button type="button" class="btn primary" id="generate-talking-head-btn" style="margin-top:16px">Generate Video</button>
+                <button type="button" class="btn primary" id="generate-talking-head-btn" style="margin-top:16px">Generate Preview</button>
                 <div class="freeform-status" id="video-studio-status"></div>
                 <div class="video-studio-progress" id="video-studio-progress" style="display:none">
                   <div class="video-studio-progress-bar">
@@ -499,8 +505,15 @@
               <div class="video-studio-preview">
                 <label class="label">Preview</label>
                 <div class="video-preview-container" id="video-preview-container">
-                  <div class="video-placeholder">Your talking-head video will appear here</div>
+                  <div class="video-placeholder" id="video-placeholder">Your talking-head video will appear here</div>
+                  <img id="video-studio-preview-avatar" style="display:none;width:100%;border-radius:8px" alt="Avatar preview" />
                   <video id="video-studio-preview-video" controls style="display:none" playsinline></video>
+                </div>
+                <div id="video-studio-voice-label" style="display:none;margin-top:6px;font-size:13px;color:var(--text-secondary)"></div>
+                <div id="video-preview-actions" style="display:none;margin-top:10px;gap:8px;flex-wrap:wrap">
+                  <button type="button" class="btn primary" id="confirm-talking-head-btn">Generate Video</button>
+                  <button type="button" class="btn small" id="regenerate-avatar-btn">New Avatar</button>
+                  <button type="button" class="btn small" id="edit-script-btn">Edit Script</button>
                 </div>
                 <button type="button" class="btn small" id="download-talking-head-btn" style="display:none;margin-top:8px">Download Video</button>
               </div>
