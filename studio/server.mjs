@@ -2441,7 +2441,7 @@ function buildTextPrompt(data, brand) {
 
   return [
     `Create a TikTok carousel slide (1080x1920, 9:16) for ${brand.name}.`,
-    `Visual style: ${brand.imageStyle || 'Minimalist and clean with plenty of negative space.'}`,
+    `Visual style: ${brand.imageStyle || 'Clean and modern with natural lighting feel, subtle texture, and plenty of negative space. Avoid flat digital look — add depth with soft shadows and light grain.'}`,
     `Background: ${safeBackground} using brand palette primary ${c.primary}, accent ${c.accent}, white ${c.white}, secondary ${c.secondary}, CTA color ${c.cta} (CTA only).`,
     `Composition: ${safeLayout}. Large left-aligned text block with generous margins — keep text well away from all edges, especially top and bottom. Plenty of negative space.`,
     textBlocks.join('\n\n'),
@@ -2484,10 +2484,10 @@ function buildPhotoPrompt(data, brand) {
 
   return [
     `Create a photo for a TikTok carousel slide (1080x1920, 9:16) for ${brand.name}.`,
-    `Visual style: ${brand.imageStyle || 'Clean and professional photography with natural lighting.'}`,
+    `Visual style: ${brand.imageStyle || 'Candid photography shot on iPhone 15 Pro, natural daylight, visible skin texture, subtle film grain, slightly muted natural colors, shallow depth of field.'}`,
     `Scene: ${safeSport} in ${safeSetting}, ${safeAction}.`,
     `Mood: ${safeMood}.`,
-    `Composition: simple, clean background. Leave negative space for text overlay in the ${safeOverlayPlacement}. No brand logos on subject.`,
+    `Composition: real-world environment with natural imperfections. Single directional light source. Shallow depth of field on background. Leave negative space for text overlay in the ${safeOverlayPlacement}. No brand logos on subject.`,
     `Add a subtle ${safeOverlayStyle} behind text for readability; image stays dominant and uncluttered.`,
     'Overlay text (EXACT, verbatim):',
     `Micro-label: "${safeMicro}"`,
@@ -2497,7 +2497,7 @@ function buildPhotoPrompt(data, brand) {
     `Typography: modern sans-serif like Inter/SF Pro, headline bold at approximately ${data.headlineFontSize || 82}pt, body regular at approximately ${data.bodyFontSize || 34}pt, clean kerning.`,
     `Brand palette accents only (accent ${c.accent}, CTA color ${c.cta} for CTA only).`,
     trickyLine || null,
-    'Hard constraints: no extra text beyond quoted. no watermarks. no random logos. no distorted faces/hands. no nonsense text. no perfect/flawless skin. no ultra-smooth rendering. no heavy retouching look.',
+    'Hard constraints: no extra text beyond quoted. no watermarks. no random logos. no distorted faces/hands. no nonsense text. no perfect/flawless skin. no ultra-smooth rendering. no heavy retouching look. no omnidirectional lighting. no oversaturated colors. no perfectly symmetrical composition. no porcelain skin. no plastic or waxy texture.',
   ]
     .filter(Boolean)
     .join('\n');
@@ -2513,13 +2513,13 @@ function buildPhotoImagePrompt(data, brand) {
 
   return [
     `Create a photo for a TikTok carousel slide (1080x1920, 9:16) for ${brand.name}.`,
-    `Visual style: ${brand.imageStyle || 'Clean and professional photography with natural lighting.'}`,
+    `Visual style: ${brand.imageStyle || 'Candid photography shot on iPhone 15 Pro, natural daylight, visible skin texture, subtle film grain, slightly muted natural colors, shallow depth of field.'}`,
     `Scene: ${safeSport} in ${safeSetting}, ${safeAction}.`,
     `Mood: ${safeMood}.`,
-    `Composition: simple, clean background. Leave clear negative space in the ${overlayPlacement} for text overlay — keep this area relatively clean/dark so overlaid text is readable.`,
+    `Composition: real-world environment with natural imperfections. Single directional light source. Shallow depth of field on background. Leave clear negative space in the ${overlayPlacement} for text overlay — keep this area relatively clean/dark so overlaid text is readable.`,
     data.personId ? 'Feature the person from the reference photo(s), preserve their face and identity accurately.' : null,
     'Do NOT include any text, labels, typography, watermarks, or logos in the image. The image should be purely photographic with no text elements whatsoever.',
-    'Hard constraints: no text. no watermarks. no logos. no distorted faces/hands. no perfect/flawless skin. no ultra-smooth rendering. no heavy retouching look.',
+    'Hard constraints: no text. no watermarks. no logos. no distorted faces/hands. no perfect/flawless skin. no ultra-smooth rendering. no heavy retouching look. no omnidirectional lighting. no oversaturated colors. no perfectly symmetrical composition. no porcelain skin. no plastic or waxy texture.',
   ]
     .filter(Boolean)
     .join('\n');
@@ -2891,8 +2891,18 @@ const BASE_REFINEMENT_INSTRUCTIONS = `Your job: Take a raw image-generation prom
 - Keep the prompt concise and direct — no fluff, no markdown, no explanation
 
 CRITICAL: Respect the brand's visual style direction. Do not override it with generic realism instructions. Adapt your refinements to match the brand's stated aesthetic.
-- AVOID these words that make images look AI-generated: "perfect", "flawless", "ultra-smooth", "ultra-detailed", "8K", "hyper-realistic", "masterpiece"
+- AVOID these words that make images look AI-generated: "perfect", "flawless", "ultra-smooth", "ultra-detailed", "8K", "hyper-realistic", "masterpiece", "stunning", "breathtaking", "gorgeous", "magnificent", "epic", "HDR", "octane render", "ray tracing", "highly detailed"
 - Backgrounds should be simple and believable — not epic dramatic locations with god rays
+
+REALISM RULES — apply to ALL image prompts:
+- Always specify a single natural light SOURCE and direction (e.g. "soft daylight from a window on the left", "golden hour sidelighting"). Never leave lighting unspecified.
+- Request visible skin texture: pores, fine lines, natural blemishes. Never smooth or airbrushed.
+- Add subtle film grain or slight sensor noise — real cameras produce this naturally.
+- Use shallow depth of field with soft background bokeh when a subject is present.
+- Specify a real camera feel: "shot on iPhone 15 Pro" or "50mm lens, f/2.8 aperture".
+- Colors should be natural and slightly muted — no oversaturation, no HDR look.
+- Subjects should feel candid and mid-moment, not stiffly posed or perfectly centered.
+- Include small environmental imperfections: creases, dust, wear marks, natural asymmetry.
 
 Return ONLY the refined prompt text. No preamble, no explanation, no markdown formatting.`;
 
@@ -3019,7 +3029,7 @@ Structural rewrites:
 
 Return ONLY the refined prompt. No preamble, no explanation, no markdown.`;
 
-async function refinePromptWithClaude(rawPrompt, slideType, formData, brand, req) {
+async function refinePromptWithClaude(rawPrompt, slideType, formData, brand, req, slideIndex = -1) {
   try {
     const refinementInstructions = slideType === 'meme'
       ? MEME_REFINEMENT_INSTRUCTIONS
@@ -3032,6 +3042,19 @@ async function refinePromptWithClaude(rawPrompt, slideType, formData, brand, req
     ].filter(Boolean).join('\n\n');
     const brandContext = brandContextParts ? `<brand_context>\n${brandContextParts}\n</brand_context>` : '';
     const systemPrompt = `${brandContext}\n\n${refinementInstructions}`;
+
+    let hookEnhancement = '';
+    if (slideIndex === 0 && (slideType === 'photo' || slideType === 'text')) {
+      hookEnhancement = `\n\nHOOK SLIDE (Slide 1) — This is the first slide. It must STOP THE SCROLL. Enhance the prompt with:
+- Dramatic cinematic lighting with high visual contrast and bold colors
+- Close-up or medium-close framing with a strong visual focal point
+- If a person is present: expressive face showing emotion (determination, surprise, intensity), direct eye contact
+- Rich atmospheric mood — warm golden, cool blue, or dramatic tonal grading
+- Negative space in the upper portion for bold text overlay
+- Magazine-cover or editorial quality — this slide is a movie poster, not a page in a book
+- The image should feel urgent, emotionally charged, and impossible to scroll past`;
+    }
+
     let context;
     if (slideType === 'meme') {
       context = `This is a MEME for ${brand.name}. It must look like a genuine internet meme — informal, humorous, culturally aware. Do NOT apply carousel rules (no safe zones, no TikTok composition, no professional typography). Preserve the meme format and humor. Only refine for text legibility and spelling accuracy. Keep the raw, authentic meme aesthetic. CRITICAL: If the user prompt mentions real people by name (Drake, celebrities, public figures), replace them with generic characters — OpenAI will reject prompts depicting real people.`;
@@ -3056,7 +3079,7 @@ async function refinePromptWithClaude(rawPrompt, slideType, formData, brand, req
       messages: [
         {
           role: 'user',
-          content: `${context}\n\nRefine this ${slideType === 'video' ? 'video' : 'image'}-generation prompt:\n\n${rawPrompt}`,
+          content: `${context}${hookEnhancement}\n\nRefine this ${slideType === 'video' ? 'video' : 'image'}-generation prompt:\n\n${rawPrompt}`,
         },
       ],
       maxTokens: 1024,
@@ -4018,7 +4041,7 @@ app.post('/api/brands/full-setup', requireAuth, async (req, res) => {
                 highlightPhrase: slide.highlight || '',
               }, brand);
             }
-            const refinedPrompt = await refinePromptWithClaude(rawPrompt, slide.type, slide, brand, req);
+            const refinedPrompt = await refinePromptWithClaude(rawPrompt, slide.type, slide, brand, req, i);
             const prompt = refinedPrompt || rawPrompt;
             try {
               let buffer = await generateImage({
@@ -4955,7 +4978,8 @@ Return ONLY the meme description (no explanation, no preamble).`,
       data.slideType,
       data,
       brand,
-      req
+      req,
+      data.slideIndex != null ? data.slideIndex : -1
     );
     const prompt = refinedPrompt || (rawPrompt + referenceInstruction);
 
@@ -5069,7 +5093,7 @@ const videoJobs = new Map();
 const talkingHeadPreviews = new Map();
 
 app.post('/api/generate-carousel', requireAuth, generationLimiter, async (req, res) => {
-  const { slides, includeOwl, owlPosition, quality, brand: brandId, imageModel, referenceImage, referenceUsage, referenceInstructions } = req.body || {};
+  const { slides, includeOwl, owlPosition, quality, brand: brandId, imageModel, referenceImage, referenceUsage, referenceInstructions, imageDensity } = req.body || {};
   if (!slides || !Array.isArray(slides) || slides.length === 0) {
     return res.status(400).json({ error: 'Missing slides array' });
   }
@@ -5118,7 +5142,7 @@ app.post('/api/generate-carousel', requireAuth, generationLimiter, async (req, r
           if (slideData.imageUsage === 'ai-background') {
             console.log(`[Carousel ${jobId}] ${brand.name} | Slide ${i + 1}/${slides.length} (mockup + AI bg)`);
             const bgPrompt = buildMockupBackgroundPrompt(slideData, brand);
-            const refined = await refinePromptWithClaude(bgPrompt, 'photo', slideData, brand, req);
+            const refined = await refinePromptWithClaude(bgPrompt, 'photo', slideData, brand, req, i);
             const bgBuffer = await generateImage({
               model: slideData.imageModel,
               prompt: refined || bgPrompt,
@@ -5166,7 +5190,7 @@ app.post('/api/generate-carousel', requireAuth, generationLimiter, async (req, r
               imageBuffer = await fs.readFile(refPath);
             } else {
               const rawPrompt = buildPhotoPrompt(slideData, brand);
-              const refined = await refinePromptWithClaude(rawPrompt, 'photo', slideData, brand, req);
+              const refined = await refinePromptWithClaude(rawPrompt, 'photo', slideData, brand, req, i);
               imageBuffer = await generateImage({
                 model: slideData.imageModel,
                 prompt: refined || rawPrompt,
@@ -5297,7 +5321,7 @@ app.post('/api/generate-carousel', requireAuth, generationLimiter, async (req, r
             const person = await getPersonById(slideData.personId, req.user?.uid);
             if (person && person.photos?.length > 0) {
               const rawPrompt = buildPhotoImagePrompt(slideData, brand);
-              const refined = await refinePromptWithClaude(rawPrompt, 'photo', slideData, brand, req);
+              const refined = await refinePromptWithClaude(rawPrompt, 'photo', slideData, brand, req, i);
               const prompt = refined || rawPrompt;
 
               console.log(`[Carousel ${jobId}] ${brand.name} | Slide ${i + 1}/${slides.length} (person "${person.name}")`);
@@ -5334,8 +5358,18 @@ app.post('/api/generate-carousel', requireAuth, generationLimiter, async (req, r
           }
         }
 
+        // Apply image density override
+        let effectiveType = slideData.slideType;
+        if (imageDensity === 'all-photo' && effectiveType === 'text') {
+          effectiveType = 'photo';
+        } else if (imageDensity === 'photo-heavy' && effectiveType === 'text' && (i === 0 || Math.random() < 0.7)) {
+          effectiveType = 'photo';
+        } else if (imageDensity === 'text-heavy' && effectiveType === 'photo' && i !== 0) {
+          effectiveType = 'text';
+        }
+
         const rawPrompt =
-          slideData.slideType === 'photo'
+          effectiveType === 'photo'
             ? buildPhotoPrompt(slideData, brand)
             : buildTextPrompt(slideData, brand);
 
@@ -5350,7 +5384,7 @@ app.post('/api/generate-carousel', requireAuth, generationLimiter, async (req, r
           carouselRefInstruction = `\n\nReference image provided: Use it as ${slideRefUsage || 'background inspiration'}. ${slideRefInstructions || ''}`;
         }
 
-        const refinedPrompt = await refinePromptWithClaude(rawPrompt + carouselRefInstruction, slideData.slideType, slideData, brand, req);
+        const refinedPrompt = await refinePromptWithClaude(rawPrompt + carouselRefInstruction, effectiveType, slideData, brand, req, i);
         const prompt = refinedPrompt || (rawPrompt + carouselRefInstruction);
 
         console.log(`[Carousel ${jobId}] ${brand.name} | Slide ${i + 1}/${slides.length}${slideRefImage ? ' (ref image)' : ''}`);
@@ -6319,7 +6353,7 @@ Nothing else.`,
 // --- Freeform AI Content Generation ---
 app.post('/api/generate-freeform', requireAuth, generationLimiter, async (req, res) => {
   try {
-    const { prompt: userPrompt, brand: brandId, slideCount } = req.body || {};
+    const { prompt: userPrompt, brand: brandId, slideCount, imageDensity } = req.body || {};
     if (!userPrompt) {
       return res.status(400).json({ error: 'Missing prompt' });
     }
@@ -6331,6 +6365,12 @@ app.post('/api/generate-freeform', requireAuth, generationLimiter, async (req, r
     const numSlides = Math.min(Math.max(parseInt(slideCount) || 7, 1), 20);
 
     const brandCtx = [brand.systemPrompt, brand.productKnowledge ? `Product knowledge:\n${brand.productKnowledge}` : ''].filter(Boolean).join('\n\n');
+    const densityInstruction = {
+      'all-photo': 'Make ALL slides type "photo" — every slide should have an AI-generated photographic background.',
+      'photo-heavy': 'Make most slides type "photo" (at least 70%). Only use "text" for data-heavy or list slides. First and last slides MUST be "photo".',
+      'balanced': 'Alternate between "photo" and "text" types for visual variety. First slide should be "photo" for hook impact.',
+      'text-heavy': 'Use mostly "text" type slides. Only use "photo" for the hook slide (slide 1) and any key emotional moment.',
+    }[imageDensity] || 'Make most slides type "photo" (at least 70%). Only use "text" for data-heavy or list slides. First and last slides MUST be "photo".';
     const freeformSystemPrompt = `<brand_context>\n${brandCtx}\n</brand_context>
 
 You are generating carousel slide content for ${brand.name} social media (TikTok/Instagram).
@@ -6364,7 +6404,7 @@ Rules:
 - Include a "caption" field with this structure: (1) HOOK line under 125 chars using a proven formula — question, stat, promise, mistake, or curiosity pattern. (2) 1-2 VALUE sentences expanding on the carousel takeaway with natural keywords. (3) SPECIFIC CTA — "save this for later", "comment which tip you'll try", "send this to someone who needs it", or a choice question. Avoid generic CTAs like "thoughts?". (4) 3-5 hashtags at the end.
 - First slide should be a strong hook (usually photo type)
 - Last slide should be a CTA with "${brand.name} — link in bio"
-- Mix photo, text, and mockup types for visual variety
+- ${densityInstruction}
 - Use mockup type with text-statement layout for bold statement slides (no screenshot needed)
 - Use mockup type with phone-right or phone-left for app screenshot slides (user provides screenshot after)
 - Headlines should be punchy, under 15 words

@@ -373,6 +373,7 @@ function resetAppState() {
 
   // Viral overlay state
   viralOverlaidImages = {};
+  viralOverlayCache = {};
 
   // Generation state
   batchJobId = null;
@@ -2847,14 +2848,16 @@ function selectIdea(ideaId) {
     el.classList.toggle('active', el.dataset.ideaId === ideaId);
   });
 
-  // Save current idea's generated images before switching
+  // Save current idea's generated images and overlay state before switching
   if (selectedIdea) {
     generatedImagesCache[selectedIdea.id] = generatedImages;
+    viralOverlayCache[selectedIdea.id] = viralOverlaidImages;
   }
 
   selectedIdea = idea;
   currentSlideIndex = 0;
   generatedImages = generatedImagesCache[idea.id] || {};
+  viralOverlaidImages = viralOverlayCache[idea.id] || {};
   batchJobId = null;
   slideReferenceImages = {};
 
@@ -3411,6 +3414,10 @@ function applyVideoMode() {
 
   // Generate All Slides button
   generateAllBtn.style.display = isVideo ? 'none' : '';
+
+  // Image Density row — show only when multiple slides exist (not video mode)
+  const densityRow = document.getElementById('carousel-density-row');
+  if (densityRow) densityRow.style.display = (!isVideo && slideEdits.length > 1) ? '' : 'none';
 
   // Submit button text
   const submitBtn = form.querySelector('button[type="submit"]');
@@ -5081,6 +5088,7 @@ async function startBatchGeneration() {
   saveCurrentSlideEdits();
 
   const slides = slideEdits.map((s, i) => buildSlidePayload(s, i));
+  const densitySelect = document.getElementById('imageDensity');
   const payload = {
     slides,
     includeOwl: form.elements.includeOwl.checked,
@@ -5089,6 +5097,7 @@ async function startBatchGeneration() {
     brand: currentBrand,
     imageModel: getSelectedImageModel(),
     textModel: getSelectedTextModel(),
+    imageDensity: densitySelect ? densitySelect.value : 'photo-heavy',
   };
 
   progressSection.style.display = 'block';
@@ -5397,6 +5406,7 @@ freeformGenerateBtn.addEventListener('click', async () => {
         brand: currentBrand,
         slideCount: freeformSlideCount.value,
         textModel: getSelectedTextModel(),
+        imageDensity: document.getElementById('imageDensity')?.value || 'photo-heavy',
       }),
     });
 
@@ -5868,6 +5878,7 @@ const viralOverlayResults = document.getElementById('viral-overlay-results');
 const viralOverlayStrip = document.getElementById('viral-overlay-strip');
 const viralDownloadAllBtn = document.getElementById('viral-download-all-btn');
 let viralOverlaidImages = {}; // { slideIndex: { url, filename } }
+let viralOverlayCache = {}; // { ideaId: { slideIndex: { url, filename } } }
 
 function updateViralOverlayPanel() {
   const imageKeys = Object.keys(generatedImages).filter(k => generatedImages[k] && !generatedImages[k].isVideo);

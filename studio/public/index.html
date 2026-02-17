@@ -1147,6 +1147,19 @@
                 </div>
               </div>
 
+              <div class="form-row" id="carousel-density-row" style="display:none">
+                <div class="form-group">
+                  <label class="label" for="imageDensity">Image Density</label>
+                  <select name="imageDensity" id="imageDensity">
+                    <option value="all-photo">All Photos — every slide gets an AI image</option>
+                    <option value="photo-heavy" selected>Photo-Heavy Mix — most slides are photos</option>
+                    <option value="balanced">Balanced Mix — alternating photo and text</option>
+                    <option value="text-heavy">Text-Heavy — mostly text, photos for hook + key slides</option>
+                  </select>
+                  <p class="form-hint">Controls how many slides get AI-generated images vs text-only backgrounds</p>
+                </div>
+              </div>
+
               <div class="action-buttons">
                 <button type="submit" class="btn primary">Generate This Slide</button>
                 <button type="button" class="btn accent" id="generate-all-btn">Generate All Slides</button>
