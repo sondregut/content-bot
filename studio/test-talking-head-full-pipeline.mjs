@@ -18,7 +18,7 @@ import crypto from 'crypto';
 const AVATAR_PATH = '/tmp/athlete-mindset-avatar-preview.png';
 
 // --- Helper: Generate text with Claude ---
-async function generateScript(topic, brandName = 'Athlete Mindset', targetWords = 45) {
+async function generateScript(topic, brandName = 'Athlete Mindset', targetWords = 35) {
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
   const systemMsg = `You write scripts for talking-head social media videos for ${brandName}.
@@ -39,7 +39,7 @@ PACING & LANGUAGE:
 - Concrete numbers beat vague claims ("4ms accuracy" not "incredibly precise")
 - Vary cadence: fast-fast-fast then pause before key reveals
 - One main point per script — not three, not five, one
-- ~${targetWords} words for ~15 seconds at natural speaking pace
+- ~${targetWords} words for ~12-13 seconds at natural speaking pace (keeps video under 15 seconds)
 
 ENDING:
 - End on strongest value statement or surprise
@@ -211,9 +211,9 @@ async function main() {
     console.log('Avatar: Athlete Mindset track athlete');
     console.log('='.repeat(60));
 
-    // Step 1: Generate script (~45 words for 15 seconds)
+    // Step 1: Generate script (~35 words for 12-13 seconds, staying under 15 sec limit)
     const topic = 'mental training techniques for pole vaulters';
-    const script = await generateScript(topic, 'Athlete Mindset', 45);
+    const script = await generateScript(topic, 'Athlete Mindset', 35);
 
     // Step 2: Prepare avatar
     console.log('📸 Loading avatar image...');

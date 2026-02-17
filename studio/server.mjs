@@ -5486,7 +5486,7 @@ PACING & LANGUAGE:
 - Concrete numbers beat vague claims ("4ms accuracy" not "incredibly precise")
 - Vary cadence: fast-fast-fast then pause before key reveals
 - One main point per script — not three, not five, one
-- ~150 words max for 60 seconds at natural speaking pace
+- ~35 words max for 12-13 seconds at natural speaking pace (keeps video under 15 seconds)
 
 ENDING:
 - End on strongest value statement or surprise
@@ -5587,7 +5587,7 @@ PACING & LANGUAGE:
 - Concrete numbers beat vague claims ("4ms accuracy" not "incredibly precise")
 - Vary cadence: fast-fast-fast then pause before key reveals
 - One main point per script — not three, not five, one
-- ~150 words max for 60 seconds at natural speaking pace
+- ~35 words max for 12-13 seconds at natural speaking pace (keeps video under 15 seconds)
 
 ENDING:
 - End on strongest value statement or surprise
@@ -6070,7 +6070,7 @@ PACING & LANGUAGE:
 - Concrete numbers beat vague claims ("4ms accuracy" not "incredibly precise")
 - Vary cadence: fast-fast-fast then pause before key reveals
 - One main point per script — not three, not five, one
-- ~150 words max for 60 seconds at natural speaking pace
+- ~35 words max for 12-13 seconds at natural speaking pace (keeps video under 15 seconds)
 
 ENDING:
 - End on strongest value statement or surprise
