@@ -275,6 +275,7 @@ const TALKING_HEAD_MODELS = {
   'veed/fabric-1.0': { name: 'VEED Fabric 1.0', provider: 'fal', nativeAudio: false },
   'fal-ai/sadtalker': { name: 'SadTalker', provider: 'fal', nativeAudio: false },
   'kling-v2.6-pro': { name: 'Kling 2.6 Pro', provider: 'fal', nativeAudio: true },
+  'kling-v3.0-standard': { name: 'Kling 3.0', provider: 'fal', nativeAudio: true },
   'seedance-v1.5-pro': { name: 'Seedance 1.5 Pro', provider: 'fal', nativeAudio: true },
   'veo-3.1': { name: 'Veo 3.1', provider: 'gemini', nativeAudio: true },
 };
@@ -678,6 +679,31 @@ async function generateTalkingHeadNative(imageUrl, script, { model, falKey, gemi
     const { request_id, status_url, response_url } = await submitRes.json();
     if (!request_id) throw new Error('Seedance 1.5 Pro did not return a request_id');
     return await pollFalJob(status_url, response_url, falKey, 'Seedance 1.5 Pro');
+  }
+
+  // --- Kling 3.0 via fal.ai ---
+  if (model === 'kling-v3.0-standard') {
+    if (!falKey) throw new Error('Add your Fal.ai API key in Settings for Kling 3.0.');
+    const endpoint = 'https://queue.fal.run/fal-ai/kling-video/v3/standard/image-to-video';
+    const prompt = `A person speaking naturally to camera, delivering a monologue. They say: "${script.slice(0, 500)}"`;
+    const submitRes = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Authorization': `Key ${falKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prompt,
+        image_url: imageUrl,
+        duration: '15',
+        aspect_ratio: '9:16',
+        generate_audio: true,
+      }),
+    });
+    if (!submitRes.ok) {
+      const errText = await submitRes.text();
+      throw new Error(`Kling 3.0 submit failed (${submitRes.status}): ${errText}`);
+    }
+    const { request_id, status_url, response_url } = await submitRes.json();
+    if (!request_id) throw new Error('Kling 3.0 did not return a request_id');
+    return await pollFalJob(status_url, response_url, falKey, 'Kling 3.0');
   }
 
   // --- Veo 3.1 via Gemini API ---
