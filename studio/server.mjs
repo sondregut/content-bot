@@ -5396,14 +5396,18 @@ app.post('/api/generate-talking-head-preview', requireAuth, generationLimiter, a
         const presenterHint = presenterDescription ? `\nPresenter description from user: "${presenterDescription}"` : '';
         avatarPrompt = await generateText({
           model: req.body?.textModel,
-          system: `You generate image prompts for AI portrait photos. Given a brand context and script, create a prompt for a portrait photo of a presenter.
+          system: `You generate image prompts for talking-head video avatars. These are for social media videos (TikTok/Reels) where the person will appear to be speaking to camera via AI lip sync. The image must produce someone viewers want to watch.
 
 Rules:
-- Portrait-style: head + shoulders, face clearly visible, looking directly at camera (required for lip sync)
-- Match the person to the brand's audience (age, style, attire, energy)
-- Simple but contextual background (gym for fitness, office for business, kitchen for food, etc.)
+- ATTRACTIVE, charismatic person — think influencer or content creator, not a stock photo. Strong jawline, clear skin, expressive eyes, natural confidence
+- Head and upper body visible, face clearly visible, looking directly at camera with slight natural smile (required for lip sync to work)
+- Match the person to the brand's audience (age, style, attire, energy) — but always make them aspirational
+- Dynamic, interesting composition — NOT a flat passport photo. Use depth of field, natural lighting with some contrast, environmental context
+- Contextual background that tells a story (gym floor for fitness, locker room, track, modern office, kitchen counter, etc.) — blurred/bokeh preferred
+- The person should have ENERGY — slight lean forward, confident posture, mid-conversation feel
+- Photorealistic, cinematic lighting, shot on 85mm lens look, shallow depth of field
 - No text, logos, overlays, or watermarks
-- Photorealistic, well-lit, high quality
+- 9:16 portrait orientation (vertical video frame)
 - Return ONLY the image prompt, nothing else`,
           messages: [{ role: 'user', content: `Brand: ${brand.name}\n${brand.systemPrompt || ''}\n\nScript: ${finalScript.slice(0, 500)}${presenterHint}` }],
           maxTokens: 300,
@@ -5413,7 +5417,7 @@ Rules:
         console.warn('[TalkingHead Preview] Smart avatar prompt failed, using fallback:', err.message);
       }
       if (!avatarPrompt) {
-        avatarPrompt = 'Professional headshot portrait photo of a friendly, approachable person looking directly at the camera. Clean background, good lighting, shoulders visible. Photorealistic, high quality.';
+        avatarPrompt = 'Attractive, charismatic content creator looking directly at camera with a confident slight smile, head and upper body visible. Cinematic lighting, shallow depth of field, blurred modern background. Photorealistic, shot on 85mm lens, 9:16 vertical portrait. The person has natural confidence and energy, like they are mid-conversation.';
       }
 
       console.log(`[TalkingHead Preview] Avatar prompt: ${avatarPrompt.slice(0, 120)}...`);
@@ -5769,7 +5773,7 @@ app.post('/api/generate-talking-head', requireAuth, generationLimiter, async (re
         } else {
           // AI-generated avatar
           job.step = 'generating-avatar';
-          const avatarPrompt = `Professional headshot portrait photo of a friendly, approachable person looking directly at the camera. Clean background, good lighting, shoulders visible. The person appears to be a brand spokesperson or content creator. Photorealistic, high quality.`;
+          const avatarPrompt = `Attractive, charismatic content creator looking directly at camera with a confident slight smile, head and upper body visible. Cinematic lighting, shallow depth of field, blurred modern background. Photorealistic, shot on 85mm lens, 9:16 vertical portrait. The person has natural confidence and energy, like they are mid-conversation.`;
           console.log(`[TalkingHead] Generating AI avatar...`);
           const avatarBuffer = await generateImage({
             model: 'gemini-3-pro-image-preview',
