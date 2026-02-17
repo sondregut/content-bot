@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.74.0",
+    "@fal-ai/client": "^1.9.1",
     "@google/genai": "^1.0.0",
     "archiver": "^7.0.1",
     "dotenv": "^16.4.7",

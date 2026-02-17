@@ -521,6 +521,9 @@ async function listElevenLabsVoices(key) {
     name: v.name,
     provider: 'elevenlabs',
     preview: v.preview_url || null,
+    labels: v.labels || {},       // { gender, age, accent, description, use_case }
+    description: v.description || null,
+    category: v.category || null, // premade, cloned, professional
   }));
 }
 
@@ -5365,33 +5368,15 @@ app.post('/api/generate-talking-head-preview', requireAuth, generationLimiter, a
     if (refined) finalScript = refined;
     if (!finalScript) throw new Error('Failed to generate script.');
 
-    // Step 2: AI voice selection (if auto)
-    let selectedVoice = voice;
-    let selectedVoiceProvider = voiceProvider || 'openai';
-    if (!voice || voice === 'auto') {
-      try {
-        const voicePick = await generateText({
-          model: req.body?.textModel,
-          system: 'You are a voice casting director. Given a script, pick the best OpenAI TTS voice. Available voices: alloy (neutral), ash (warm male), coral (warm female), echo (smooth male), fable (expressive), nova (energetic female), onyx (deep male), sage (calm), shimmer (soft female). Reply with ONLY the voice name, nothing else.',
-          messages: [{ role: 'user', content: `Pick the best voice for this script:\n\n${finalScript}` }],
-          maxTokens: 20,
-          req,
-        });
-        const picked = (voicePick || '').trim().toLowerCase();
-        selectedVoice = ['alloy','ash','coral','echo','fable','nova','onyx','sage','shimmer'].includes(picked) ? picked : 'nova';
-      } catch { selectedVoice = 'nova'; }
-      selectedVoiceProvider = 'openai';
-      console.log(`[TalkingHead Preview] AI picked voice: ${selectedVoice}`);
-    }
-
-    // Step 3: Generate avatar (only for AI-generated; skip for person/upload)
+    // Step 2: Generate avatar (only for AI-generated; skip for person/upload)
+    // Done BEFORE voice selection so we can match voice gender to the avatar
     let avatarUrl = null;
+    let avatarPrompt = null;
     if (avatarSource === 'person' || avatarSource === 'upload') {
       // No avatar generation needed — will use existing photo in confirm step
       avatarUrl = null;
     } else {
       // Smart avatar prompt via Claude
-      let avatarPrompt;
       try {
         const presenterHint = presenterDescription ? `\nPresenter description from user: "${presenterDescription}"` : '';
         avatarPrompt = await generateText({
@@ -5444,6 +5429,68 @@ TECHNICAL:
       console.log(`[TalkingHead Preview] Avatar uploaded: ${avatarUrl.slice(0, 80)}...`);
     }
 
+    // Step 3: AI voice selection (if auto) — done AFTER avatar so we can match gender/character
+    let selectedVoice = voice;
+    let selectedVoiceProvider = voiceProvider || 'openai';
+    let selectedVoiceName = null;
+    if (!voice || voice === 'auto') {
+      try {
+        const avatarContext = avatarPrompt ? `\nThe presenter in the video looks like: ${avatarPrompt.slice(0, 200)}` : '';
+        const elevenLabsKey = getElevenLabsKey(req);
+        let elVoiceList = [];
+        let elVoiceBlock = '';
+        if (elevenLabsKey) {
+          try {
+            elVoiceList = await listElevenLabsVoices(elevenLabsKey);
+            const elDescriptions = elVoiceList.slice(0, 40).map(v => {
+              const l = v.labels || {};
+              const traits = [l.gender, l.age, l.accent, l.description, l.use_case].filter(Boolean).join(', ');
+              return `- ${v.name} (id:${v.id}) — ${traits || 'no description'}`;
+            }).join('\n');
+            elVoiceBlock = `\n\nAvailable ElevenLabs voices (higher quality, more natural):\n${elDescriptions}\n\nPrefer ElevenLabs voices when they match the character well.`;
+          } catch (err) {
+            console.warn('[TalkingHead Preview] Failed to fetch ElevenLabs voices:', err.message);
+          }
+        }
+        const voicePick = await generateText({
+          model: req.body?.textModel,
+          system: `You are a voice casting director for TikTok/Reels talking-head videos. Pick a voice that matches the presenter's CHARACTER — gender, age, ethnicity, personality, and the script's tone.
+
+Available OpenAI voices: alloy (neutral), ash (warm male), coral (warm female), echo (smooth male), fable (expressive British), nova (energetic female), onyx (deep male), sage (calm wise), shimmer (soft female).${elVoiceBlock}
+
+Rules:
+- Match gender: male presenter = male voice, female = female. NEVER mismatch.
+- Match age: young person = youthful voice, older person = mature voice.
+- Match energy: hype/motivational script = energetic voice, calm/educational = composed voice.
+- Match ethnicity/accent when possible (e.g. a Black male coach should sound like a Black male coach).
+
+Reply with ONLY the voice in this format: provider:id (e.g. "openai:echo" or "elevenlabs:JBFqnCBsd6RMkjVDRZzb")
+Nothing else.`,
+          messages: [{ role: 'user', content: `Script:\n${finalScript.slice(0, 300)}${avatarContext}` }],
+          maxTokens: 50,
+          req,
+        });
+        const picked = (voicePick || '').trim();
+        const [pickedProvider, pickedId] = picked.includes(':') ? picked.split(':', 2) : ['openai', picked];
+        if (pickedProvider === 'elevenlabs' && elevenLabsKey && pickedId) {
+          const matchedVoice = elVoiceList.find(v => v.id === pickedId || v.name.toLowerCase() === pickedId.toLowerCase());
+          if (matchedVoice) {
+            selectedVoice = matchedVoice.id;
+            selectedVoiceProvider = 'elevenlabs';
+            selectedVoiceName = matchedVoice.name;
+          } else {
+            // AI returned an ElevenLabs voice but ID didn't match — fallback to first matching gender
+            selectedVoice = 'echo'; selectedVoiceProvider = 'openai';
+          }
+        } else {
+          const openaiId = pickedId.toLowerCase();
+          selectedVoice = ['alloy','ash','coral','echo','fable','nova','onyx','sage','shimmer'].includes(openaiId) ? openaiId : 'echo';
+          selectedVoiceProvider = 'openai';
+        }
+      } catch { selectedVoice = 'echo'; selectedVoiceProvider = 'openai'; }
+      console.log(`[TalkingHead Preview] AI picked voice: ${selectedVoiceName || selectedVoice} (${selectedVoiceProvider})`);
+    }
+
     // Store preview for confirm step
     const previewId = crypto.randomUUID().slice(0, 12);
     talkingHeadPreviews.set(previewId, {
@@ -5469,6 +5516,7 @@ TECHNICAL:
       script: finalScript,
       avatarUrl,
       voice: selectedVoice,
+      voiceName: selectedVoiceName || selectedVoice,
       voiceProvider: selectedVoiceProvider,
     });
   } catch (err) {
@@ -5709,31 +5757,61 @@ app.post('/api/generate-talking-head', requireAuth, generationLimiter, async (re
         // Step 2: Pick voice + generate speech
         job.step = 'generating-voice';
         let selectedVoice = voice;
+        let selectedVoiceProvider = voiceProvider || 'openai';
         if (!voice || voice === 'auto') {
-          // AI picks voice based on script tone
           try {
+            const elevenLabsKey = getElevenLabsKey(capturedReq);
+            let elVoiceList = [];
+            let elVoiceBlock = '';
+            if (elevenLabsKey) {
+              try {
+                elVoiceList = await listElevenLabsVoices(elevenLabsKey);
+                const elDescriptions = elVoiceList.slice(0, 40).map(v => {
+                  const l = v.labels || {};
+                  const traits = [l.gender, l.age, l.accent, l.description, l.use_case].filter(Boolean).join(', ');
+                  return `- ${v.name} (id:${v.id}) — ${traits || 'no description'}`;
+                }).join('\n');
+                elVoiceBlock = `\n\nAvailable ElevenLabs voices (higher quality, more natural):\n${elDescriptions}\n\nPrefer ElevenLabs voices when they match the character well.`;
+              } catch (err) {
+                console.warn('[TalkingHead] Failed to fetch ElevenLabs voices:', err.message);
+              }
+            }
             const voicePick = await generateText({
               model: capturedReq.body?.textModel,
-              system: 'You are a voice casting director. Given a script, pick the best OpenAI TTS voice. Available voices: alloy (neutral), ash (warm male), coral (warm female), echo (smooth male), fable (expressive), nova (energetic female), onyx (deep male), sage (calm), shimmer (soft female). Reply with ONLY the voice name, nothing else.',
+              system: `You are a voice casting director. Pick the best voice for this talking-head video script.
+
+Available OpenAI voices: alloy (neutral), ash (warm male), coral (warm female), echo (smooth male), fable (expressive British), nova (energetic female), onyx (deep male), sage (calm wise), shimmer (soft female).${elVoiceBlock}
+
+Reply with ONLY the voice in this format: provider:id (e.g. "openai:echo" or "elevenlabs:JBFqnCBsd6RMkjVDRZzb")
+Nothing else.`,
               messages: [{ role: 'user', content: `Pick the best voice for this script:\n\n${finalScript}` }],
-              maxTokens: 20,
+              maxTokens: 50,
               req: capturedReq,
             });
-            const picked = (voicePick || '').trim().toLowerCase();
-            if (['alloy','ash','coral','echo','fable','nova','onyx','sage','shimmer'].includes(picked)) {
-              selectedVoice = picked;
+            const picked = (voicePick || '').trim();
+            const [pickedProvider, pickedId] = picked.includes(':') ? picked.split(':', 2) : ['openai', picked];
+            if (pickedProvider === 'elevenlabs' && elevenLabsKey && pickedId) {
+              const matchedVoice = elVoiceList.find(v => v.id === pickedId || v.name.toLowerCase() === pickedId.toLowerCase());
+              if (matchedVoice) {
+                selectedVoice = matchedVoice.id;
+                selectedVoiceProvider = 'elevenlabs';
+              } else {
+                selectedVoice = 'nova'; selectedVoiceProvider = 'openai';
+              }
             } else {
-              selectedVoice = 'nova';
+              const openaiId = (pickedId || '').toLowerCase();
+              selectedVoice = ['alloy','ash','coral','echo','fable','nova','onyx','sage','shimmer'].includes(openaiId) ? openaiId : 'nova';
+              selectedVoiceProvider = 'openai';
             }
           } catch (err) {
             console.warn('[TalkingHead] Voice auto-pick failed, using nova:', err.message);
-            selectedVoice = 'nova';
+            selectedVoice = 'nova'; selectedVoiceProvider = 'openai';
           }
-          console.log(`[TalkingHead] AI picked voice: ${selectedVoice}`);
+          console.log(`[TalkingHead] AI picked voice: ${selectedVoice} (${selectedVoiceProvider})`);
         }
         let audioBuffer;
         const elevenLabsKey = getElevenLabsKey(capturedReq);
-        if (voiceProvider === 'elevenlabs' && elevenLabsKey) {
+        if (selectedVoiceProvider === 'elevenlabs' && elevenLabsKey) {
           audioBuffer = await generateSpeechElevenLabs(finalScript, { key: elevenLabsKey, voiceId: selectedVoice });
         } else {
           audioBuffer = await generateSpeech(finalScript, { voice: selectedVoice, req: capturedReq });

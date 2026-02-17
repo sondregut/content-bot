@@ -6461,7 +6461,7 @@ async function generateTalkingHeadPreview() {
     }
 
     // Show voice selection
-    const voiceName = data.voice || 'auto';
+    const voiceName = data.voiceName || data.voice || 'auto';
     videoVoiceLabel.textContent = `Voice: ${voiceName}${data.voiceProvider === 'elevenlabs' ? ' (ElevenLabs)' : ''}`;
     videoVoiceLabel.style.display = 'block';
 
