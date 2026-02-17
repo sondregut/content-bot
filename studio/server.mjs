@@ -5656,11 +5656,12 @@ SELECTION: Conservative brands → Everyday only. Energetic brands → mix Every
 PERSON:
 - Very attractive — symmetrical face, clear skin, bright eyes, well-groomed
 - But CASUAL, not posed — slight smile or mouth slightly open mid-sentence
-- Framed from mid-chest up (like holding phone at arm's length) — NOT a tight face close-up
+- Framed from mid-chest up, selfie distance — NOT a tight face close-up
 - Show head, neck, shoulders, and upper chest — similar to a FaceTime call framing
 - Looking directly at camera lens
 - Match to brand audience (age, style, attire) but aspirational
 - Normal skin texture — not airbrushed or overly smooth
+- Hands should be relaxed or gesturing naturally — NEVER holding a phone, camera, or device
 
 TECHNICAL:
 - Front-facing phone camera perspective (NOT a DSLR or professional camera)
@@ -5678,7 +5679,7 @@ TECHNICAL:
         console.warn('[TalkingHead Preview] Smart avatar prompt failed, using fallback:', err.message);
       }
       if (!avatarPrompt) {
-        avatarPrompt = 'Very attractive young content creator sitting in parked car, driver seat, filming a selfie-style TikTok video. Symmetrical face, great bone structure, clear glowing skin, bright eyes. Looking directly at camera with natural slight smile, mid-sentence mouth slightly open. Natural daylight through car windows, selfie camera perspective, face and upper chest visible. Photorealistic, 9:16 vertical frame, casual and authentic feel, selfie-angle phone held at arm\'s length.';
+        avatarPrompt = 'Very attractive young content creator sitting in parked car, driver seat, filming a selfie-style TikTok video. Symmetrical face, great bone structure, clear glowing skin, bright eyes. Looking directly at camera with natural slight smile, mid-sentence mouth slightly open. Natural daylight through car windows, selfie camera perspective, face and upper chest visible. Hands relaxed or gesturing naturally, not holding anything. Photorealistic, 9:16 vertical frame, casual and authentic feel.';
       }
 
       console.log(`[TalkingHead Preview] Avatar prompt: ${avatarPrompt.slice(0, 120)}...`);
