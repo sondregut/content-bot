@@ -5396,18 +5396,30 @@ app.post('/api/generate-talking-head-preview', requireAuth, generationLimiter, a
         const presenterHint = presenterDescription ? `\nPresenter description from user: "${presenterDescription}"` : '';
         avatarPrompt = await generateText({
           model: req.body?.textModel,
-          system: `You generate image prompts for talking-head video avatars. These are for social media videos (TikTok/Reels) where the person will appear to be speaking to camera via AI lip sync. The image must produce someone viewers want to watch.
+          system: `You generate image prompts for TikTok/Reels talking-head video thumbnails. The image will be used as the base frame for an AI lip-sync video where the person appears to speak directly to camera — like a real creator filming themselves.
 
-Rules:
-- ATTRACTIVE, charismatic person — think influencer or content creator, not a stock photo. Strong jawline, clear skin, expressive eyes, natural confidence
-- Head and upper body visible, face clearly visible, looking directly at camera with slight natural smile (required for lip sync to work)
-- Match the person to the brand's audience (age, style, attire, energy) — but always make them aspirational
-- Dynamic, interesting composition — NOT a flat passport photo. Use depth of field, natural lighting with some contrast, environmental context
-- Contextual background that tells a story (gym floor for fitness, locker room, track, modern office, kitchen counter, etc.) — blurred/bokeh preferred
-- The person should have ENERGY — slight lean forward, confident posture, mid-conversation feel
-- Photorealistic, cinematic lighting, shot on 85mm lens look, shallow depth of field
+Think about how real TikTok creators film: selfie-angle phone held at arm's length, in a REAL casual situation where people naturally talk to camera. The goal is to look like a paused frame from an actual selfie video, NOT a professional photoshoot.
+
+SETTING — pick one that fits the brand and script context:
+- In a car (parked, driver's seat, natural daylight through windows — extremely common for TikTok)
+- Walking outside (selfie-style, street/park/campus behind them, slight motion feel)
+- On a court/field/gym floor (post-practice, slightly sweaty, authentic)
+- At a desk or kitchen counter (casual, at home)
+- Locker room, hotel room, backstage — anywhere people casually film themselves
+
+PERSON:
+- Always ATTRACTIVE — think popular creator/influencer, not stock photo model
+- Natural, casual expression — slight smile or mid-sentence mouth slightly open, like they're about to say something
+- Face clearly visible, looking directly at camera (required for lip sync)
+- Selfie-distance framing: face + upper chest, slightly closer than a portrait
+- Match person to brand audience (age, style, attire) but always aspirational
+- Natural/ambient lighting from the environment, not studio lights
+
+TECHNICAL:
+- Selfie camera perspective (front-facing phone camera look, slight wide-angle distortion is OK)
+- 9:16 vertical frame
+- Photorealistic, natural colors, no filters
 - No text, logos, overlays, or watermarks
-- 9:16 portrait orientation (vertical video frame)
 - Return ONLY the image prompt, nothing else`,
           messages: [{ role: 'user', content: `Brand: ${brand.name}\n${brand.systemPrompt || ''}\n\nScript: ${finalScript.slice(0, 500)}${presenterHint}` }],
           maxTokens: 300,
@@ -5417,7 +5429,7 @@ Rules:
         console.warn('[TalkingHead Preview] Smart avatar prompt failed, using fallback:', err.message);
       }
       if (!avatarPrompt) {
-        avatarPrompt = 'Attractive, charismatic content creator looking directly at camera with a confident slight smile, head and upper body visible. Cinematic lighting, shallow depth of field, blurred modern background. Photorealistic, shot on 85mm lens, 9:16 vertical portrait. The person has natural confidence and energy, like they are mid-conversation.';
+        avatarPrompt = 'Attractive young content creator sitting in parked car, driver seat, filming a selfie-style TikTok video. Looking directly at camera with a natural slight smile, mid-sentence. Natural daylight through car windows, selfie camera perspective, face and upper chest visible. Photorealistic, 9:16 vertical frame, casual and authentic feel.';
       }
 
       console.log(`[TalkingHead Preview] Avatar prompt: ${avatarPrompt.slice(0, 120)}...`);
@@ -5773,7 +5785,7 @@ app.post('/api/generate-talking-head', requireAuth, generationLimiter, async (re
         } else {
           // AI-generated avatar
           job.step = 'generating-avatar';
-          const avatarPrompt = `Attractive, charismatic content creator looking directly at camera with a confident slight smile, head and upper body visible. Cinematic lighting, shallow depth of field, blurred modern background. Photorealistic, shot on 85mm lens, 9:16 vertical portrait. The person has natural confidence and energy, like they are mid-conversation.`;
+          const avatarPrompt = `Attractive young content creator sitting in parked car, driver seat, filming a selfie-style TikTok video. Looking directly at camera with a natural slight smile, mid-sentence. Natural daylight through car windows, selfie camera perspective, face and upper chest visible. Photorealistic, 9:16 vertical frame, casual and authentic feel.`;
           console.log(`[TalkingHead] Generating AI avatar...`);
           const avatarBuffer = await generateImage({
             model: 'gemini-3-pro-image-preview',
