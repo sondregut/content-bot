@@ -15,6 +15,7 @@ import { spawn, execSync } from 'child_process';
 import rateLimit from 'express-rate-limit';
 import ffmpegPath from 'ffmpeg-static';
 import { GoogleGenAI } from '@google/genai';
+import { createCanvas, loadImage as canvasLoadImage } from '@napi-rs/canvas';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -8766,6 +8767,606 @@ app.get('/api/tiktok/post-status/:publishId', requireAuth, async (req, res) => {
     res.status(500).json({ error: safeErrorMessage(err) });
   }
 });
+// --- Viral Text Overlay (ported from Larry's TikTok pipeline) ---
+
+function viralWrapText(ctx, text, maxWidth) {
+  const cleanText = text.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, '').trim();
+  const manualLines = cleanText.split('\n');
+  const wrappedLines = [];
+  for (const line of manualLines) {
+    if (ctx.measureText(line.trim()).width <= maxWidth) {
+      wrappedLines.push(line.trim());
+      continue;
+    }
+    const words = line.trim().split(/\s+/);
+    let currentLine = '';
+    for (const word of words) {
+      const testLine = currentLine ? `${currentLine} ${word}` : word;
+      if (ctx.measureText(testLine).width <= maxWidth) {
+        currentLine = testLine;
+      } else {
+        if (currentLine) wrappedLines.push(currentLine);
+        currentLine = word;
+      }
+    }
+    if (currentLine) wrappedLines.push(currentLine);
+  }
+  return wrappedLines;
+}
+
+async function applyViralTextOverlay(imageBuffer, text) {
+  const img = await canvasLoadImage(imageBuffer);
+  const canvas = createCanvas(img.width, img.height);
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(img, 0, 0);
+
+  const fontSize = Math.round(img.width * 0.065);
+  const outlineWidth = Math.round(fontSize * 0.15);
+  const maxWidth = img.width * 0.75;
+  const lineHeight = fontSize * 1.25;
+
+  ctx.font = `bold ${fontSize}px Arial`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+
+  const lines = viralWrapText(ctx, text, maxWidth);
+  const totalTextHeight = lines.length * lineHeight;
+  const startY = (img.height * 0.30) - (totalTextHeight / 2) + (lineHeight / 2);
+  const minY = img.height * 0.10;
+  const maxY = img.height * 0.80 - totalTextHeight;
+  const safeY = Math.max(minY, Math.min(startY, maxY));
+  const x = img.width / 2;
+
+  for (let i = 0; i < lines.length; i++) {
+    const y = safeY + (i * lineHeight);
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = outlineWidth;
+    ctx.lineJoin = 'round';
+    ctx.miterLimit = 2;
+    ctx.strokeText(lines[i], x, y);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillText(lines[i], x, y);
+  }
+
+  return Buffer.from(canvas.toBuffer('image/png'));
+}
+
+// Apply viral text overlay to a single slide
+app.post('/api/apply-viral-overlay', requireAuth, async (req, res) => {
+  try {
+    const { imageUrl, text } = req.body;
+    if (!imageUrl || !text) return res.status(400).json({ error: 'imageUrl and text are required' });
+
+    // Fetch the image
+    let imageBuffer;
+    if (imageUrl.startsWith('data:')) {
+      const b64 = imageUrl.split(',')[1];
+      imageBuffer = Buffer.from(b64, 'base64');
+    } else {
+      if (!isUrlSafe(imageUrl)) throw new Error('URL not allowed');
+      const imgRes = await fetch(imageUrl);
+      if (!imgRes.ok) throw new Error(`Failed to fetch image: ${imgRes.status}`);
+      imageBuffer = Buffer.from(await imgRes.arrayBuffer());
+    }
+
+    const overlaid = await applyViralTextOverlay(imageBuffer, text);
+
+    // Save to output dir
+    const filename = `viral_${crypto.randomBytes(6).toString('hex')}.png`;
+    const outputPath = path.join(outputDir, filename);
+    await fs.writeFile(outputPath, overlaid);
+
+    // Upload to Firebase Storage if available
+    let publicUrl = `/output/${filename}`;
+    if (bucket) {
+      const storagePath = `viral-overlays/${filename}`;
+      const file = bucket.file(storagePath);
+      await file.save(overlaid, { contentType: 'image/png', public: true });
+      publicUrl = `https://storage.googleapis.com/${bucket.name}/${storagePath}`;
+    }
+
+    res.json({ ok: true, url: publicUrl, filename });
+  } catch (err) {
+    console.error('[Viral Overlay]', err);
+    res.status(500).json({ error: safeErrorMessage(err, 'Overlay failed') });
+  }
+});
+
+// Apply viral text overlay to all slides in batch
+app.post('/api/apply-viral-overlay-batch', requireAuth, async (req, res) => {
+  try {
+    const { slides } = req.body;
+    if (!Array.isArray(slides) || slides.length === 0) {
+      return res.status(400).json({ error: 'slides array is required (each with imageUrl and text)' });
+    }
+
+    const results = [];
+    for (const slide of slides) {
+      if (!slide.imageUrl || !slide.text) {
+        results.push({ error: 'Missing imageUrl or text', original: slide.imageUrl });
+        continue;
+      }
+
+      let imageBuffer;
+      if (slide.imageUrl.startsWith('data:')) {
+        const b64 = slide.imageUrl.split(',')[1];
+        imageBuffer = Buffer.from(b64, 'base64');
+      } else {
+        if (!isUrlSafe(slide.imageUrl)) throw new Error('URL not allowed');
+        const imgRes = await fetch(slide.imageUrl);
+        if (!imgRes.ok) {
+          results.push({ error: `Failed to fetch: ${imgRes.status}`, original: slide.imageUrl });
+          continue;
+        }
+        imageBuffer = Buffer.from(await imgRes.arrayBuffer());
+      }
+
+      const overlaid = await applyViralTextOverlay(imageBuffer, slide.text);
+      const filename = `viral_${crypto.randomBytes(6).toString('hex')}.png`;
+      const outputPath = path.join(outputDir, filename);
+      await fs.writeFile(outputPath, overlaid);
+
+      let publicUrl = `/output/${filename}`;
+      if (bucket) {
+        const storagePath = `viral-overlays/${filename}`;
+        const file = bucket.file(storagePath);
+        await file.save(overlaid, { contentType: 'image/png', public: true });
+        publicUrl = `https://storage.googleapis.com/${bucket.name}/${storagePath}`;
+      }
+
+      results.push({ ok: true, url: publicUrl, filename, original: slide.imageUrl });
+    }
+
+    res.json({ ok: true, results });
+  } catch (err) {
+    console.error('[Viral Overlay Batch]', err);
+    res.status(500).json({ error: safeErrorMessage(err, 'Batch overlay failed') });
+  }
+});
+
+// --- Postiz Draft Posting (TikTok via Postiz — posts as draft so user can add music) ---
+
+const POSTIZ_BASE_URL = 'https://api.postiz.com/public/v1';
+
+function getPostizKeys(req) {
+  const apiKey = req.headers['x-postiz-key'];
+  const integrationId = req.headers['x-postiz-integration-id'];
+  if (apiKey && integrationId) return { apiKey, integrationId };
+  return null;
+}
+
+// Post slides to TikTok via Postiz (draft mode)
+app.post('/api/postiz/post', requireAuth, async (req, res) => {
+  const keys = getPostizKeys(req);
+  if (!keys) return res.status(400).json({ error: 'Postiz API Key and Integration ID required. Add them in Settings.' });
+
+  try {
+    const userId = req.user?.uid;
+    if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+
+    const { imageUrls, caption, title, brandId } = req.body;
+
+    if (!imageUrls || !Array.isArray(imageUrls) || imageUrls.length === 0) {
+      return res.status(400).json({ error: 'No images provided' });
+    }
+
+    // Upload images to Postiz
+    console.log(`[Postiz] Uploading ${imageUrls.length} slides...`);
+    const images = [];
+    for (let i = 0; i < imageUrls.length; i++) {
+      // Fetch the image
+      let imgBuffer;
+      if (imageUrls[i].startsWith('data:')) {
+        const b64 = imageUrls[i].split(',')[1];
+        imgBuffer = Buffer.from(b64, 'base64');
+      } else {
+        if (!isUrlSafe(imageUrls[i])) throw new Error('URL not allowed');
+        const imgRes = await fetch(imageUrls[i]);
+        if (!imgRes.ok) throw new Error(`Failed to fetch image ${i + 1}`);
+        imgBuffer = Buffer.from(await imgRes.arrayBuffer());
+      }
+
+      // Upload to Postiz
+      const form = new FormData();
+      const blob = new Blob([imgBuffer], { type: 'image/png' });
+      form.append('file', blob, `slide${i + 1}.png`);
+
+      const uploadRes = await fetch(`${POSTIZ_BASE_URL}/upload`, {
+        method: 'POST',
+        headers: { 'Authorization': keys.apiKey },
+        body: form,
+      });
+      const uploadData = await uploadRes.json();
+      if (uploadData.error) throw new Error(`Upload failed for slide ${i + 1}: ${JSON.stringify(uploadData.error)}`);
+
+      images.push({ id: uploadData.id, path: uploadData.path });
+      console.log(`[Postiz] Uploaded slide ${i + 1}: ${uploadData.id}`);
+
+      // Rate limit buffer
+      if (i < imageUrls.length - 1) {
+        await new Promise(r => setTimeout(r, 1500));
+      }
+    }
+
+    // Create TikTok post via Postiz
+    console.log('[Postiz] Creating TikTok draft post...');
+    const postRes = await fetch(`${POSTIZ_BASE_URL}/posts`, {
+      method: 'POST',
+      headers: {
+        'Authorization': keys.apiKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        type: 'now',
+        date: new Date().toISOString(),
+        shortLink: false,
+        tags: [],
+        posts: [{
+          integration: { id: keys.integrationId },
+          value: [{ content: caption || '', image: images }],
+          settings: {
+            __type: 'tiktok',
+            title: title || '',
+            privacy_level: 'SELF_ONLY',
+            duet: false,
+            stitch: false,
+            comment: true,
+            autoAddMusic: 'no',
+            brand_content_toggle: false,
+            brand_organic_toggle: false,
+            video_made_with_ai: true,
+            content_posting_method: 'UPLOAD',
+          },
+        }],
+      }),
+    });
+
+    const postData = await postRes.json();
+    console.log('[Postiz] Post created:', JSON.stringify(postData));
+
+    const postId = Array.isArray(postData) ? postData[0]?.postId : postData.postId;
+
+    // Save post metadata to Firestore
+    if (db && postId) {
+      await db.collection('postiz_posts').doc(postId).set({
+        userId,
+        postId,
+        caption: caption || '',
+        title: title || '',
+        brandId: brandId || '',
+        slideCount: imageUrls.length,
+        privacy: 'SELF_ONLY',
+        postedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    }
+
+    res.json({
+      ok: true,
+      postId,
+      message: 'Posted as draft to TikTok via Postiz. Open TikTok, add a trending sound, then publish!',
+    });
+  } catch (err) {
+    console.error('[Postiz] Post error:', err);
+    res.status(500).json({ error: safeErrorMessage(err, 'Postiz post failed') });
+  }
+});
+
+// --- Postiz Analytics (connect posts to TikTok video IDs + pull metrics) ---
+
+async function postizAPI(method, endpoint, apiKey, body = null) {
+  const opts = {
+    method,
+    headers: { 'Authorization': apiKey, 'Content-Type': 'application/json' },
+  };
+  if (body) opts.body = JSON.stringify(body);
+  const res = await fetch(`${POSTIZ_BASE_URL}${endpoint}`, opts);
+  return res.json();
+}
+
+// Connect Postiz posts to TikTok video IDs
+app.post('/api/postiz/connect-analytics', requireAuth, async (req, res) => {
+  const keys = getPostizKeys(req);
+  if (!keys) return res.status(400).json({ error: 'Postiz API Key and Integration ID required.' });
+
+  try {
+    const { days = 3 } = req.body;
+    const now = new Date();
+    const startDate = new Date(now - days * 86400000);
+    const cutoffDate = new Date(now - 2 * 3600000);
+
+    // Get all posts in range
+    const postsData = await postizAPI('GET', `/posts?startDate=${startDate.toISOString()}&endDate=${now.toISOString()}`, keys.apiKey);
+    let posts = (postsData.posts || []).filter(p => p.integration?.providerIdentifier === 'tiktok');
+    posts.sort((a, b) => new Date(a.publishDate) - new Date(b.publishDate));
+
+    const connected = posts.filter(p => p.releaseId && p.releaseId !== 'missing');
+    const unconnected = posts.filter(p => !p.releaseId || p.releaseId === 'missing');
+    const connectableUnconnected = unconnected.filter(p => new Date(p.publishDate) < cutoffDate);
+
+    let newlyConnected = 0;
+
+    if (connectableUnconnected.length > 0) {
+      const referencePost = connectableUnconnected[0];
+      const tiktokVideos = await postizAPI('GET', `/posts/${referencePost.id}/missing`, keys.apiKey);
+
+      if (Array.isArray(tiktokVideos) && tiktokVideos.length > 0) {
+        const videoIds = tiktokVideos.map(v => v.id).sort();
+        const connectedIds = new Set(connected.map(p => p.releaseId));
+        const availableIds = videoIds.filter(id => !connectedIds.has(id));
+        const sortedAvailable = availableIds.sort();
+        const idsToUse = sortedAvailable.slice(-connectableUnconnected.length);
+
+        for (let i = 0; i < connectableUnconnected.length; i++) {
+          const post = connectableUnconnected[i];
+          const videoId = idsToUse[i];
+          if (!videoId) continue;
+
+          await postizAPI('PUT', `/posts/${post.id}/release-id`, keys.apiKey, { releaseId: videoId });
+          newlyConnected++;
+          await new Promise(r => setTimeout(r, 1000));
+        }
+      }
+    }
+
+    res.json({
+      ok: true,
+      totalPosts: posts.length,
+      alreadyConnected: connected.length,
+      newlyConnected,
+      tooNew: unconnected.length - connectableUnconnected.length,
+    });
+  } catch (err) {
+    console.error('[Postiz Analytics] Connect error:', err);
+    res.status(500).json({ error: safeErrorMessage(err, 'Analytics connection failed') });
+  }
+});
+
+// Get per-post analytics
+app.get('/api/postiz/analytics', requireAuth, async (req, res) => {
+  const keys = getPostizKeys(req);
+  if (!keys) return res.status(400).json({ error: 'Postiz API Key and Integration ID required.' });
+
+  try {
+    const days = parseInt(req.query.days) || 3;
+    const now = new Date();
+    const startDate = new Date(now - days * 86400000);
+
+    const postsData = await postizAPI('GET', `/posts?startDate=${startDate.toISOString()}&endDate=${now.toISOString()}`, keys.apiKey);
+    let posts = (postsData.posts || []).filter(p =>
+      p.integration?.providerIdentifier === 'tiktok' &&
+      p.releaseId && p.releaseId !== 'missing'
+    );
+    posts.sort((a, b) => new Date(b.publishDate) - new Date(a.publishDate));
+
+    const results = [];
+    for (const post of posts) {
+      const analytics = await postizAPI('GET', `/analytics/post/${post.id}`, keys.apiKey);
+      const metrics = {};
+      if (Array.isArray(analytics)) {
+        analytics.forEach(m => {
+          const latest = m.data?.[m.data.length - 1];
+          if (latest) metrics[m.label.toLowerCase()] = parseInt(latest.total) || 0;
+        });
+      }
+
+      results.push({
+        id: post.id,
+        date: post.publishDate?.slice(0, 10),
+        hook: (post.content || '').substring(0, 70),
+        app: post.integration?.name,
+        views: metrics.views || 0,
+        likes: metrics.likes || 0,
+        comments: metrics.comments || 0,
+        shares: metrics.shares || 0,
+        releaseId: post.releaseId,
+      });
+
+      await new Promise(r => setTimeout(r, 300));
+    }
+
+    const totalViews = results.reduce((s, r) => s + r.views, 0);
+    const totalLikes = results.reduce((s, r) => s + r.likes, 0);
+
+    res.json({
+      ok: true,
+      posts: results,
+      summary: {
+        totalViews,
+        totalLikes,
+        postCount: results.length,
+        best: results.length > 0 ? results.reduce((a, b) => a.views > b.views ? a : b) : null,
+        worst: results.length > 0 ? results.reduce((a, b) => a.views < b.views ? a : b) : null,
+      },
+    });
+  } catch (err) {
+    console.error('[Postiz Analytics] Fetch error:', err);
+    res.status(500).json({ error: safeErrorMessage(err, 'Analytics fetch failed') });
+  }
+});
+
+// Diagnostic report
+app.get('/api/analytics/report', requireAuth, async (req, res) => {
+  const keys = getPostizKeys(req);
+  if (!keys) return res.status(400).json({ error: 'Postiz API Key and Integration ID required.' });
+
+  try {
+    const days = parseInt(req.query.days) || 3;
+    const brandId = req.query.brandId || '';
+    const now = new Date();
+    const startDate = new Date(now - days * 86400000);
+
+    const postsData = await postizAPI('GET', `/posts?startDate=${startDate.toISOString()}&endDate=${now.toISOString()}`, keys.apiKey);
+    let posts = (postsData.posts || []).filter(p =>
+      p.integration?.providerIdentifier === 'tiktok' &&
+      p.releaseId && p.releaseId !== 'missing'
+    );
+    posts.sort((a, b) => new Date(b.publishDate) - new Date(a.publishDate));
+
+    // Get analytics for each post
+    const postResults = [];
+    for (const post of posts) {
+      const analytics = await postizAPI('GET', `/analytics/post/${post.id}`, keys.apiKey);
+      const metrics = {};
+      if (Array.isArray(analytics)) {
+        analytics.forEach(m => {
+          const latest = m.data?.[m.data.length - 1];
+          if (latest) metrics[m.label.toLowerCase()] = parseInt(latest.total) || 0;
+        });
+      }
+      postResults.push({
+        id: post.id,
+        date: post.publishDate?.slice(0, 10),
+        hook: (post.content || '').substring(0, 70),
+        app: post.integration?.name,
+        views: metrics.views || 0,
+        likes: metrics.likes || 0,
+        comments: metrics.comments || 0,
+        shares: metrics.shares || 0,
+      });
+      await new Promise(r => setTimeout(r, 300));
+    }
+
+    const avgViews = postResults.length > 0
+      ? postResults.reduce((s, p) => s + p.views, 0) / postResults.length : 0;
+
+    const viewsGood = avgViews > 10000;
+
+    let diagnosis, level;
+    if (viewsGood) {
+      diagnosis = 'Views are strong! Scale what\'s working — make variations of top-performing hooks.';
+      level = 'scale';
+    } else if (avgViews > 3000) {
+      diagnosis = 'Views are decent but can improve. Test different hook categories and posting times.';
+      level = 'fix-hooks';
+    } else {
+      diagnosis = 'Views need work. Try radically different formats, research trending content in your niche.';
+      level = 'reset';
+    }
+
+    res.json({
+      ok: true,
+      diagnosis: { level, message: diagnosis, avgViews: Math.round(avgViews) },
+      posts: postResults,
+      days,
+    });
+  } catch (err) {
+    console.error('[Analytics Report] Error:', err);
+    res.status(500).json({ error: safeErrorMessage(err, 'Report generation failed') });
+  }
+});
+
+// --- Hook Performance Tracking ---
+
+// Get hook performance data
+app.get('/api/analytics/hooks', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user?.uid;
+    if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+    const brandId = req.query.brandId || '';
+
+    if (!db) return res.json({ ok: true, hooks: [] });
+
+    let query = db.collection('hook_performance').where('userId', '==', userId);
+    if (brandId) query = query.where('brandId', '==', brandId);
+    const snap = await query.orderBy('views', 'desc').limit(50).get();
+
+    const hooks = [];
+    snap.forEach(doc => hooks.push({ id: doc.id, ...doc.data() }));
+
+    // Classify hooks
+    for (const hook of hooks) {
+      if (hook.views >= 10000) hook.status = 'doubleDown';
+      else if (hook.views >= 1000) hook.status = 'testing';
+      else hook.status = 'dropped';
+    }
+
+    res.json({ ok: true, hooks });
+  } catch (err) {
+    console.error('[Hook Performance] Error:', err);
+    res.status(500).json({ error: safeErrorMessage(err, 'Hook fetch failed') });
+  }
+});
+
+// Save hook performance data (auto-extracted from posts)
+app.post('/api/analytics/save-hooks', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user?.uid;
+    if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+    if (!db) return res.json({ ok: true });
+
+    const { hooks } = req.body;
+    if (!Array.isArray(hooks)) return res.status(400).json({ error: 'hooks array required' });
+
+    const batch = db.batch();
+    for (const hook of hooks) {
+      const docId = hook.postId || crypto.randomBytes(8).toString('hex');
+      const ref = db.collection('hook_performance').doc(docId);
+      batch.set(ref, {
+        userId,
+        postId: hook.postId || '',
+        brandId: hook.brandId || '',
+        hookText: hook.hookText || '',
+        ctaText: hook.ctaText || '',
+        views: hook.views || 0,
+        likes: hook.likes || 0,
+        comments: hook.comments || 0,
+        shares: hook.shares || 0,
+        date: hook.date || new Date().toISOString().slice(0, 10),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+    }
+    await batch.commit();
+
+    res.json({ ok: true, saved: hooks.length });
+  } catch (err) {
+    console.error('[Hook Performance] Save error:', err);
+    res.status(500).json({ error: safeErrorMessage(err, 'Hook save failed') });
+  }
+});
+
+// Generate new hooks based on winning patterns
+app.post('/api/analytics/generate-hooks', requireAuth, async (req, res) => {
+  try {
+    const { winningHooks, brandName, brandDescription } = req.body;
+    if (!winningHooks || !Array.isArray(winningHooks) || winningHooks.length === 0) {
+      return res.status(400).json({ error: 'winningHooks array required' });
+    }
+
+    const hookList = winningHooks.map((h, i) => `${i + 1}. "${h.text}" (${h.views?.toLocaleString() || 0} views)`).join('\n');
+
+    const prompt = `You are a TikTok content strategist. Based on these winning hooks for ${brandName || 'this brand'}:
+
+${hookList}
+
+${brandDescription ? `Brand context: ${brandDescription}` : ''}
+
+Generate 5 NEW hook variations that follow the same patterns (structure, emotional triggers, format) but with different angles/scenarios. Each hook should be 4-8 words, punchy, and designed to stop scrolling.
+
+Return ONLY a JSON array of strings, no markdown:
+["hook 1", "hook 2", "hook 3", "hook 4", "hook 5"]`;
+
+    const text = await generateText({
+      model: req.body.model || 'claude-haiku-4-5-20251001',
+      system: 'You are a viral TikTok content strategist. Return only valid JSON.',
+      messages: [{ role: 'user', content: prompt }],
+      maxTokens: 500,
+      req,
+    });
+
+    let hooks;
+    try {
+      hooks = JSON.parse(text.replace(/```json?\n?/g, '').replace(/```/g, '').trim());
+    } catch {
+      hooks = text.split('\n').filter(l => l.trim()).map(l => l.replace(/^[\d."'\-\s]+/, '').replace(/["']/g, '').trim()).filter(Boolean).slice(0, 5);
+    }
+
+    res.json({ ok: true, hooks });
+  } catch (err) {
+    console.error('[Generate Hooks] Error:', err);
+    res.status(500).json({ error: safeErrorMessage(err, 'Hook generation failed') });
+  }
+});
+
 // Start server (only when run directly, not on Vercel)
 if (process.env.VERCEL !== '1') {
   app.listen(PORT, () => {

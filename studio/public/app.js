@@ -155,6 +155,10 @@ async function authFetch(url, opts = {}) {
   if (elevenLabsKey) opts.headers['X-ElevenLabs-Key'] = elevenLabsKey;
   if (tiktokClientKey) opts.headers['X-TikTok-Client-Key'] = tiktokClientKey;
   if (tiktokClientSecret) opts.headers['X-TikTok-Client-Secret'] = tiktokClientSecret;
+  const postizKey = localStorage.getItem(_prefix + 'postiz_key');
+  const postizIntegrationId = localStorage.getItem(_prefix + 'postiz_integration_id');
+  if (postizKey) opts.headers['X-Postiz-Key'] = postizKey;
+  if (postizIntegrationId) opts.headers['X-Postiz-Integration-Id'] = postizIntegrationId;
   return fetch(url, opts);
 }
 
@@ -366,6 +370,9 @@ function resetAppState() {
   generatedImages = {};
   generatedImagesCache = {};
   failedSlides = {};
+
+  // Viral overlay state
+  viralOverlaidImages = {};
 
   // Generation state
   batchJobId = null;
@@ -755,6 +762,10 @@ function loadApiKeysFromStorage() {
   if (settingsElevenLabsKey) settingsElevenLabsKey.value = elevenLabs;
   if (settingsTiktokClientKey) settingsTiktokClientKey.value = tiktokKey;
   if (settingsTiktokClientSecret) settingsTiktokClientSecret.value = tiktokSecret;
+  const postizKeyEl = document.getElementById('settings-postiz-key');
+  const postizIntIdEl = document.getElementById('settings-postiz-integration-id');
+  if (postizKeyEl) postizKeyEl.value = localStorage.getItem(prefix + 'postiz_key') || '';
+  if (postizIntIdEl) postizIntIdEl.value = localStorage.getItem(prefix + 'postiz_integration_id') || '';
 }
 
 // API key show/hide toggles
@@ -826,6 +837,15 @@ settingsSaveBtn.addEventListener('click', async () => {
   else localStorage.removeItem(prefix + 'tiktok_client_key');
   if (tiktokSecret) localStorage.setItem(prefix + 'tiktok_client_secret', tiktokSecret);
   else localStorage.removeItem(prefix + 'tiktok_client_secret');
+
+  const postizKeyEl = document.getElementById('settings-postiz-key');
+  const postizIntIdEl = document.getElementById('settings-postiz-integration-id');
+  const postizKeyVal = postizKeyEl ? postizKeyEl.value.trim() : '';
+  const postizIntIdVal = postizIntIdEl ? postizIntIdEl.value.trim() : '';
+  if (postizKeyVal) localStorage.setItem(prefix + 'postiz_key', postizKeyVal);
+  else localStorage.removeItem(prefix + 'postiz_key');
+  if (postizIntIdVal) localStorage.setItem(prefix + 'postiz_integration_id', postizIntIdVal);
+  else localStorage.removeItem(prefix + 'postiz_integration_id');
 
   // Keys are stored in browser only — sent via headers on each API request
   settingsStatus.textContent = 'Keys saved! They will be used for all AI requests.';
@@ -5270,6 +5290,8 @@ function updateGallery() {
 
   // Update TikTok post UI when gallery changes
   if (typeof updateTikTokUI === 'function') updateTikTokUI();
+  // Update viral overlay panel when gallery changes
+  if (typeof updateViralOverlayPanel === 'function') updateViralOverlayPanel();
 }
 
 // --- Background Image Upload ---
@@ -5550,6 +5572,7 @@ function openPersonalizeView() {
   if (document.getElementById('meme-view')) document.getElementById('meme-view').style.display = 'none';
   if (document.getElementById('video-studio-view')) document.getElementById('video-studio-view').style.display = 'none';
   if (document.getElementById('media-library-view')) document.getElementById('media-library-view').style.display = 'none';
+  if (document.getElementById('analytics-view')) document.getElementById('analytics-view').style.display = 'none';
   personalizeView.style.display = 'block';
   renderFaceStudioPersons();
   renderFaceStudioPersonDetail();
@@ -5648,6 +5671,7 @@ function openMemeView() {
   document.getElementById('content-plan-view').style.display = 'none';
   if (document.getElementById('video-studio-view')) document.getElementById('video-studio-view').style.display = 'none';
   if (document.getElementById('media-library-view')) document.getElementById('media-library-view').style.display = 'none';
+  if (document.getElementById('analytics-view')) document.getElementById('analytics-view').style.display = 'none';
   memeView.style.display = 'block';
   updateMemePreviewAspect();
   updateMemeIconPreview();
@@ -5832,6 +5856,182 @@ document.getElementById('person-select').addEventListener('change', function() {
   }
 });
 
+// --- Viral Text Overlay ---
+// =============================================
+
+const viralOverlaySection = document.getElementById('viral-overlay-section');
+const viralOverlaySlides = document.getElementById('viral-overlay-slides');
+const viralPreviewBtn = document.getElementById('viral-preview-btn');
+const viralApplyAllBtn = document.getElementById('viral-apply-all-btn');
+const viralOverlayStatus = document.getElementById('viral-overlay-status');
+const viralOverlayResults = document.getElementById('viral-overlay-results');
+const viralOverlayStrip = document.getElementById('viral-overlay-strip');
+const viralDownloadAllBtn = document.getElementById('viral-download-all-btn');
+let viralOverlaidImages = {}; // { slideIndex: { url, filename } }
+
+function updateViralOverlayPanel() {
+  const imageKeys = Object.keys(generatedImages).filter(k => generatedImages[k] && !generatedImages[k].isVideo);
+  if (imageKeys.length === 0) {
+    viralOverlaySection.style.display = 'none';
+    return;
+  }
+  viralOverlaySection.style.display = 'block';
+
+  // Build per-slide text inputs
+  let html = '';
+  for (const key of imageKeys.sort((a, b) => a - b)) {
+    const gen = generatedImages[key];
+    const slideNum = parseInt(key) + 1;
+    const existingText = viralOverlaySlides.querySelector(`textarea[data-index="${key}"]`)?.value || '';
+    html += `<div class="viral-overlay-slide-row">
+      <span class="slide-num">${slideNum}</span>
+      <img src="${escapeHtml(sanitizeMediaUrl(gen.url))}" alt="Slide ${slideNum}" />
+      <textarea data-index="${key}" rows="2" placeholder="4-6 words per line, use Enter for breaks">${escapeHtml(existingText)}</textarea>
+    </div>`;
+  }
+  viralOverlaySlides.innerHTML = html;
+
+  // Enable buttons when at least one textarea has text
+  const checkTexts = () => {
+    const anyText = [...viralOverlaySlides.querySelectorAll('textarea')].some(t => t.value.trim());
+    viralPreviewBtn.disabled = !anyText;
+    viralApplyAllBtn.disabled = !anyText;
+  };
+  viralOverlaySlides.querySelectorAll('textarea').forEach(t => t.addEventListener('input', checkTexts));
+  checkTexts();
+}
+
+// Preview a single slide overlay (current slide)
+viralPreviewBtn.addEventListener('click', async () => {
+  const textarea = viralOverlaySlides.querySelector(`textarea[data-index="${currentSlideIndex}"]`);
+  if (!textarea || !textarea.value.trim()) {
+    viralOverlayStatus.textContent = 'Enter text for the current slide first.';
+    viralOverlayStatus.className = 'viral-overlay-status error';
+    return;
+  }
+
+  const gen = generatedImages[currentSlideIndex];
+  if (!gen) return;
+
+  viralPreviewBtn.disabled = true;
+  viralOverlayStatus.textContent = 'Applying overlay...';
+  viralOverlayStatus.className = 'viral-overlay-status processing';
+
+  try {
+    const res = await authFetch('/api/apply-viral-overlay', {
+      method: 'POST',
+      body: JSON.stringify({ imageUrl: gen.url, text: textarea.value.trim() }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Overlay failed');
+
+    viralOverlaidImages[currentSlideIndex] = { url: data.url, filename: data.filename };
+    viralOverlayStatus.textContent = 'Preview ready!';
+    viralOverlayStatus.className = 'viral-overlay-status success';
+    renderViralResults();
+  } catch (err) {
+    viralOverlayStatus.textContent = err.message;
+    viralOverlayStatus.className = 'viral-overlay-status error';
+  } finally {
+    viralPreviewBtn.disabled = false;
+  }
+});
+
+// Apply overlay to all slides
+viralApplyAllBtn.addEventListener('click', async () => {
+  const textareas = viralOverlaySlides.querySelectorAll('textarea');
+  const slides = [];
+  textareas.forEach(t => {
+    const text = t.value.trim();
+    const idx = t.dataset.index;
+    const gen = generatedImages[idx];
+    if (text && gen) {
+      slides.push({ imageUrl: gen.url, text, index: idx });
+    }
+  });
+
+  if (slides.length === 0) {
+    viralOverlayStatus.textContent = 'Enter text for at least one slide.';
+    viralOverlayStatus.className = 'viral-overlay-status error';
+    return;
+  }
+
+  viralApplyAllBtn.disabled = true;
+  viralPreviewBtn.disabled = true;
+  viralOverlayStatus.textContent = `Applying overlays to ${slides.length} slides...`;
+  viralOverlayStatus.className = 'viral-overlay-status processing';
+
+  try {
+    const res = await authFetch('/api/apply-viral-overlay-batch', {
+      method: 'POST',
+      body: JSON.stringify({ slides: slides.map(s => ({ imageUrl: s.imageUrl, text: s.text })) }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Batch overlay failed');
+
+    data.results.forEach((r, i) => {
+      if (r.ok) {
+        viralOverlaidImages[slides[i].index] = { url: r.url, filename: r.filename };
+      }
+    });
+
+    const successCount = data.results.filter(r => r.ok).length;
+    viralOverlayStatus.textContent = `${successCount}/${slides.length} overlays applied!`;
+    viralOverlayStatus.className = 'viral-overlay-status success';
+    renderViralResults();
+  } catch (err) {
+    viralOverlayStatus.textContent = err.message;
+    viralOverlayStatus.className = 'viral-overlay-status error';
+  } finally {
+    viralApplyAllBtn.disabled = false;
+    viralPreviewBtn.disabled = false;
+  }
+});
+
+function renderViralResults() {
+  const keys = Object.keys(viralOverlaidImages).sort((a, b) => a - b);
+  if (keys.length === 0) {
+    viralOverlayResults.style.display = 'none';
+    return;
+  }
+  viralOverlayResults.style.display = 'block';
+  viralOverlayStrip.innerHTML = keys.map(k => {
+    const img = viralOverlaidImages[k];
+    return `<img src="${escapeHtml(img.url)}" alt="Overlaid slide ${parseInt(k) + 1}" data-filename="${escapeHtml(img.filename)}" />`;
+  }).join('');
+
+  // Click to open full-size
+  viralOverlayStrip.querySelectorAll('img').forEach(img => {
+    img.addEventListener('click', () => {
+      window.open(img.src, '_blank');
+    });
+  });
+}
+
+// Download all overlaid slides as ZIP
+viralDownloadAllBtn.addEventListener('click', async () => {
+  const keys = Object.keys(viralOverlaidImages).sort((a, b) => a - b);
+  if (keys.length === 0) return;
+  const filenames = keys.map(k => viralOverlaidImages[k].filename);
+  try {
+    const res = await authFetch('/api/download-selected', {
+      method: 'POST',
+      body: JSON.stringify({ filenames, brandId: currentBrand?.id || 'viral' }),
+    });
+    if (!res.ok) throw new Error('Download failed');
+    const blob = await res.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'viral-overlays.zip';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
+  } catch (err) {
+    console.error('Download failed:', err);
+  }
+});
+
 // --- TikTok Integration ---
 // =============================================
 
@@ -5884,10 +6084,12 @@ function updateTikTokUI() {
     tiktokConnectBtn.title = 'Connect your TikTok account';
   }
 
-  // Show/hide post button in gallery
+  // Show/hide post button in gallery (show if TikTok connected OR Postiz configured)
   const hasSlides = Object.keys(generatedImages).length > 0;
+  const _prefix = getKeyPrefix();
+  const hasPostiz = Boolean(localStorage.getItem(_prefix + 'postiz_key') && localStorage.getItem(_prefix + 'postiz_integration_id'));
   if (tiktokPostBtn) {
-    tiktokPostBtn.style.display = (tiktokConnected && hasSlides) ? 'inline-flex' : 'none';
+    tiktokPostBtn.style.display = ((tiktokConnected || hasPostiz) && hasSlides) ? 'inline-flex' : 'none';
   }
 }
 
@@ -5962,11 +6164,13 @@ tiktokCaption.addEventListener('input', () => {
 tiktokPostBtn.addEventListener('click', openTikTokModal);
 
 function openTikTokModal() {
-  // Populate slide previews
+  // Populate slide previews — use overlaid images if available, fall back to originals
   const keys = Object.keys(generatedImages).sort((a, b) => a - b);
   tiktokSlidesPreview.innerHTML = keys.map((key) => {
+    const overlaid = viralOverlaidImages[key];
     const gen = generatedImages[key];
-    return `<img src="${gen.url}" alt="Slide ${parseInt(key) + 1}" />`;
+    const url = overlaid ? overlaid.url : gen.url;
+    return `<img src="${escapeHtml(url)}" alt="Slide ${parseInt(key) + 1}" />`;
   }).join('');
 
   // Reset form
@@ -5981,6 +6185,31 @@ function openTikTokModal() {
   document.getElementById('tiktok-brand-content').checked = false;
   document.getElementById('tiktok-brand-organic').checked = false;
   document.getElementById('tiktok-privacy').value = 'SELF_ONLY';
+
+  // Show/hide posting method toggle based on what's configured
+  const methodToggle = document.getElementById('tiktok-post-method-toggle');
+  const postizNote = document.getElementById('postiz-method-note');
+  const _pfx = getKeyPrefix();
+  const _hasPostiz = Boolean(localStorage.getItem(_pfx + 'postiz_key') && localStorage.getItem(_pfx + 'postiz_integration_id'));
+  if (_hasPostiz && tiktokConnected) {
+    // Both available — show toggle
+    methodToggle.style.display = 'flex';
+  } else if (_hasPostiz) {
+    // Only Postiz — pre-select and hide toggle
+    methodToggle.style.display = 'flex';
+    document.querySelector('input[name="tiktok-post-method"][value="postiz"]').checked = true;
+  } else {
+    // Only direct — hide toggle
+    methodToggle.style.display = 'none';
+    document.querySelector('input[name="tiktok-post-method"][value="direct"]').checked = true;
+  }
+  // Show/hide Postiz note
+  const updatePostizNote = () => {
+    const isPostiz = document.querySelector('input[name="tiktok-post-method"]:checked')?.value === 'postiz';
+    postizNote.style.display = isPostiz ? 'block' : 'none';
+  };
+  document.querySelectorAll('input[name="tiktok-post-method"]').forEach(r => r.addEventListener('change', updatePostizNote));
+  updatePostizNote();
 
   tiktokModal.style.display = 'flex';
   _activeFocusTrap = trapFocus(tiktokModal);
@@ -6010,16 +6239,59 @@ async function postToTikTok() {
   const keys = Object.keys(generatedImages).sort((a, b) => a - b);
   if (keys.length === 0) return;
 
-  const imageUrls = keys.map((key) => generatedImages[key].url);
+  // Use overlaid images if available, fall back to originals
+  const imageUrls = keys.map((key) => {
+    const overlaid = viralOverlaidImages[key];
+    return overlaid ? overlaid.url : generatedImages[key].url;
+  });
+
   const caption = tiktokCaption.value.trim();
+  const postMethod = document.querySelector('input[name="tiktok-post-method"]:checked')?.value || 'direct';
+
+  tiktokSubmitBtn.disabled = true;
+  tiktokSubmitBtn.textContent = 'Uploading...';
+
+  if (postMethod === 'postiz') {
+    // Post via Postiz (draft mode)
+    tiktokPostStatus.textContent = `Uploading ${imageUrls.length} slides to Postiz...`;
+    tiktokPostStatus.className = 'tiktok-post-status processing';
+
+    try {
+      const res = await authFetch('/api/postiz/post', {
+        method: 'POST',
+        body: JSON.stringify({
+          imageUrls,
+          caption,
+          title: caption.substring(0, 100),
+          brandId: currentBrand?.id || '',
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Postiz post failed');
+
+      tiktokPostStatus.textContent = data.message || 'Posted as draft! Open TikTok, add a trending sound, then publish.';
+      tiktokPostStatus.className = 'tiktok-post-status success';
+      tiktokSubmitBtn.textContent = 'Done';
+      tiktokSubmitBtn.onclick = closeTikTokModal;
+    } catch (err) {
+      tiktokPostStatus.textContent = `Error: ${err.message}`;
+      tiktokPostStatus.className = 'tiktok-post-status error';
+      tiktokSubmitBtn.disabled = false;
+      tiktokSubmitBtn.innerHTML = `
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19.59 6.69a4.83 4.83 0 01-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 01-2.88 2.5 2.89 2.89 0 01-2.89-2.89 2.89 2.89 0 012.89-2.89c.28 0 .54.04.79.1v-3.5a6.37 6.37 0 00-.79-.05A6.34 6.34 0 003.15 15.2a6.34 6.34 0 006.34 6.34 6.34 6.34 0 006.34-6.34V8.73a8.19 8.19 0 004.76 1.52v-3.4a4.85 4.85 0 01-1-.16z"/></svg>
+        Retry
+      `;
+    }
+    return;
+  }
+
+  // Direct TikTok posting (existing flow)
   const privacyLevel = document.getElementById('tiktok-privacy').value;
   const autoAddMusic = document.getElementById('tiktok-auto-music').checked;
   const disableComment = document.getElementById('tiktok-disable-comment').checked;
   const brandContentToggle = document.getElementById('tiktok-brand-content').checked;
   const brandOrganicToggle = document.getElementById('tiktok-brand-organic').checked;
 
-  tiktokSubmitBtn.disabled = true;
-  tiktokSubmitBtn.textContent = 'Uploading...';
   tiktokPostStatus.textContent = `Converting ${imageUrls.length} slides and uploading to TikTok...`;
   tiktokPostStatus.className = 'tiktok-post-status processing';
 
@@ -6241,6 +6513,7 @@ function openVideoStudio() {
   if (memeView) memeView.style.display = 'none';
   document.getElementById('content-plan-view').style.display = 'none';
   if (document.getElementById('media-library-view')) document.getElementById('media-library-view').style.display = 'none';
+  if (document.getElementById('analytics-view')) document.getElementById('analytics-view').style.display = 'none';
   videoStudioView.style.display = 'block';
   populateVideoStudioAvatarDropdown();
   loadVideoStudioVoices();
@@ -6914,6 +7187,7 @@ async function openMediaLibrary() {
   personalizeView.style.display = 'none';
   if (document.getElementById('meme-view')) document.getElementById('meme-view').style.display = 'none';
   if (document.getElementById('video-studio-view')) document.getElementById('video-studio-view').style.display = 'none';
+  if (document.getElementById('analytics-view')) document.getElementById('analytics-view').style.display = 'none';
   document.getElementById('content-plan-view').style.display = 'none';
   mediaLibraryView.style.display = 'block';
 
@@ -7278,3 +7552,241 @@ async function selectBackground(imgUrl) {
     console.error('Failed to select background:', err);
   }
 }
+
+// ===================== ANALYTICS DASHBOARD =====================
+
+const analyticsView = document.getElementById('analytics-view');
+const analyticsDays = document.getElementById('analytics-days');
+const analyticsConnectBtn = document.getElementById('analytics-connect-btn');
+const analyticsRefreshBtn = document.getElementById('analytics-refresh-btn');
+const analyticsStatus = document.getElementById('analytics-status');
+const analyticsDiagnosis = document.getElementById('analytics-diagnosis');
+const analyticsSummary = document.getElementById('analytics-summary');
+const analyticsTableBody = document.getElementById('analytics-table-body');
+const analyticsEmpty = document.getElementById('analytics-empty');
+const hookLabWinners = document.getElementById('hook-lab-winners');
+const hookLabTesting = document.getElementById('hook-lab-testing');
+const hookLabDropped = document.getElementById('hook-lab-dropped');
+const hookLabGenerated = document.getElementById('hook-lab-generated');
+const hookLabGeneratedList = document.getElementById('hook-lab-generated-list');
+const generateHooksBtn = document.getElementById('generate-hooks-btn');
+
+function openAnalyticsView() {
+  emptyState.style.display = 'none';
+  editorArea.style.display = 'none';
+  personalizeView.style.display = 'none';
+  memeView.style.display = 'none';
+  document.getElementById('content-plan-view').style.display = 'none';
+  if (document.getElementById('video-studio-view')) document.getElementById('video-studio-view').style.display = 'none';
+  if (document.getElementById('media-library-view')) document.getElementById('media-library-view').style.display = 'none';
+  analyticsView.style.display = 'block';
+  loadAnalytics();
+}
+
+function closeAnalyticsView() {
+  analyticsView.style.display = 'none';
+  if (selectedIdea) {
+    editorArea.style.display = 'block';
+  } else {
+    emptyState.style.display = 'flex';
+  }
+}
+
+document.getElementById('sidebar-analytics-btn').addEventListener('click', openAnalyticsView);
+document.getElementById('analytics-back-btn').addEventListener('click', closeAnalyticsView);
+
+function formatViews(n) {
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+  if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+  return String(n);
+}
+
+async function loadAnalytics() {
+  const days = analyticsDays.value || '3';
+  analyticsStatus.textContent = 'Loading analytics...';
+  analyticsStatus.className = 'analytics-status processing';
+
+  try {
+    // Fetch analytics data and report in parallel
+    const [analyticsRes, reportRes] = await Promise.all([
+      authFetch(`/api/postiz/analytics?days=${days}`),
+      authFetch(`/api/analytics/report?days=${days}&brandId=${currentBrand?.id || ''}`),
+    ]);
+
+    const analyticsData = await analyticsRes.json();
+    const reportData = await reportRes.json();
+
+    if (!analyticsRes.ok) throw new Error(analyticsData.error || 'Analytics failed');
+
+    // Render diagnosis
+    if (reportData.ok && reportData.diagnosis) {
+      const d = reportData.diagnosis;
+      analyticsDiagnosis.style.display = 'flex';
+      analyticsDiagnosis.dataset.level = d.level;
+      const icons = { scale: '🟢', 'fix-hooks': '🟡', reset: '🔴' };
+      const labels = { scale: 'Scale It', 'fix-hooks': 'Fix Hooks', reset: 'Needs Work' };
+      document.getElementById('analytics-diagnosis-icon').textContent = icons[d.level] || '📊';
+      document.getElementById('analytics-diagnosis-level').textContent = labels[d.level] || d.level;
+      document.getElementById('analytics-diagnosis-message').textContent = d.message;
+    } else {
+      analyticsDiagnosis.style.display = 'none';
+    }
+
+    // Render summary
+    if (analyticsData.ok && analyticsData.summary) {
+      const s = analyticsData.summary;
+      analyticsSummary.style.display = 'grid';
+      document.getElementById('analytics-total-views').textContent = formatViews(s.totalViews);
+      document.getElementById('analytics-total-likes').textContent = formatViews(s.totalLikes);
+      document.getElementById('analytics-post-count').textContent = s.postCount;
+      document.getElementById('analytics-avg-views').textContent = s.postCount > 0 ? formatViews(Math.round(s.totalViews / s.postCount)) : '0';
+    }
+
+    // Render table
+    const posts = analyticsData.posts || [];
+    if (posts.length === 0) {
+      analyticsEmpty.style.display = 'block';
+      document.getElementById('analytics-table').style.display = 'none';
+    } else {
+      analyticsEmpty.style.display = 'none';
+      document.getElementById('analytics-table').style.display = 'table';
+      analyticsTableBody.innerHTML = posts.map(p => `
+        <tr>
+          <td>${escapeHtml(p.date || '')}</td>
+          <td>${escapeHtml(p.hook || '')}</td>
+          <td>${formatViews(p.views)}</td>
+          <td>${p.likes}</td>
+          <td>${p.comments}</td>
+          <td>${p.shares}</td>
+        </tr>
+      `).join('');
+    }
+
+    // Load hooks
+    loadHookPerformance(posts);
+
+    analyticsStatus.textContent = '';
+  } catch (err) {
+    analyticsStatus.textContent = err.message;
+    analyticsStatus.className = 'analytics-status error';
+  }
+}
+
+async function loadHookPerformance(posts) {
+  try {
+    const res = await authFetch(`/api/analytics/hooks?brandId=${currentBrand?.id || ''}`);
+    const data = await res.json();
+    if (!data.ok) return;
+
+    const hooks = data.hooks || [];
+    const winners = hooks.filter(h => h.status === 'doubleDown');
+    const testing = hooks.filter(h => h.status === 'testing');
+    const dropped = hooks.filter(h => h.status === 'dropped');
+
+    const renderHookList = (list, container) => {
+      if (list.length === 0) {
+        container.innerHTML = '<p class="field-hint" style="margin:0;font-size:0.78rem">No hooks yet</p>';
+        return;
+      }
+      container.innerHTML = list.slice(0, 10).map(h => `
+        <div class="hook-lab-item">
+          <div>${escapeHtml(h.hookText || '')}</div>
+          <span class="hook-views">${formatViews(h.views)} views</span>
+        </div>
+      `).join('');
+    };
+
+    renderHookList(winners, hookLabWinners);
+    renderHookList(testing, hookLabTesting);
+    renderHookList(dropped, hookLabDropped);
+
+    // Auto-save hook data from analytics posts
+    if (posts && posts.length > 0) {
+      const hooksToSave = posts.map(p => ({
+        postId: p.id,
+        brandId: currentBrand?.id || '',
+        hookText: p.hook || '',
+        views: p.views || 0,
+        likes: p.likes || 0,
+        comments: p.comments || 0,
+        shares: p.shares || 0,
+        date: p.date || '',
+      }));
+      authFetch('/api/analytics/save-hooks', {
+        method: 'POST',
+        body: JSON.stringify({ hooks: hooksToSave }),
+      }).catch(() => {}); // fire and forget
+    }
+  } catch {
+    // Hook data not critical
+  }
+}
+
+// Connect posts to TikTok video IDs
+analyticsConnectBtn.addEventListener('click', async () => {
+  analyticsConnectBtn.disabled = true;
+  analyticsStatus.textContent = 'Connecting posts to TikTok videos...';
+  analyticsStatus.className = 'analytics-status processing';
+
+  try {
+    const res = await authFetch('/api/postiz/connect-analytics', {
+      method: 'POST',
+      body: JSON.stringify({ days: parseInt(analyticsDays.value) || 3 }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Connection failed');
+
+    analyticsStatus.textContent = `Connected ${data.newlyConnected} new posts. ${data.alreadyConnected} already connected. ${data.tooNew || 0} too new.`;
+    analyticsStatus.className = 'analytics-status success';
+
+    // Refresh analytics
+    setTimeout(loadAnalytics, 1000);
+  } catch (err) {
+    analyticsStatus.textContent = err.message;
+    analyticsStatus.className = 'analytics-status error';
+  } finally {
+    analyticsConnectBtn.disabled = false;
+  }
+});
+
+analyticsRefreshBtn.addEventListener('click', loadAnalytics);
+analyticsDays.addEventListener('change', loadAnalytics);
+
+// Generate new hooks
+generateHooksBtn.addEventListener('click', async () => {
+  generateHooksBtn.disabled = true;
+  generateHooksBtn.textContent = 'Generating...';
+
+  try {
+    // Get winning hooks from the hook lab
+    const res = await authFetch(`/api/analytics/hooks?brandId=${currentBrand?.id || ''}`);
+    const data = await res.json();
+    const winners = (data.hooks || []).filter(h => h.views >= 5000).slice(0, 5);
+
+    if (winners.length === 0) {
+      hookLabGenerated.style.display = 'block';
+      hookLabGeneratedList.innerHTML = '<li>Need at least a few posts with 5K+ views to identify patterns.</li>';
+      return;
+    }
+
+    const genRes = await authFetch('/api/analytics/generate-hooks', {
+      method: 'POST',
+      body: JSON.stringify({
+        winningHooks: winners.map(h => ({ text: h.hookText, views: h.views })),
+        brandName: currentBrand?.name || '',
+        brandDescription: currentBrand?.systemPrompt || '',
+      }),
+    });
+    const genData = await genRes.json();
+    if (!genRes.ok) throw new Error(genData.error || 'Generation failed');
+
+    hookLabGenerated.style.display = 'block';
+    hookLabGeneratedList.innerHTML = (genData.hooks || []).map(h => `<li>${escapeHtml(h)}</li>`).join('');
+  } catch (err) {
+    hookLabGenerated.style.display = 'block';
+    hookLabGeneratedList.innerHTML = `<li>Error: ${escapeHtml(err.message)}</li>`;
+  } finally {
+    generateHooksBtn.disabled = false;
+    generateHooksBtn.textContent = 'Generate New Hooks';
+  }
+});

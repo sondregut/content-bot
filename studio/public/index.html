@@ -61,6 +61,7 @@
           <button class="header-nav-btn" id="sidebar-meme-btn">&#127912; Meme Studio</button>
           <button class="header-nav-btn" id="sidebar-video-studio-btn">&#127908; Video Studio</button>
           <button class="header-nav-btn" id="sidebar-media-btn">&#128194; Media Library</button>
+          <button class="header-nav-btn" id="sidebar-analytics-btn">&#128200; Analytics</button>
         </nav>
         <div class="header-right">
           <button class="tiktok-connect-btn" id="tiktok-connect-btn" title="Connect TikTok">
@@ -597,6 +598,28 @@
                 </div>
                 <div class="gallery-strip" id="gallery-strip"></div>
               </div>
+
+              <!-- Viral Text Overlay Panel -->
+              <div class="viral-overlay-section" id="viral-overlay-section" style="display:none">
+                <div class="viral-overlay-header">
+                  <h3>TikTok Text Overlay</h3>
+                  <span class="viral-overlay-hint">White text with black outline &mdash; the proven viral format</span>
+                </div>
+                <div class="viral-overlay-slides" id="viral-overlay-slides"></div>
+                <div class="viral-overlay-actions">
+                  <button type="button" class="btn small" id="viral-preview-btn" disabled>Preview Slide</button>
+                  <button type="button" class="btn small primary" id="viral-apply-all-btn" disabled>Apply All Overlays</button>
+                </div>
+                <div class="viral-overlay-status" id="viral-overlay-status"></div>
+                <div class="viral-overlay-results" id="viral-overlay-results" style="display:none">
+                  <h4>Overlaid Slides</h4>
+                  <div class="viral-overlay-strip" id="viral-overlay-strip"></div>
+                  <div class="viral-overlay-result-actions">
+                    <button type="button" class="btn small accent" id="viral-download-all-btn">Download Overlaid ZIP</button>
+                  </div>
+                </div>
+              </div>
+
               <div class="progress-section" id="progress-section" style="display:none">
                 <div class="progress-label" id="progress-label">Generating...</div>
                 <div class="progress-bar">
@@ -1175,6 +1198,98 @@
             </div>
           </div>
 
+          <!-- Analytics View -->
+          <div class="analytics-view" id="analytics-view" style="display:none">
+            <div class="analytics-header">
+              <button class="media-back-btn" id="analytics-back-btn" title="Back">&larr;</button>
+              <h2>Analytics Dashboard</h2>
+              <div class="analytics-controls">
+                <select id="analytics-days" class="app-dropdown">
+                  <option value="3">Last 3 days</option>
+                  <option value="7">Last 7 days</option>
+                  <option value="14">Last 14 days</option>
+                  <option value="30">Last 30 days</option>
+                </select>
+                <button class="btn small" id="analytics-connect-btn">Connect Posts</button>
+                <button class="btn small primary" id="analytics-refresh-btn">Refresh</button>
+              </div>
+            </div>
+
+            <!-- Diagnosis Banner -->
+            <div class="analytics-diagnosis" id="analytics-diagnosis" style="display:none">
+              <div class="analytics-diagnosis-icon" id="analytics-diagnosis-icon"></div>
+              <div class="analytics-diagnosis-text">
+                <strong id="analytics-diagnosis-level"></strong>
+                <p id="analytics-diagnosis-message"></p>
+              </div>
+            </div>
+
+            <!-- Stats Summary -->
+            <div class="analytics-summary" id="analytics-summary" style="display:none">
+              <div class="analytics-stat">
+                <span class="analytics-stat-value" id="analytics-total-views">0</span>
+                <span class="analytics-stat-label">Total Views</span>
+              </div>
+              <div class="analytics-stat">
+                <span class="analytics-stat-value" id="analytics-total-likes">0</span>
+                <span class="analytics-stat-label">Total Likes</span>
+              </div>
+              <div class="analytics-stat">
+                <span class="analytics-stat-value" id="analytics-post-count">0</span>
+                <span class="analytics-stat-label">Posts</span>
+              </div>
+              <div class="analytics-stat">
+                <span class="analytics-stat-value" id="analytics-avg-views">0</span>
+                <span class="analytics-stat-label">Avg Views</span>
+              </div>
+            </div>
+
+            <!-- Posts Table -->
+            <div class="analytics-table-wrap" id="analytics-table-wrap">
+              <table class="analytics-table" id="analytics-table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Hook Text</th>
+                    <th>Views</th>
+                    <th>Likes</th>
+                    <th>Comments</th>
+                    <th>Shares</th>
+                  </tr>
+                </thead>
+                <tbody id="analytics-table-body"></tbody>
+              </table>
+              <p class="analytics-empty" id="analytics-empty" style="display:none">No analytics data yet. Post via Postiz, wait 2+ hours, then click "Connect Posts".</p>
+            </div>
+
+            <div class="analytics-status" id="analytics-status"></div>
+
+            <!-- Hook Lab Section -->
+            <div class="hook-lab-section" id="hook-lab-section">
+              <h3>Hook Lab</h3>
+              <p class="field-hint">Track which hooks drive views. Winning patterns auto-surface here.</p>
+              <div class="hook-lab-columns" id="hook-lab-columns">
+                <div class="hook-lab-col">
+                  <h4>Winners (10K+)</h4>
+                  <div id="hook-lab-winners" class="hook-lab-list"></div>
+                </div>
+                <div class="hook-lab-col">
+                  <h4>Testing (1K-10K)</h4>
+                  <div id="hook-lab-testing" class="hook-lab-list"></div>
+                </div>
+                <div class="hook-lab-col">
+                  <h4>Dropped (&lt;1K)</h4>
+                  <div id="hook-lab-dropped" class="hook-lab-list"></div>
+                </div>
+              </div>
+              <button class="btn small primary" id="generate-hooks-btn" style="margin-top:12px">Generate New Hooks</button>
+              <div class="hook-lab-generated" id="hook-lab-generated" style="display:none">
+                <h4>AI-Generated Hooks</h4>
+                <ul id="hook-lab-generated-list"></ul>
+              </div>
+            </div>
+          </div>
+
         </main>
       </div>
     </div>
@@ -1563,6 +1678,26 @@
               </button>
             </div>
           </div>
+          <div class="settings-divider"></div>
+          <p class="field-hint" style="margin-bottom:12px">Post via <a href="https://postiz.com" target="_blank" style="color:var(--cyan)">Postiz</a> to create TikTok drafts &mdash; add trending music before publishing. This is separate from direct TikTok posting above.</p>
+          <div class="form-group full">
+            <label class="label" for="settings-postiz-key">Postiz API Key</label>
+            <div class="api-key-input-wrap">
+              <input type="password" id="settings-postiz-key" placeholder="Your Postiz API key" />
+              <button type="button" class="api-key-toggle" data-target="settings-postiz-key" title="Show/hide key">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path class="eye-open" d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle class="eye-open" cx="12" cy="12" r="3"/><line class="eye-closed" style="display:none" x1="1" y1="1" x2="23" y2="23"/><path class="eye-closed" style="display:none" d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/></svg>
+              </button>
+            </div>
+          </div>
+          <div class="form-group full">
+            <label class="label" for="settings-postiz-integration-id">Postiz TikTok Integration ID</label>
+            <div class="api-key-input-wrap">
+              <input type="password" id="settings-postiz-integration-id" placeholder="Integration ID from Postiz dashboard" />
+              <button type="button" class="api-key-toggle" data-target="settings-postiz-integration-id" title="Show/hide key">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path class="eye-open" d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle class="eye-open" cx="12" cy="12" r="3"/><line class="eye-closed" style="display:none" x1="1" y1="1" x2="23" y2="23"/><path class="eye-closed" style="display:none" d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/></svg>
+              </button>
+            </div>
+          </div>
           <div class="settings-status" id="settings-status"></div>
           <div class="settings-divider"></div>
           <div class="settings-section-header" id="prompt-settings-toggle">
@@ -1598,6 +1733,21 @@
         </div>
         <div class="tiktok-modal-body">
           <div class="tiktok-slides-preview" id="tiktok-slides-preview"></div>
+
+          <div class="tiktok-field">
+            <label>Posting Method</label>
+            <div class="tiktok-post-method-toggle" id="tiktok-post-method-toggle">
+              <label class="tiktok-method-option">
+                <input type="radio" name="tiktok-post-method" value="direct" checked />
+                <span>Direct to TikTok</span>
+              </label>
+              <label class="tiktok-method-option">
+                <input type="radio" name="tiktok-post-method" value="postiz" />
+                <span>Via Postiz (draft)</span>
+              </label>
+            </div>
+            <p class="tiktok-field-note" id="postiz-method-note" style="display:none">Posts as a private draft. Open TikTok, add a trending sound, then publish. Music is the #1 algorithm factor.</p>
+          </div>
 
           <div class="tiktok-field">
             <label>Caption / Description</label>
