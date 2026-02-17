@@ -5408,11 +5408,11 @@ SETTING — pick one that fits the brand and script context:
 - Locker room, hotel room, backstage — anywhere people casually film themselves
 
 PERSON:
-- Always ATTRACTIVE — think popular creator/influencer, not stock photo model
+- VERY GOOD-LOOKING person — symmetrical face, great bone structure, clear glowing skin, bright eyes, well-groomed. Think top-tier fitness influencer or model who also creates content. The kind of face that stops you mid-scroll
 - Natural, casual expression — slight smile or mid-sentence mouth slightly open, like they're about to say something
 - Face clearly visible, looking directly at camera (required for lip sync)
 - Selfie-distance framing: face + upper chest, slightly closer than a portrait
-- Match person to brand audience (age, style, attire) but always aspirational
+- Match person to brand audience (age, style, attire) but always aspirational — the best-looking version of that audience
 - Natural/ambient lighting from the environment, not studio lights
 
 TECHNICAL:
