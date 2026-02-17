@@ -5391,9 +5391,6 @@ app.post('/api/generate-talking-head-preview', requireAuth, generationLimiter, a
       avatarUrl = null;
     } else {
       // Smart avatar prompt via Claude
-      const openai = getOpenAI(req);
-      if (!openai) throw new Error('Add your OpenAI API key in Settings for AI avatar generation.');
-
       let avatarPrompt;
       try {
         const presenterHint = presenterDescription ? `\nPresenter description from user: "${presenterDescription}"` : '';
@@ -5420,23 +5417,12 @@ Rules:
       }
 
       console.log(`[TalkingHead Preview] Avatar prompt: ${avatarPrompt.slice(0, 120)}...`);
-      const imgResult = await openai.images.generate({
-        model: 'gpt-image-1',
+      const avatarBuffer = await generateImage({
+        model: 'gemini-2.5-flash-image',
         prompt: avatarPrompt,
-        n: 1,
         size: '1024x1024',
+        req,
       });
-      const imgData = imgResult.data?.[0];
-      if (!imgData) throw new Error('AI avatar generation returned no image');
-      let avatarBuffer;
-      if (imgData.b64_json) {
-        avatarBuffer = Buffer.from(imgData.b64_json, 'base64');
-      } else if (imgData.url) {
-        const dlRes = await fetch(imgData.url);
-        avatarBuffer = Buffer.from(await dlRes.arrayBuffer());
-      } else {
-        throw new Error('AI avatar generation returned unexpected format');
-      }
       const avatarFilename = `avatar_preview_${crypto.randomUUID().slice(0, 8)}.png`;
       avatarUrl = await uploadImageForFal(avatarBuffer, avatarFilename);
       console.log(`[TalkingHead Preview] Avatar uploaded: ${avatarUrl.slice(0, 80)}...`);
@@ -5783,27 +5769,14 @@ app.post('/api/generate-talking-head', requireAuth, generationLimiter, async (re
         } else {
           // AI-generated avatar
           job.step = 'generating-avatar';
-          const openai = getOpenAI(capturedReq);
-          if (!openai) throw new Error('Add your OpenAI API key in Settings for AI avatar generation.');
           const avatarPrompt = `Professional headshot portrait photo of a friendly, approachable person looking directly at the camera. Clean background, good lighting, shoulders visible. The person appears to be a brand spokesperson or content creator. Photorealistic, high quality.`;
           console.log(`[TalkingHead] Generating AI avatar...`);
-          const imgResult = await openai.images.generate({
-            model: 'gpt-image-1',
+          const avatarBuffer = await generateImage({
+            model: 'gemini-2.5-flash-image',
             prompt: avatarPrompt,
-            n: 1,
             size: '1024x1024',
+            req: capturedReq,
           });
-          const imgData = imgResult.data?.[0];
-          if (!imgData) throw new Error('AI avatar generation returned no image');
-          let avatarBuffer;
-          if (imgData.b64_json) {
-            avatarBuffer = Buffer.from(imgData.b64_json, 'base64');
-          } else if (imgData.url) {
-            const dlRes = await fetch(imgData.url);
-            avatarBuffer = Buffer.from(await dlRes.arrayBuffer());
-          } else {
-            throw new Error('AI avatar generation returned unexpected format');
-          }
           job.step = 'uploading-avatar';
           const avatarFilename = `avatar_ai_${crypto.randomUUID().slice(0, 8)}.png`;
           avatarUrl = await uploadImageForFal(avatarBuffer, avatarFilename);
