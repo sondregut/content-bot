@@ -5418,7 +5418,7 @@ Rules:
 
       console.log(`[TalkingHead Preview] Avatar prompt: ${avatarPrompt.slice(0, 120)}...`);
       const avatarBuffer = await generateImage({
-        model: 'gemini-2.5-flash-image',
+        model: 'gemini-3-pro-image-preview',
         prompt: avatarPrompt,
         size: '1024x1024',
         req,
@@ -5772,7 +5772,7 @@ app.post('/api/generate-talking-head', requireAuth, generationLimiter, async (re
           const avatarPrompt = `Professional headshot portrait photo of a friendly, approachable person looking directly at the camera. Clean background, good lighting, shoulders visible. The person appears to be a brand spokesperson or content creator. Photorealistic, high quality.`;
           console.log(`[TalkingHead] Generating AI avatar...`);
           const avatarBuffer = await generateImage({
-            model: 'gemini-2.5-flash-image',
+            model: 'gemini-3-pro-image-preview',
             prompt: avatarPrompt,
             size: '1024x1024',
             req: capturedReq,
