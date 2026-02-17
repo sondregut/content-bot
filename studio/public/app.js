@@ -6441,6 +6441,10 @@ async function generateTalkingHeadPreview() {
       }),
     });
 
+    const contentType = res.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      throw new Error(res.status === 504 ? 'Request timed out — try a shorter script or try again.' : `Server error (${res.status})`);
+    }
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Preview generation failed');
 
@@ -6494,6 +6498,10 @@ async function confirmTalkingHead() {
       }),
     });
 
+    const ct = res.headers.get('content-type') || '';
+    if (!ct.includes('application/json')) {
+      throw new Error(res.status === 504 ? 'Request timed out — try again.' : `Server error (${res.status})`);
+    }
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Generation failed');
 
