@@ -7001,7 +7001,6 @@ document.getElementById('media-load-more-btn')?.addEventListener('click', async 
 // Navigation buttons
 document.getElementById('media-back-btn')?.addEventListener('click', closeMediaLibrary);
 document.getElementById('sidebar-media-btn')?.addEventListener('click', openMediaLibrary);
-document.getElementById('header-media-btn')?.addEventListener('click', openMediaLibrary);
 
 // --- Background Library ---
 

@@ -292,6 +292,31 @@ body {
 
 .header-btn:hover { background: rgba(255,255,255,0.2); }
 
+.header-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.header-nav-btn {
+  padding: 6px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.15);
+  background: rgba(255,255,255,0.08);
+  color: var(--white);
+  font-family: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.header-nav-btn:hover {
+  background: rgba(255,255,255,0.18);
+  border-color: rgba(255,255,255,0.3);
+}
+
 .app-dropdown {
   padding: 6px 12px;
   border-radius: 8px;
@@ -4649,6 +4674,18 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   .header-brand-section {
     width: 100%;
     flex-wrap: wrap;
+  }
+
+  .header-nav {
+    width: 100%;
+    order: 3;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .header-nav-btn {
+    font-size: 0.72rem;
+    padding: 5px 10px;
   }
 
   .editor-columns {
