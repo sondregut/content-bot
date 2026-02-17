@@ -5283,7 +5283,41 @@ app.post('/api/generate-talking-head-script', requireAuth, async (req, res) => {
     const brandCtx = [brand.systemPrompt, brand.productKnowledge ? `Product knowledge: ${brand.productKnowledge}` : ''].filter(Boolean).join('\n\n');
     const brandCtxBlock = brandCtx ? `<brand_context>\n${brandCtx}\n</brand_context>\n\n` : '';
 
-    const systemMsg = `${brandCtxBlock}You write scripts for talking-head social media videos for ${brand.name}. Write a punchy, conversational script (30-60 seconds when spoken). Speak directly to camera as the presenter — use "you" to address the viewer. Include a strong hook in the first sentence. Keep it natural and energetic. Return ONLY the script text, no stage directions or formatting.`;
+    const systemMsg = `${brandCtxBlock}You write scripts for talking-head social media videos for ${brand.name}.
+
+HOOK (first 1-2 sentences):
+- Must land in under 3 seconds spoken
+- Use one of: bold/controversial statement, surprising number, myth-bust ("You've been doing X wrong"), direct call-out ("If you're still doing X..."), or results-first proof
+- Never start with greetings ("Hey guys"), yes/no questions, or generic intros
+- Hook must connect directly to the content — no random shock
+
+STRUCTURE — pick one per script:
+- PAS (Problem → Agitate → Solve) — for pain-point products
+- Bold Claim → Education → Payoff — for "did you know" / myth-busting
+- Before/After → Bridge — for transformation/results content
+
+PACING & LANGUAGE:
+- Short sentences: 5-12 words each, 6th-grade reading level
+- Concrete numbers beat vague claims ("4ms accuracy" not "incredibly precise")
+- Vary cadence: fast-fast-fast then pause before key reveals
+- One main point per script — not three, not five, one
+- ~150 words max for 60 seconds at natural speaking pace
+
+ENDING:
+- End on strongest value statement or surprise
+- No generic CTAs ("follow for more") — the content itself should make them follow
+- "It's free" / specific price / specific result = strongest closers
+
+AVOID:
+- No filler ("kind of", "pretty much", "actually")
+- No stage directions, formatting, or emojis
+- No "pick me" energy — assume the viewer already respects you
+- Don't pitch — educate. The product is the natural answer to the problem
+- Don't sound like an ad — sound like someone sharing something they discovered
+
+Use the brand's product knowledge for accurate, specific details. Match the brand's voice. The product should enter naturally as the solution.
+
+Return ONLY the script text.`;
     const userMsg = topic
       ? `Write a talking-head video script for ${brand.name} about: ${topic}`
       : `Write a talking-head video script for ${brand.name}. Pick a compelling, specific topic that would resonate with the brand's audience and showcase what makes the brand unique.`;
@@ -5350,8 +5384,54 @@ app.post('/api/generate-talking-head-preview', requireAuth, generationLimiter, a
     const isEmpty = !finalScript;
     const isTopicOnly = isEmpty || finalScript.split(/\s+/).length < 20;
     const systemMsg = isTopicOnly
-      ? `${brandCtxBlock}You write scripts for talking-head social media videos for ${brand.name}. ${isEmpty ? 'Pick an engaging topic relevant to the brand and its audience.' : 'Given a topic or brief,'} Write a punchy, conversational script (30-60 seconds when spoken). Speak directly to camera as if you're the presenter. Include a hook in the first sentence. Return ONLY the script text.`
-      : `${brandCtxBlock}You refine scripts for talking-head social media videos. Keep it conversational, punchy, and under 60 seconds when spoken. Preserve the core message but improve flow and hooks. Return ONLY the refined script text, nothing else.`;
+      ? `${brandCtxBlock}You write scripts for talking-head social media videos for ${brand.name}. ${isEmpty ? 'Pick an engaging topic relevant to the brand and its audience.' : 'Given a topic or brief, write the script around it.'}
+
+HOOK (first 1-2 sentences):
+- Must land in under 3 seconds spoken
+- Use one of: bold/controversial statement, surprising number, myth-bust ("You've been doing X wrong"), direct call-out ("If you're still doing X..."), or results-first proof
+- Never start with greetings ("Hey guys"), yes/no questions, or generic intros
+- Hook must connect directly to the content — no random shock
+
+STRUCTURE — pick one per script:
+- PAS (Problem → Agitate → Solve) — for pain-point products
+- Bold Claim → Education → Payoff — for "did you know" / myth-busting
+- Before/After → Bridge — for transformation/results content
+
+PACING & LANGUAGE:
+- Short sentences: 5-12 words each, 6th-grade reading level
+- Concrete numbers beat vague claims ("4ms accuracy" not "incredibly precise")
+- Vary cadence: fast-fast-fast then pause before key reveals
+- One main point per script — not three, not five, one
+- ~150 words max for 60 seconds at natural speaking pace
+
+ENDING:
+- End on strongest value statement or surprise
+- No generic CTAs ("follow for more") — the content itself should make them follow
+- "It's free" / specific price / specific result = strongest closers
+
+AVOID:
+- No filler ("kind of", "pretty much", "actually")
+- No stage directions, formatting, or emojis
+- No "pick me" energy — assume the viewer already respects you
+- Don't pitch — educate. The product is the natural answer to the problem
+- Don't sound like an ad — sound like someone sharing something they discovered
+
+Use the brand's product knowledge for accurate, specific details. Match the brand's voice. The product should enter naturally as the solution.
+
+Return ONLY the script text.`
+      : `${brandCtxBlock}You refine scripts for talking-head social media videos for ${brand.name}.
+
+Apply these improvements while preserving the core message and key facts:
+- Add a strong hook if weak (bold claim, surprising number, myth-bust, or direct call-out — must land in under 3 seconds spoken)
+- Tighten pacing: short sentences (5-12 words), 6th-grade reading level
+- Replace vague language with concrete specifics and numbers
+- Cut all filler ("kind of", "pretty much", "actually", "basically")
+- Ensure one clear structure: PAS, Bold Claim → Education → Payoff, or Before/After → Bridge
+- End on strongest value statement — no generic CTAs
+- Keep under 150 words / 60 seconds spoken
+- No stage directions, formatting, or emojis
+
+Return ONLY the refined script text, nothing else.`;
     const userMsg = isEmpty
       ? `Write a talking-head video script for ${brand.name}. Pick a compelling topic that would resonate with the brand's audience.`
       : isTopicOnly
@@ -5380,32 +5460,57 @@ app.post('/api/generate-talking-head-preview', requireAuth, generationLimiter, a
       try {
         const presenterHint = presenterDescription ? `\nPresenter description from user: "${presenterDescription}"` : '';
         avatarPrompt = await generateText({
-          model: req.body?.textModel,
-          system: `You generate image prompts for TikTok/Reels talking-head video thumbnails. The image will be used as the base frame for an AI lip-sync video where the person appears to speak directly to camera — like a real creator filming themselves.
+          model: 'claude-sonnet-4-5-20250929',
+          system: `You generate image prompts for TikTok talking-head thumbnails. The image becomes the base frame for AI lip-sync video.
 
-Think about how real TikTok creators film: selfie-angle phone held at arm's length, in a REAL casual situation where people naturally talk to camera. The goal is to look like a paused frame from an actual selfie video, NOT a professional photoshoot.
+CRITICAL REALISM RULES — this must look like a REAL phone selfie, NOT a professional photo:
+- Shot on a front-facing phone camera — slight wide-angle distortion, imperfect framing
+- Background stays sharp and detailed — iPhone front cameras keep everything in focus, the whole scene is crisp
+- Normal phone-camera lighting (not cinematic, not golden hour unless truly natural)
+- Messy, real environments — not styled or aesthetically perfect
+- Think "screenshot from someone's Instagram story" not "portrait photography"
 
-SETTING — pick one that fits the brand and script context:
-- In a car (parked, driver's seat, natural daylight through windows — extremely common for TikTok)
-- Walking outside (selfie-style, street/park/campus behind them, slight motion feel)
-- On a court/field/gym floor (post-practice, slightly sweaty, authentic)
-- At a desk or kitchen counter (casual, at home)
-- Locker room, hotel room, backstage — anywhere people casually film themselves
+SETTINGS — pick ONE based on brand + script energy:
+
+EVERYDAY (default for most content):
+- Parked car, driver seat, daylight through windows
+- Walking on a sidewalk or parking lot
+- Gym floor or weight room (messy, real gym — not a photoshoot gym)
+- Bedroom, kitchen, or living room (normal messy room)
+- Coffee shop or fast food spot
+
+ELEVATED (for energetic brands, motivational scripts):
+- Car at night, dashboard lights on face, city through windshield
+- Rooftop or balcony (casual, leaning on railing — not posed)
+- Beach or pool (casual, like they just pulled out their phone)
+- Airport gate or airplane seat
+- Locker room or backstage (gritty, real — not clean)
+
+HIGH-IMPACT (only for truly bold/shocking content):
+- Inside a helicopter or small plane (headset on, window view)
+- Edge of a cliff or mountain trail
+- On a boat or jet ski
+- Standing in rain (genuinely wet, not artistic rain)
+
+SELECTION: Conservative brands → Everyday only. Energetic brands → mix Everyday + Elevated. Bold scripts → can use High-Impact. Default to Everyday.
 
 PERSON:
-- VERY GOOD-LOOKING person — symmetrical face, great bone structure, clear glowing skin, bright eyes, well-groomed. Think top-tier fitness influencer or model who also creates content. The kind of face that stops you mid-scroll
-- Natural, casual expression — slight smile or mid-sentence mouth slightly open, like they're about to say something
-- Face clearly visible, looking directly at camera (required for lip sync)
-- Selfie-distance framing: face + upper chest, slightly closer than a portrait
-- Match person to brand audience (age, style, attire) but always aspirational — the best-looking version of that audience
-- Natural/ambient lighting from the environment, not studio lights
+- Very attractive — symmetrical face, clear skin, bright eyes, well-groomed
+- But CASUAL, not posed — slight smile or mouth slightly open mid-sentence
+- Framed from mid-chest up (like holding phone at arm's length) — NOT a tight face close-up
+- Show head, neck, shoulders, and upper chest — similar to a FaceTime call framing
+- Looking directly at camera lens
+- Match to brand audience (age, style, attire) but aspirational
+- Normal skin texture — not airbrushed or overly smooth
 
 TECHNICAL:
-- Selfie camera perspective (front-facing phone camera look, slight wide-angle distortion is OK)
+- Front-facing phone camera perspective (NOT a DSLR or professional camera)
+- Everything in the frame is sharp and in focus — f/2.2 iPhone front camera, deep depth of field, crisp background details
 - 9:16 vertical frame
-- Photorealistic, natural colors, no filters
-- No text, logos, overlays, or watermarks
-- Return ONLY the image prompt, nothing else`,
+- Photorealistic with normal phone-camera quality — slight noise/grain is OK
+- No text, logos, overlays, watermarks
+- Do NOT describe the scene poetically — use plain, direct language
+- Return ONLY the prompt, nothing else`,
           messages: [{ role: 'user', content: `Brand: ${brand.name}\n${brand.systemPrompt || ''}\n\nScript: ${finalScript.slice(0, 500)}${presenterHint}` }],
           maxTokens: 300,
           req,
@@ -5414,7 +5519,7 @@ TECHNICAL:
         console.warn('[TalkingHead Preview] Smart avatar prompt failed, using fallback:', err.message);
       }
       if (!avatarPrompt) {
-        avatarPrompt = 'Attractive young content creator sitting in parked car, driver seat, filming a selfie-style TikTok video. Looking directly at camera with a natural slight smile, mid-sentence. Natural daylight through car windows, selfie camera perspective, face and upper chest visible. Photorealistic, 9:16 vertical frame, casual and authentic feel.';
+        avatarPrompt = 'Very attractive young content creator sitting in parked car, driver seat, filming a selfie-style TikTok video. Symmetrical face, great bone structure, clear glowing skin, bright eyes. Looking directly at camera with natural slight smile, mid-sentence mouth slightly open. Natural daylight through car windows, selfie camera perspective, face and upper chest visible. Photorealistic, 9:16 vertical frame, casual and authentic feel, selfie-angle phone held at arm\'s length.';
       }
 
       console.log(`[TalkingHead Preview] Avatar prompt: ${avatarPrompt.slice(0, 120)}...`);
@@ -5727,8 +5832,54 @@ app.post('/api/generate-talking-head', requireAuth, generationLimiter, async (re
           const isEmpty = !finalScript;
           const isTopicOnly = isEmpty || finalScript.split(/\s+/).length < 20;
           const systemMsg = isTopicOnly
-            ? `${brandCtxBlock}You write scripts for talking-head social media videos for ${brand.name}. ${isEmpty ? 'Pick an engaging topic relevant to the brand and its audience.' : 'Given a topic or brief,'} Write a punchy, conversational script (30-60 seconds when spoken). Speak directly to camera as if you're the presenter. Include a hook in the first sentence. Return ONLY the script text.`
-            : `${brandCtxBlock}You refine scripts for talking-head social media videos. Keep it conversational, punchy, and under 60 seconds when spoken. Preserve the core message but improve flow and hooks. Return ONLY the refined script text, nothing else.`;
+            ? `${brandCtxBlock}You write scripts for talking-head social media videos for ${brand.name}. ${isEmpty ? 'Pick an engaging topic relevant to the brand and its audience.' : 'Given a topic or brief, write the script around it.'}
+
+HOOK (first 1-2 sentences):
+- Must land in under 3 seconds spoken
+- Use one of: bold/controversial statement, surprising number, myth-bust ("You've been doing X wrong"), direct call-out ("If you're still doing X..."), or results-first proof
+- Never start with greetings ("Hey guys"), yes/no questions, or generic intros
+- Hook must connect directly to the content — no random shock
+
+STRUCTURE — pick one per script:
+- PAS (Problem → Agitate → Solve) — for pain-point products
+- Bold Claim → Education → Payoff — for "did you know" / myth-busting
+- Before/After → Bridge — for transformation/results content
+
+PACING & LANGUAGE:
+- Short sentences: 5-12 words each, 6th-grade reading level
+- Concrete numbers beat vague claims ("4ms accuracy" not "incredibly precise")
+- Vary cadence: fast-fast-fast then pause before key reveals
+- One main point per script — not three, not five, one
+- ~150 words max for 60 seconds at natural speaking pace
+
+ENDING:
+- End on strongest value statement or surprise
+- No generic CTAs ("follow for more") — the content itself should make them follow
+- "It's free" / specific price / specific result = strongest closers
+
+AVOID:
+- No filler ("kind of", "pretty much", "actually")
+- No stage directions, formatting, or emojis
+- No "pick me" energy — assume the viewer already respects you
+- Don't pitch — educate. The product is the natural answer to the problem
+- Don't sound like an ad — sound like someone sharing something they discovered
+
+Use the brand's product knowledge for accurate, specific details. Match the brand's voice. The product should enter naturally as the solution.
+
+Return ONLY the script text.`
+            : `${brandCtxBlock}You refine scripts for talking-head social media videos for ${brand.name}.
+
+Apply these improvements while preserving the core message and key facts:
+- Add a strong hook if weak (bold claim, surprising number, myth-bust, or direct call-out — must land in under 3 seconds spoken)
+- Tighten pacing: short sentences (5-12 words), 6th-grade reading level
+- Replace vague language with concrete specifics and numbers
+- Cut all filler ("kind of", "pretty much", "actually", "basically")
+- Ensure one clear structure: PAS, Bold Claim → Education → Payoff, or Before/After → Bridge
+- End on strongest value statement — no generic CTAs
+- Keep under 150 words / 60 seconds spoken
+- No stage directions, formatting, or emojis
+
+Return ONLY the refined script text, nothing else.`;
           const userMsg = isEmpty
             ? `Write a talking-head video script for ${brand.name}. Pick a compelling topic that would resonate with the brand's audience.`
             : isTopicOnly
