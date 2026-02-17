@@ -270,6 +270,15 @@ async function generateWithLoRA(loraUrl, prompt, { loraModel, aspectRatio = '9:1
   return Buffer.from(await imgRes.arrayBuffer());
 }
 
+// --- Talking Head Model Registry ---
+const TALKING_HEAD_MODELS = {
+  'veed/fabric-1.0': { name: 'VEED Fabric 1.0', provider: 'fal', nativeAudio: false },
+  'fal-ai/sadtalker': { name: 'SadTalker', provider: 'fal', nativeAudio: false },
+  'kling-v2.6-pro': { name: 'Kling 2.6 Pro', provider: 'fal', nativeAudio: true },
+  'seedance-v1.5-pro': { name: 'Seedance 1.5 Pro', provider: 'fal', nativeAudio: true },
+  'veo-3.1': { name: 'Veo 3.1', provider: 'gemini', nativeAudio: true },
+};
+
 // --- Video Generation ---
 const FAL_VIDEO_ENDPOINTS = {
   'kling-v3-standard': 'https://queue.fal.run/fal-ai/kling-video/v3/standard/text-to-video',
@@ -627,6 +636,156 @@ async function generateTalkingFace(imageUrl, audioUrl, { falKey, model }) {
     }
   }
   throw new Error('Lip sync generation timed out after 10 minutes');
+}
+
+async function generateTalkingHeadNative(imageUrl, script, { model, falKey, gemini, geminiKey }) {
+  const modelInfo = TALKING_HEAD_MODELS[model];
+  if (!modelInfo) throw new Error(`Unknown talking-head model: ${model}`);
+
+  // --- Kling 2.6 Pro via fal.ai ---
+  if (model === 'kling-v2.6-pro') {
+    if (!falKey) throw new Error('Add your Fal.ai API key in Settings for Kling 2.6 Pro.');
+    const endpoint = 'https://queue.fal.run/fal-ai/kling-video/v2.6/pro/image-to-video';
+    const prompt = `A person speaking naturally to camera, delivering a monologue. They say: "${script.slice(0, 500)}"`;
+    const submitRes = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Authorization': `Key ${falKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt, image_url: imageUrl, duration: '10', aspect_ratio: '9:16', generate_audio: true }),
+    });
+    if (!submitRes.ok) {
+      const errText = await submitRes.text();
+      throw new Error(`Kling 2.6 Pro submit failed (${submitRes.status}): ${errText}`);
+    }
+    const { request_id, status_url, response_url } = await submitRes.json();
+    if (!request_id) throw new Error('Kling 2.6 Pro did not return a request_id');
+    return await pollFalJob(status_url, response_url, falKey, 'Kling 2.6 Pro');
+  }
+
+  // --- Seedance 1.5 Pro via fal.ai ---
+  if (model === 'seedance-v1.5-pro') {
+    if (!falKey) throw new Error('Add your Fal.ai API key in Settings for Seedance 1.5 Pro.');
+    const endpoint = 'https://queue.fal.run/fal-ai/bytedance/seedance/v1.5/pro/image-to-video';
+    const prompt = `A person speaking naturally to camera, delivering a monologue. They say: "${script.slice(0, 500)}"`;
+    const submitRes = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Authorization': `Key ${falKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt, image_url: imageUrl, duration: 10, aspect_ratio: '9:16', generate_audio: true }),
+    });
+    if (!submitRes.ok) {
+      const errText = await submitRes.text();
+      throw new Error(`Seedance 1.5 Pro submit failed (${submitRes.status}): ${errText}`);
+    }
+    const { request_id, status_url, response_url } = await submitRes.json();
+    if (!request_id) throw new Error('Seedance 1.5 Pro did not return a request_id');
+    return await pollFalJob(status_url, response_url, falKey, 'Seedance 1.5 Pro');
+  }
+
+  // --- Veo 3.1 via Gemini API ---
+  if (model === 'veo-3.1') {
+    if (!gemini) throw new Error('Add your Google Gemini API key in Settings for Veo 3.1.');
+    const prompt = `A person speaking naturally to camera in a selfie-style vertical video. They say: "${script.slice(0, 500)}"`;
+
+    // Download avatar image and convert to base64 for reference
+    const imgRes = await fetch(imageUrl);
+    if (!imgRes.ok) throw new Error('Failed to download avatar for Veo 3.1');
+    const imgBuf = Buffer.from(await imgRes.arrayBuffer());
+    const imgBase64 = imgBuf.toString('base64');
+    const mimeType = 'image/png';
+
+    const veoConfig = {
+      aspectRatio: '9:16',
+      numberOfVideos: 1,
+      durationSeconds: 8,
+      personGeneration: 'allow_adult',
+      generateAudio: true,
+      referenceImages: [{
+        image: { imageBytes: imgBase64, mimeType },
+        referenceType: 'ASSET',
+      }],
+    };
+    const response = await gemini.models.generateVideos({
+      model: 'veo-3.1-generate-preview',
+      prompt,
+      config: veoConfig,
+    });
+    let op = response;
+    const deadline = Date.now() + 600_000;
+    while (!op.done && Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 5000));
+      op = await gemini.operations.getVideosOperation({ operation: op });
+    }
+    if (!op.done) throw new Error('Veo 3.1 talking-head generation timed out');
+    const raiFiltered = op.response?.raiMediaFilteredCount;
+    if (raiFiltered > 0) {
+      const reasons = op.response?.raiMediaFilteredReasons?.join(', ') || 'unknown';
+      throw new Error(`Video blocked by safety filters (${reasons}). Try a different avatar or script.`);
+    }
+    const generatedVideo = op.response?.generatedVideos?.[0];
+    if (!generatedVideo?.video) throw new Error('Veo 3.1 returned no video');
+    console.log(`[TalkingHead Veo] Video URI: ${generatedVideo.video.uri?.slice(0, 120)}...`);
+
+    // Download video
+    const tmpFilename = `veo_talking_${crypto.randomUUID().slice(0, 8)}.mp4`;
+    const tmpPath = path.join(outputDir, tmpFilename);
+    try {
+      await gemini.files.download({ file: generatedVideo.video, downloadPath: tmpPath });
+      return tmpPath;
+    } catch (sdkErr) {
+      console.log(`[TalkingHead Veo] SDK download failed: ${sdkErr.message}, trying direct fetch...`);
+      const uri = generatedVideo.video.uri;
+      const dlRes = await fetch(uri, { headers: { 'x-goog-api-key': geminiKey } });
+      if (dlRes.ok) {
+        const buf = Buffer.from(await dlRes.arrayBuffer());
+        await fs.writeFile(tmpPath, buf);
+        return tmpPath;
+      }
+      throw new Error(`Failed to download Veo 3.1 video (SDK: ${sdkErr.message}, fetch: ${dlRes.status})`);
+    }
+  }
+
+  throw new Error(`Unsupported native-audio model: ${model}`);
+}
+
+// Shared fal.ai polling helper for native-audio models
+async function pollFalJob(statusUrl, responseUrl, falKey, modelLabel) {
+  let consecutiveErrors = 0;
+  const deadline = Date.now() + 600_000;
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 5000));
+    let statusRes;
+    try {
+      statusRes = await fetch(statusUrl, { headers: { 'Authorization': `Key ${falKey}` } });
+    } catch (fetchErr) {
+      consecutiveErrors++;
+      console.warn(`[${modelLabel}] Poll fetch error (${consecutiveErrors}): ${fetchErr.message}`);
+      if (consecutiveErrors >= 5) throw new Error(`${modelLabel} polling failed after ${consecutiveErrors} network errors: ${fetchErr.message}`);
+      continue;
+    }
+    if (!statusRes.ok) {
+      consecutiveErrors++;
+      const errText = await statusRes.text().catch(() => '');
+      console.warn(`[${modelLabel}] Poll status ${statusRes.status} (${consecutiveErrors}): ${errText.slice(0, 200)}`);
+      if (consecutiveErrors >= 5) throw new Error(`${modelLabel} polling returned ${statusRes.status} ${consecutiveErrors} times`);
+      continue;
+    }
+    consecutiveErrors = 0;
+    const status = await statusRes.json();
+    console.log(`[${modelLabel}] Poll: status=${status.status}, queue_position=${status.queue_position ?? 'n/a'}`);
+    if (status.status === 'COMPLETED') {
+      const result = status.response || await (async () => {
+        const resultRes = await fetch(responseUrl, { headers: { 'Authorization': `Key ${falKey}` } });
+        if (!resultRes.ok) throw new Error(`${modelLabel} result fetch failed (${resultRes.status})`);
+        return resultRes.json();
+      })();
+      const videoUrl = result.video?.url;
+      if (!videoUrl) throw new Error(`${modelLabel} returned success but no video URL`);
+      return videoUrl;
+    }
+    if (status.status === 'FAILED') {
+      throw new Error(`${modelLabel} failed: ${status.error || JSON.stringify(status).slice(0, 300)}`);
+    }
+  }
+  throw new Error(`${modelLabel} timed out after 10 minutes`);
 }
 
 // --- Firebase Admin ---
@@ -5534,11 +5693,16 @@ TECHNICAL:
       console.log(`[TalkingHead Preview] Avatar uploaded: ${avatarUrl.slice(0, 80)}...`);
     }
 
-    // Step 3: AI voice selection (if auto) — done AFTER avatar so we can match gender/character
+    // Step 3: AI voice selection (if auto) — skip for native-audio models
+    const isNativeAudio = TALKING_HEAD_MODELS[lipSyncModel]?.nativeAudio === true;
     let selectedVoice = voice;
-    let selectedVoiceProvider = voiceProvider || 'openai';
+    let selectedVoiceProvider = isNativeAudio ? 'native' : (voiceProvider || 'openai');
     let selectedVoiceName = null;
-    if (!voice || voice === 'auto') {
+    if (isNativeAudio) {
+      selectedVoice = 'native';
+      selectedVoiceName = `${TALKING_HEAD_MODELS[lipSyncModel].name} (native)`;
+      console.log(`[TalkingHead Preview] Native audio model ${lipSyncModel} — skipping voice selection`);
+    } else if (!voice || voice === 'auto') {
       try {
         const avatarContext = avatarPrompt ? `\nThe presenter in the video looks like: ${avatarPrompt.slice(0, 200)}` : '';
         const elevenLabsKey = getElevenLabsKey(req);
@@ -5642,18 +5806,24 @@ app.post('/api/generate-talking-head-confirm', requireAuth, generationLimiter, a
     }
 
     const falKey = req.headers['x-fal-key'];
-    if (!falKey) return res.status(400).json({ error: 'Add your Fal.ai API key in Settings for talking-head video generation.' });
-
     const finalScript = (overrideScript || '').trim() || preview.script;
     const brand = await getBrandAsync(preview.brandId, req.user?.uid);
-    const model = preview.lipSyncModel === 'fal-ai/sadtalker' ? 'fal-ai/sadtalker' : 'veed/fabric-1.0';
+    const model = preview.lipSyncModel || 'veed/fabric-1.0';
+    const isNativeAudio = TALKING_HEAD_MODELS[model]?.nativeAudio === true;
+
+    // Validate required keys
+    if (isNativeAudio && model === 'veo-3.1') {
+      if (!req.headers['x-gemini-key']) return res.status(400).json({ error: 'Add your Google Gemini API key in Settings for Veo 3.1.' });
+    } else {
+      if (!falKey) return res.status(400).json({ error: 'Add your Fal.ai API key in Settings for talking-head video generation.' });
+    }
 
     const jobId = crypto.randomUUID().slice(0, 12);
     const job = {
       id: jobId,
       userId: req.user?.uid || null,
       status: 'running',
-      step: 'generating-voice',
+      step: isNativeAudio ? 'preparing-avatar' : 'generating-voice',
       prompt: finalScript,
       refinedPrompt: finalScript,
       url: null,
@@ -5680,21 +5850,7 @@ app.post('/api/generate-talking-head-confirm', requireAuth, generationLimiter, a
 
     (async () => {
       try {
-        // Step 1: TTS
-        job.step = 'generating-voice';
-        let audioBuffer;
-        const elevenLabsKey = getElevenLabsKey(capturedReq);
-        if (preview.voiceProvider === 'elevenlabs' && elevenLabsKey) {
-          audioBuffer = await generateSpeechElevenLabs(finalScript, { key: elevenLabsKey, voiceId: preview.voice });
-        } else {
-          audioBuffer = await generateSpeech(finalScript, { voice: preview.voice, req: capturedReq });
-        }
-        const audioSlug = crypto.randomUUID().slice(0, 8);
-        const audioFilename = `tts_${preview.brandId}_${Date.now()}_${audioSlug}.mp3`;
-        const audioUrl = await uploadAudioToStorage(audioBuffer, audioFilename);
-        console.log(`[TalkingHead Confirm] Audio generated: ${audioFilename}`);
-
-        // Step 2: Resolve avatar URL
+        // Step 1: Resolve avatar URL (needed for both pipelines)
         job.step = 'preparing-avatar';
         let avatarUrl = preview.avatarUrl;
         if (preview.avatarSource === 'person' && person) {
@@ -5722,25 +5878,56 @@ app.post('/api/generate-talking-head-confirm', requireAuth, generationLimiter, a
           const avatarFilename = `avatar_${crypto.randomUUID().slice(0, 8)}.png`;
           avatarUrl = await uploadImageForFal(avatarBuffer, avatarFilename);
         }
-        if (!avatarUrl) throw new Error('No avatar available for lip sync');
+        if (!avatarUrl) throw new Error('No avatar available');
         console.log(`[TalkingHead Confirm] Avatar ready: ${avatarUrl.slice(0, 80)}...`);
 
-        // Step 3: Lip sync
-        job.step = 'generating-video';
-        let absoluteAudioUrl = audioUrl;
-        if (audioUrl.startsWith('/')) {
-          const proto = capturedReq.headers['x-forwarded-proto'] || 'http';
-          const host = capturedReq.headers['x-forwarded-host'] || capturedReq.headers.host || `localhost:${PORT}`;
-          absoluteAudioUrl = `${proto}://${host}${audioUrl}`;
-        }
-        const videoResultUrl = await generateTalkingFace(avatarUrl, absoluteAudioUrl, { falKey, model });
-        console.log(`[TalkingHead Confirm] Video generated: ${videoResultUrl.slice(0, 80)}...`);
+        let videoResultUrl;
 
-        // Step 4: Download + finalize
+        if (isNativeAudio) {
+          // --- Native audio pipeline: image + script → model generates video with voice ---
+          job.step = 'generating-video';
+          console.log(`[TalkingHead Confirm] Using native-audio model: ${model}`);
+          const gemini = model === 'veo-3.1' ? getGemini(capturedReq) : null;
+          const geminiKey = capturedReq.headers['x-gemini-key'] || null;
+          videoResultUrl = await generateTalkingHeadNative(avatarUrl, finalScript, { model, falKey, gemini, geminiKey });
+        } else {
+          // --- Legacy pipeline: TTS → lip sync overlay ---
+          job.step = 'generating-voice';
+          let audioBuffer;
+          const elevenLabsKey = getElevenLabsKey(capturedReq);
+          if (preview.voiceProvider === 'elevenlabs' && elevenLabsKey) {
+            audioBuffer = await generateSpeechElevenLabs(finalScript, { key: elevenLabsKey, voiceId: preview.voice });
+          } else {
+            audioBuffer = await generateSpeech(finalScript, { voice: preview.voice, req: capturedReq });
+          }
+          const audioSlug = crypto.randomUUID().slice(0, 8);
+          const audioFilename = `tts_${preview.brandId}_${Date.now()}_${audioSlug}.mp3`;
+          const audioUrl = await uploadAudioToStorage(audioBuffer, audioFilename);
+          console.log(`[TalkingHead Confirm] Audio generated: ${audioFilename}`);
+
+          job.step = 'generating-video';
+          let absoluteAudioUrl = audioUrl;
+          if (audioUrl.startsWith('/')) {
+            const proto = capturedReq.headers['x-forwarded-proto'] || 'http';
+            const host = capturedReq.headers['x-forwarded-host'] || capturedReq.headers.host || `localhost:${PORT}`;
+            absoluteAudioUrl = `${proto}://${host}${audioUrl}`;
+          }
+          const legacyModel = model === 'fal-ai/sadtalker' ? 'fal-ai/sadtalker' : 'veed/fabric-1.0';
+          videoResultUrl = await generateTalkingFace(avatarUrl, absoluteAudioUrl, { falKey, model: legacyModel });
+        }
+        console.log(`[TalkingHead Confirm] Video generated: ${typeof videoResultUrl === 'string' ? videoResultUrl.slice(0, 80) : videoResultUrl}...`);
+
+        // Download + finalize
         job.step = 'finalizing';
-        const videoRes = await fetch(videoResultUrl);
-        if (!videoRes.ok) throw new Error('Failed to download lip sync video');
-        let videoBuffer = Buffer.from(await videoRes.arrayBuffer());
+        let videoBuffer;
+        if (videoResultUrl.startsWith('/') || videoResultUrl.startsWith(outputDir)) {
+          // Local file path (from Veo)
+          videoBuffer = await fs.readFile(videoResultUrl);
+        } else {
+          const videoRes = await fetch(videoResultUrl);
+          if (!videoRes.ok) throw new Error('Failed to download video');
+          videoBuffer = Buffer.from(await videoRes.arrayBuffer());
+        }
 
         const slug = crypto.randomUUID().slice(0, 8);
         const filename = `talking_${preview.brandId}_${Date.now()}_${slug}.mp4`;
@@ -5783,10 +5970,16 @@ app.post('/api/generate-talking-head', requireAuth, generationLimiter, async (re
     if (!brandId) return res.status(400).json({ error: 'Missing brand' });
 
     const falKey = req.headers['x-fal-key'];
-    if (!falKey) return res.status(400).json({ error: 'Add your Fal.ai API key in Settings for talking-head video generation.' });
+    const model = lipSyncModel || 'veed/fabric-1.0';
+    const isNativeAudio = TALKING_HEAD_MODELS[model]?.nativeAudio === true;
+
+    if (isNativeAudio && model === 'veo-3.1') {
+      if (!req.headers['x-gemini-key']) return res.status(400).json({ error: 'Add your Google Gemini API key in Settings for Veo 3.1.' });
+    } else {
+      if (!falKey) return res.status(400).json({ error: 'Add your Fal.ai API key in Settings for talking-head video generation.' });
+    }
 
     const brand = await getBrandAsync(brandId, req.user?.uid);
-    const model = lipSyncModel === 'fal-ai/sadtalker' ? 'fal-ai/sadtalker' : 'veed/fabric-1.0';
 
     const jobId = crypto.randomUUID().slice(0, 12);
     const job = {
@@ -5905,78 +6098,10 @@ Return ONLY the refined script text, nothing else.`;
         if (!finalScript) throw new Error('Failed to generate script. Please write one manually or try again.');
         console.log(`[TalkingHead] Script: ${finalScript.slice(0, 100)}...`);
 
-        // Step 2: Pick voice + generate speech
-        job.step = 'generating-voice';
-        let selectedVoice = voice;
-        let selectedVoiceProvider = voiceProvider || 'openai';
-        if (!voice || voice === 'auto') {
-          try {
-            const elevenLabsKey = getElevenLabsKey(capturedReq);
-            let elVoiceList = [];
-            let elVoiceBlock = '';
-            if (elevenLabsKey) {
-              try {
-                elVoiceList = await listElevenLabsVoices(elevenLabsKey);
-                const elDescriptions = elVoiceList.slice(0, 40).map(v => {
-                  const l = v.labels || {};
-                  const traits = [l.gender, l.age, l.accent, l.description, l.use_case].filter(Boolean).join(', ');
-                  return `- ${v.name} (id:${v.id}) — ${traits || 'no description'}`;
-                }).join('\n');
-                elVoiceBlock = `\n\nAvailable ElevenLabs voices (higher quality, more natural):\n${elDescriptions}\n\nPrefer ElevenLabs voices when they match the character well.`;
-              } catch (err) {
-                console.warn('[TalkingHead] Failed to fetch ElevenLabs voices:', err.message);
-              }
-            }
-            const voicePick = await generateText({
-              model: capturedReq.body?.textModel,
-              system: `You are a voice casting director. Pick the best voice for this talking-head video script.
-
-Available OpenAI voices: alloy (neutral), ash (warm male), coral (warm female), echo (smooth male), fable (expressive British), nova (energetic female), onyx (deep male), sage (calm wise), shimmer (soft female).${elVoiceBlock}
-
-Reply with ONLY the voice in this format: provider:id (e.g. "openai:echo" or "elevenlabs:JBFqnCBsd6RMkjVDRZzb")
-Nothing else.`,
-              messages: [{ role: 'user', content: `Pick the best voice for this script:\n\n${finalScript}` }],
-              maxTokens: 50,
-              req: capturedReq,
-            });
-            const picked = (voicePick || '').trim();
-            const [pickedProvider, pickedId] = picked.includes(':') ? picked.split(':', 2) : ['openai', picked];
-            if (pickedProvider === 'elevenlabs' && elevenLabsKey && pickedId) {
-              const matchedVoice = elVoiceList.find(v => v.id === pickedId || v.name.toLowerCase() === pickedId.toLowerCase());
-              if (matchedVoice) {
-                selectedVoice = matchedVoice.id;
-                selectedVoiceProvider = 'elevenlabs';
-              } else {
-                selectedVoice = 'nova'; selectedVoiceProvider = 'openai';
-              }
-            } else {
-              const openaiId = (pickedId || '').toLowerCase();
-              selectedVoice = ['alloy','ash','coral','echo','fable','nova','onyx','sage','shimmer'].includes(openaiId) ? openaiId : 'nova';
-              selectedVoiceProvider = 'openai';
-            }
-          } catch (err) {
-            console.warn('[TalkingHead] Voice auto-pick failed, using nova:', err.message);
-            selectedVoice = 'nova'; selectedVoiceProvider = 'openai';
-          }
-          console.log(`[TalkingHead] AI picked voice: ${selectedVoice} (${selectedVoiceProvider})`);
-        }
-        let audioBuffer;
-        const elevenLabsKey = getElevenLabsKey(capturedReq);
-        if (selectedVoiceProvider === 'elevenlabs' && elevenLabsKey) {
-          audioBuffer = await generateSpeechElevenLabs(finalScript, { key: elevenLabsKey, voiceId: selectedVoice });
-        } else {
-          audioBuffer = await generateSpeech(finalScript, { voice: selectedVoice, req: capturedReq });
-        }
-        const audioSlug = crypto.randomUUID().slice(0, 8);
-        const audioFilename = `tts_${brandId}_${Date.now()}_${audioSlug}.mp3`;
-        const audioUrl = await uploadAudioToStorage(audioBuffer, audioFilename);
-        console.log(`[TalkingHead] Audio generated: ${audioFilename} (${(audioBuffer.length / 1024).toFixed(1)}KB)`);
-
-        // Step 3: Prepare avatar
+        // Step 2: Prepare avatar
         let avatarUrl;
 
         if (avatarSource === 'person' && person) {
-          // Use person photo from Face Studio
           job.step = 'preparing-avatar';
           const photo = person.photos[0];
           let avatarBuffer;
@@ -5995,7 +6120,6 @@ Nothing else.`,
           avatarUrl = await uploadImageForFal(avatarBuffer, avatarFilename);
 
         } else if (avatarSource === 'upload' && uploadedAvatar) {
-          // Use uploaded image
           job.step = 'preparing-avatar';
           let avatarBuffer;
           if (bucket) {
@@ -6012,7 +6136,6 @@ Nothing else.`,
           avatarUrl = await uploadImageForFal(avatarBuffer, avatarFilename);
 
         } else {
-          // AI-generated avatar
           job.step = 'generating-avatar';
           const avatarPrompt = `Attractive young content creator sitting in parked car, driver seat, filming a selfie-style TikTok video. Looking directly at camera with a natural slight smile, mid-sentence. Natural daylight through car windows, selfie camera perspective, face and upper chest visible. Photorealistic, 9:16 vertical frame, casual and authentic feel.`;
           console.log(`[TalkingHead] Generating AI avatar...`);
@@ -6028,22 +6151,107 @@ Nothing else.`,
         }
         console.log(`[TalkingHead] Avatar ready: ${avatarUrl.slice(0, 80)}...`);
 
-        // Step 4: Generate talking face via fal.ai
-        job.step = 'generating-video';
-        let absoluteAudioUrl = audioUrl;
-        if (audioUrl.startsWith('/')) {
-          const proto = capturedReq.headers['x-forwarded-proto'] || 'http';
-          const host = capturedReq.headers['x-forwarded-host'] || capturedReq.headers.host || `localhost:${PORT}`;
-          absoluteAudioUrl = `${proto}://${host}${audioUrl}`;
-        }
-        const videoResultUrl = await generateTalkingFace(avatarUrl, absoluteAudioUrl, { falKey, model });
-        console.log(`[TalkingHead] Video generated: ${videoResultUrl.slice(0, 80)}...`);
+        let videoResultUrl;
 
-        // Step 5: Download + finalize
+        if (isNativeAudio) {
+          // --- Native audio pipeline: image + script → model generates video with voice ---
+          job.step = 'generating-video';
+          console.log(`[TalkingHead] Using native-audio model: ${model}`);
+          const gemini = model === 'veo-3.1' ? getGemini(capturedReq) : null;
+          const geminiKey = capturedReq.headers['x-gemini-key'] || null;
+          videoResultUrl = await generateTalkingHeadNative(avatarUrl, finalScript, { model, falKey, gemini, geminiKey });
+        } else {
+          // --- Legacy pipeline: TTS → lip sync overlay ---
+          // Step 3a: Pick voice + generate speech
+          job.step = 'generating-voice';
+          let selectedVoice = voice;
+          let selectedVoiceProvider = voiceProvider || 'openai';
+          if (!voice || voice === 'auto') {
+            try {
+              const elevenLabsKey = getElevenLabsKey(capturedReq);
+              let elVoiceList = [];
+              let elVoiceBlock = '';
+              if (elevenLabsKey) {
+                try {
+                  elVoiceList = await listElevenLabsVoices(elevenLabsKey);
+                  const elDescriptions = elVoiceList.slice(0, 40).map(v => {
+                    const l = v.labels || {};
+                    const traits = [l.gender, l.age, l.accent, l.description, l.use_case].filter(Boolean).join(', ');
+                    return `- ${v.name} (id:${v.id}) — ${traits || 'no description'}`;
+                  }).join('\n');
+                  elVoiceBlock = `\n\nAvailable ElevenLabs voices (higher quality, more natural):\n${elDescriptions}\n\nPrefer ElevenLabs voices when they match the character well.`;
+                } catch (err) {
+                  console.warn('[TalkingHead] Failed to fetch ElevenLabs voices:', err.message);
+                }
+              }
+              const voicePick = await generateText({
+                model: capturedReq.body?.textModel,
+                system: `You are a voice casting director. Pick the best voice for this talking-head video script.
+
+Available OpenAI voices: alloy (neutral), ash (warm male), coral (warm female), echo (smooth male), fable (expressive British), nova (energetic female), onyx (deep male), sage (calm wise), shimmer (soft female).${elVoiceBlock}
+
+Reply with ONLY the voice in this format: provider:id (e.g. "openai:echo" or "elevenlabs:JBFqnCBsd6RMkjVDRZzb")
+Nothing else.`,
+                messages: [{ role: 'user', content: `Pick the best voice for this script:\n\n${finalScript}` }],
+                maxTokens: 50,
+                req: capturedReq,
+              });
+              const picked = (voicePick || '').trim();
+              const [pickedProvider, pickedId] = picked.includes(':') ? picked.split(':', 2) : ['openai', picked];
+              if (pickedProvider === 'elevenlabs' && elevenLabsKey && pickedId) {
+                const matchedVoice = elVoiceList.find(v => v.id === pickedId || v.name.toLowerCase() === pickedId.toLowerCase());
+                if (matchedVoice) {
+                  selectedVoice = matchedVoice.id;
+                  selectedVoiceProvider = 'elevenlabs';
+                } else {
+                  selectedVoice = 'nova'; selectedVoiceProvider = 'openai';
+                }
+              } else {
+                const openaiId = (pickedId || '').toLowerCase();
+                selectedVoice = ['alloy','ash','coral','echo','fable','nova','onyx','sage','shimmer'].includes(openaiId) ? openaiId : 'nova';
+                selectedVoiceProvider = 'openai';
+              }
+            } catch (err) {
+              console.warn('[TalkingHead] Voice auto-pick failed, using nova:', err.message);
+              selectedVoice = 'nova'; selectedVoiceProvider = 'openai';
+            }
+            console.log(`[TalkingHead] AI picked voice: ${selectedVoice} (${selectedVoiceProvider})`);
+          }
+          let audioBuffer;
+          const elevenLabsKey = getElevenLabsKey(capturedReq);
+          if (selectedVoiceProvider === 'elevenlabs' && elevenLabsKey) {
+            audioBuffer = await generateSpeechElevenLabs(finalScript, { key: elevenLabsKey, voiceId: selectedVoice });
+          } else {
+            audioBuffer = await generateSpeech(finalScript, { voice: selectedVoice, req: capturedReq });
+          }
+          const audioSlug = crypto.randomUUID().slice(0, 8);
+          const audioFilename = `tts_${brandId}_${Date.now()}_${audioSlug}.mp3`;
+          const audioUrl = await uploadAudioToStorage(audioBuffer, audioFilename);
+          console.log(`[TalkingHead] Audio generated: ${audioFilename} (${(audioBuffer.length / 1024).toFixed(1)}KB)`);
+
+          // Step 3b: Lip sync
+          job.step = 'generating-video';
+          let absoluteAudioUrl = audioUrl;
+          if (audioUrl.startsWith('/')) {
+            const proto = capturedReq.headers['x-forwarded-proto'] || 'http';
+            const host = capturedReq.headers['x-forwarded-host'] || capturedReq.headers.host || `localhost:${PORT}`;
+            absoluteAudioUrl = `${proto}://${host}${audioUrl}`;
+          }
+          const legacyModel = model === 'fal-ai/sadtalker' ? 'fal-ai/sadtalker' : 'veed/fabric-1.0';
+          videoResultUrl = await generateTalkingFace(avatarUrl, absoluteAudioUrl, { falKey, model: legacyModel });
+        }
+        console.log(`[TalkingHead] Video generated: ${typeof videoResultUrl === 'string' ? videoResultUrl.slice(0, 80) : videoResultUrl}...`);
+
+        // Final step: Download + finalize
         job.step = 'finalizing';
-        const videoRes = await fetch(videoResultUrl);
-        if (!videoRes.ok) throw new Error('Failed to download lip sync video');
-        let videoBuffer = Buffer.from(await videoRes.arrayBuffer());
+        let videoBuffer;
+        if (videoResultUrl.startsWith('/') || videoResultUrl.startsWith(outputDir)) {
+          videoBuffer = await fs.readFile(videoResultUrl);
+        } else {
+          const videoRes = await fetch(videoResultUrl);
+          if (!videoRes.ok) throw new Error('Failed to download video');
+          videoBuffer = Buffer.from(await videoRes.arrayBuffer());
+        }
 
         const slug = crypto.randomUUID().slice(0, 8);
         const ts = Date.now();
