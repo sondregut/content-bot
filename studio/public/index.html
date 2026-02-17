@@ -61,49 +61,6 @@
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19.59 6.69a4.83 4.83 0 01-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 01-2.88 2.5 2.89 2.89 0 01-2.89-2.89 2.89 2.89 0 012.89-2.89c.28 0 .54.04.79.1v-3.5a6.37 6.37 0 00-.79-.05A6.34 6.34 0 003.15 15.2a6.34 6.34 0 006.34 6.34 6.34 6.34 0 006.34-6.34V8.73a8.19 8.19 0 004.76 1.52v-3.4a4.85 4.85 0 01-1-.16z"/></svg>
             <span id="tiktok-btn-text">Connect TikTok</span>
           </button>
-          <select class="app-dropdown" id="image-model-select">
-            <optgroup label="OpenAI">
-              <option value="gpt-image-1.5">GPT Image 1.5</option>
-              <option value="gpt-image-1">GPT Image 1</option>
-              <option value="dall-e-3">DALL-E 3</option>
-            </optgroup>
-            <optgroup label="Nano Banana">
-              <option value="gemini-2.5-flash-image">Nano Banana</option>
-              <option value="gemini-3-pro-image-preview">Nano Banana Pro</option>
-            </optgroup>
-            <optgroup label="Gemini (Legacy)">
-              <option value="gemini-2.5-flash-preview-image-generation">Gemini 2.5 Flash</option>
-              <option value="gemini-2.0-flash-preview-image-generation">Gemini 2.0 Flash</option>
-            </optgroup>
-            <optgroup label="Imagen">
-              <option value="imagen-4.0-fast-generate-001">Imagen 4.0 Fast</option>
-              <option value="imagen-4.0-generate-001">Imagen 4.0</option>
-              <option value="imagen-4.0-ultra-generate-001">Imagen 4.0 Ultra</option>
-            </optgroup>
-          </select>
-          <select class="app-dropdown" id="text-model-select">
-            <optgroup label="Claude">
-              <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
-              <option value="claude-sonnet-4-5-20250929">Sonnet 4.5</option>
-              <option value="claude-opus-4-6">Opus 4.6</option>
-            </optgroup>
-            <optgroup label="Gemini">
-              <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
-              <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
-            </optgroup>
-          </select>
-          <select class="app-dropdown" id="video-model-select">
-            <optgroup label="Kling (fal.ai)">
-              <option value="kling-v3-standard">Kling 3.0</option>
-              <option value="kling-v3-pro">Kling 3.0 Pro</option>
-              <option value="kling-v2-master">Kling 2.0 Master</option>
-            </optgroup>
-            <optgroup label="Google (Gemini key)">
-              <option value="veo-3.1">Veo 3.1</option>
-              <option value="veo-3">Veo 3</option>
-              <option value="veo-2">Veo 2</option>
-            </optgroup>
-          </select>
           <button class="header-btn" id="header-media-btn" title="Media Library" aria-label="Media Library">&#128194;</button>
           <button class="header-btn" id="settings-btn" title="Settings" aria-label="Settings">&#9881;</button>
         </div>
@@ -433,6 +390,24 @@
               <h2>Video Studio</h2>
             </div>
 
+            <!-- Step indicator -->
+            <div class="video-steps" id="video-steps">
+              <div class="video-step active" id="video-step-1">
+                <span class="video-step-number">1</span>
+                <span class="video-step-label">Script &amp; Avatar</span>
+              </div>
+              <div class="video-step-divider"></div>
+              <div class="video-step" id="video-step-2">
+                <span class="video-step-number">2</span>
+                <span class="video-step-label">Review &amp; Approve</span>
+              </div>
+              <div class="video-step-divider"></div>
+              <div class="video-step" id="video-step-3">
+                <span class="video-step-number">3</span>
+                <span class="video-step-label">Generate Video</span>
+              </div>
+            </div>
+
             <div class="video-studio-layout">
               <!-- Left column: Controls -->
               <div class="video-studio-controls">
@@ -491,7 +466,7 @@
                   </div>
                 </details>
 
-                <button type="button" class="btn primary" id="generate-talking-head-btn" style="margin-top:16px">Generate Preview</button>
+                <button type="button" class="btn primary" id="generate-talking-head-btn" style="margin-top:16px">Generate Image</button>
                 <div class="freeform-status" id="video-studio-status"></div>
                 <div class="video-studio-progress" id="video-studio-progress" style="display:none">
                   <div class="video-studio-progress-bar">
@@ -503,16 +478,19 @@
 
               <!-- Right column: Preview -->
               <div class="video-studio-preview">
-                <label class="label">Preview</label>
+                <label class="label" id="video-preview-label">Preview</label>
                 <div class="video-preview-container" id="video-preview-container">
-                  <div class="video-placeholder" id="video-placeholder">Your talking-head video will appear here</div>
+                  <div class="video-placeholder" id="video-placeholder">
+                    <span style="font-size:2rem;display:block;margin-bottom:8px">&#128247;</span>
+                    Enter a topic and click <strong>Generate Image</strong> to create the presenter avatar first
+                  </div>
                   <img id="video-studio-preview-avatar" style="display:none;width:100%;border-radius:8px" alt="Avatar preview" />
                   <video id="video-studio-preview-video" controls style="display:none" playsinline></video>
                 </div>
                 <div id="video-studio-voice-label" style="display:none;margin-top:6px;font-size:13px;color:var(--text-secondary)"></div>
                 <div id="video-preview-actions" style="display:none;margin-top:10px;gap:8px;flex-wrap:wrap">
-                  <button type="button" class="btn primary" id="confirm-talking-head-btn">Generate Video</button>
-                  <button type="button" class="btn small" id="regenerate-avatar-btn">New Avatar</button>
+                  <button type="button" class="btn primary" id="confirm-talking-head-btn">Generate Video from this Image</button>
+                  <button type="button" class="btn small" id="regenerate-avatar-btn">Regenerate Image</button>
                   <button type="button" class="btn small" id="edit-script-btn">Edit Script</button>
                 </div>
                 <button type="button" class="btn small" id="download-talking-head-btn" style="display:none;margin-top:8px">Download Video</button>
@@ -1505,6 +1483,62 @@
               </button>
             </div>
             <span class="field-hint">Optional. Enables ElevenLabs voices (voice cloning, 32+ languages) in Video Studio. Get one at <a href="https://elevenlabs.io" target="_blank" style="color:var(--cyan)">elevenlabs.io</a></span>
+          </div>
+          <div class="settings-divider"></div>
+          <h4 style="margin:0 0 10px;font-size:14px;color:var(--text)">AI Models</h4>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:4px">
+            <div class="form-group">
+              <label class="label" style="font-size:12px">Image Model</label>
+              <select class="app-dropdown" id="image-model-select" style="width:100%">
+                <optgroup label="OpenAI">
+                  <option value="gpt-image-1.5">GPT Image 1.5</option>
+                  <option value="gpt-image-1">GPT Image 1</option>
+                  <option value="dall-e-3">DALL-E 3</option>
+                </optgroup>
+                <optgroup label="Nano Banana">
+                  <option value="gemini-2.5-flash-image">Nano Banana</option>
+                  <option value="gemini-3-pro-image-preview">Nano Banana Pro</option>
+                </optgroup>
+                <optgroup label="Gemini (Legacy)">
+                  <option value="gemini-2.5-flash-preview-image-generation">Gemini 2.5 Flash</option>
+                  <option value="gemini-2.0-flash-preview-image-generation">Gemini 2.0 Flash</option>
+                </optgroup>
+                <optgroup label="Imagen">
+                  <option value="imagen-4.0-fast-generate-001">Imagen 4.0 Fast</option>
+                  <option value="imagen-4.0-generate-001">Imagen 4.0</option>
+                  <option value="imagen-4.0-ultra-generate-001">Imagen 4.0 Ultra</option>
+                </optgroup>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="label" style="font-size:12px">Text Model</label>
+              <select class="app-dropdown" id="text-model-select" style="width:100%">
+                <optgroup label="Claude">
+                  <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
+                  <option value="claude-sonnet-4-5-20250929">Sonnet 4.5</option>
+                  <option value="claude-opus-4-6">Opus 4.6</option>
+                </optgroup>
+                <optgroup label="Gemini">
+                  <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+                  <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+                </optgroup>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="label" style="font-size:12px">Video Model</label>
+              <select class="app-dropdown" id="video-model-select" style="width:100%">
+                <optgroup label="Kling (fal.ai)">
+                  <option value="kling-v3-standard">Kling 3.0</option>
+                  <option value="kling-v3-pro">Kling 3.0 Pro</option>
+                  <option value="kling-v2-master">Kling 2.0 Master</option>
+                </optgroup>
+                <optgroup label="Google (Gemini key)">
+                  <option value="veo-3.1">Veo 3.1</option>
+                  <option value="veo-3">Veo 3</option>
+                  <option value="veo-2">Veo 2</option>
+                </optgroup>
+              </select>
+            </div>
           </div>
           <div class="settings-divider"></div>
           <p class="field-hint" style="margin-bottom:12px">To post carousels to TikTok, create a TikTok Developer App at <a href="https://developers.tiktok.com" target="_blank" style="color:var(--cyan)">developers.tiktok.com</a> and add this callback URL: <code style="color:var(--cyan);font-size:0.85em">&lt;your-domain&gt;/api/tiktok/callback</code></p>

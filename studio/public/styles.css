@@ -305,6 +305,12 @@ body {
 
 .app-dropdown option { color: var(--ink); }
 
+.modal-body .app-dropdown {
+  background: var(--bg-secondary, #f3f4f6);
+  color: var(--text, #1f2937);
+  border: 1px solid var(--border, #d1d5db);
+}
+
 .app-header h1 {
   font-family: 'Space Grotesk', sans-serif;
   font-size: 1.3rem;
@@ -4436,6 +4442,75 @@ button.brand-edit-btn {
 /* --- Video Studio --- */
 .video-studio-view {
   padding: 0;
+}
+
+.video-steps {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  margin: 0 0 20px;
+  padding: 14px 20px;
+  background: var(--bg-secondary, #f3f4f6);
+  border-radius: 10px;
+}
+
+.video-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  opacity: 0.4;
+  transition: opacity 0.3s;
+}
+
+.video-step.active {
+  opacity: 1;
+}
+
+.video-step.done {
+  opacity: 0.7;
+}
+
+.video-step-number {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--border, #d1d5db);
+  color: var(--bg, #fff);
+  font-size: 13px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.video-step.active .video-step-number {
+  background: var(--cyan, #22d3ee);
+}
+
+.video-step.done .video-step-number {
+  background: var(--green, #22c55e);
+}
+
+.video-step-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.video-step.active .video-step-label {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.video-step-divider {
+  width: 40px;
+  height: 2px;
+  background: var(--border, #d1d5db);
+  margin: 0 12px;
+  flex-shrink: 0;
 }
 
 .video-studio-layout {

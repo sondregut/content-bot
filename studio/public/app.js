@@ -6342,6 +6342,15 @@ const VIDEO_STEP_PROGRESS = {
   'finalizing': { pct: 90, label: 'Finalizing...' },
 };
 
+function setVideoStep(step) {
+  const s1 = document.getElementById('video-step-1');
+  const s2 = document.getElementById('video-step-2');
+  const s3 = document.getElementById('video-step-3');
+  s1.className = 'video-step' + (step === 1 ? ' active' : step > 1 ? ' done' : '');
+  s2.className = 'video-step' + (step === 2 ? ' active' : step > 2 ? ' done' : '');
+  s3.className = 'video-step' + (step === 3 ? ' active' : '');
+}
+
 function resetVideoPreview() {
   currentPreviewId = null;
   videoPreviewAvatar.style.display = 'none';
@@ -6351,6 +6360,7 @@ function resetVideoPreview() {
   videoPlaceholder.style.display = '';
   videoStudioPreviewVideo.style.display = 'none';
   downloadTalkingHeadBtn.style.display = 'none';
+  setVideoStep(1);
 }
 
 document.getElementById('open-video-studio-btn').addEventListener('click', openVideoStudio);
@@ -6399,9 +6409,10 @@ async function generateTalkingHeadPreview() {
   generateTalkingHeadBtn.disabled = true;
   videoStudioStatus.textContent = '';
   resetVideoPreview();
+  setVideoStep(1);
   videoStudioProgress.style.display = 'flex';
   videoStudioProgressFill.style.width = '10%';
-  videoStudioProgressLabel.textContent = 'Writing script...';
+  videoStudioProgressLabel.textContent = 'Step 1: Writing script...';
 
   try {
     let uploadedAvatarFilename = null;
@@ -6420,9 +6431,10 @@ async function generateTalkingHeadPreview() {
 
     // For person/upload: skip avatar generation in preview, go straight to confirm
     if (avatarSource === 'person' || avatarSource === 'upload') {
-      videoStudioProgressLabel.textContent = 'Writing script...';
+      videoStudioProgressLabel.textContent = 'Step 1: Writing script...';
     } else {
       videoStudioProgressFill.style.width = '20%';
+      videoStudioProgressLabel.textContent = 'Step 1: Writing script & generating image...';
     }
 
     const res = await authFetch('/api/generate-talking-head-preview', {
