@@ -430,26 +430,45 @@ async function generateVideoSlide(prompt, options = {}) {
   const { request_id, status_url, response_url } = submitData;
   if (!request_id) throw new Error('fal.ai did not return a request_id');
 
+  let consecutiveErrors = 0;
   const deadline = Date.now() + 600_000;
   while (Date.now() < deadline) {
     await new Promise(r => setTimeout(r, 5000));
-    const statusRes = await fetch(status_url, {
-      headers: { 'Authorization': `Key ${falKey}` },
-    });
-    if (!statusRes.ok) continue;
-    const status = await statusRes.json();
-    if (status.status === 'COMPLETED') {
-      const resultRes = await fetch(response_url, {
+    let statusRes;
+    try {
+      statusRes = await fetch(status_url, {
         headers: { 'Authorization': `Key ${falKey}` },
       });
-      if (!resultRes.ok) throw new Error(`fal.ai result fetch failed (${resultRes.status})`);
-      const result = await resultRes.json();
+    } catch (fetchErr) {
+      consecutiveErrors++;
+      console.warn(`[Video] Poll fetch error (${consecutiveErrors}): ${fetchErr.message}`);
+      if (consecutiveErrors >= 5) throw new Error(`fal.ai video polling failed after ${consecutiveErrors} consecutive network errors: ${fetchErr.message}`);
+      continue;
+    }
+    if (!statusRes.ok) {
+      consecutiveErrors++;
+      const errText = await statusRes.text().catch(() => '');
+      console.warn(`[Video] Poll status ${statusRes.status} (${consecutiveErrors}): ${errText.slice(0, 200)}`);
+      if (consecutiveErrors >= 5) throw new Error(`fal.ai video polling returned ${statusRes.status} ${consecutiveErrors} times: ${errText.slice(0, 200)}`);
+      continue;
+    }
+    consecutiveErrors = 0;
+    const status = await statusRes.json();
+    console.log(`[Video] Poll: status=${status.status}, queue_position=${status.queue_position ?? 'n/a'}`);
+    if (status.status === 'COMPLETED') {
+      const result = status.response || await (async () => {
+        const resultRes = await fetch(response_url, {
+          headers: { 'Authorization': `Key ${falKey}` },
+        });
+        if (!resultRes.ok) throw new Error(`fal.ai result fetch failed (${resultRes.status})`);
+        return resultRes.json();
+      })();
       const videoUrl = result.video?.url;
       if (!videoUrl) throw new Error('fal.ai returned success but no video URL');
       return videoUrl;
     }
     if (status.status === 'FAILED') {
-      throw new Error(`Video generation failed: ${status.error || 'unknown error'}`);
+      throw new Error(`Video generation failed: ${status.error || JSON.stringify(status).slice(0, 300)}`);
     }
   }
   throw new Error('Video generation timed out after 10 minutes');
@@ -562,26 +581,46 @@ async function generateTalkingFace(imageUrl, audioUrl, { falKey, model }) {
   const { request_id, status_url, response_url } = submitData;
   if (!request_id) throw new Error('fal.ai did not return a request_id for lip sync');
 
+  let consecutiveErrors = 0;
   const deadline = Date.now() + 600_000;
   while (Date.now() < deadline) {
     await new Promise(r => setTimeout(r, 5000));
-    const statusRes = await fetch(status_url, {
-      headers: { 'Authorization': `Key ${falKey}` },
-    });
-    if (!statusRes.ok) continue;
-    const status = await statusRes.json();
-    if (status.status === 'COMPLETED') {
-      const resultRes = await fetch(response_url, {
+    let statusRes;
+    try {
+      statusRes = await fetch(status_url, {
         headers: { 'Authorization': `Key ${falKey}` },
       });
-      if (!resultRes.ok) throw new Error(`fal.ai lip sync result fetch failed (${resultRes.status})`);
-      const result = await resultRes.json();
+    } catch (fetchErr) {
+      consecutiveErrors++;
+      console.warn(`[LipSync] Poll fetch error (${consecutiveErrors}): ${fetchErr.message}`);
+      if (consecutiveErrors >= 5) throw new Error(`fal.ai lip sync polling failed after ${consecutiveErrors} consecutive network errors: ${fetchErr.message}`);
+      continue;
+    }
+    if (!statusRes.ok) {
+      consecutiveErrors++;
+      const errText = await statusRes.text().catch(() => '');
+      console.warn(`[LipSync] Poll status ${statusRes.status} (${consecutiveErrors}): ${errText.slice(0, 200)}`);
+      if (consecutiveErrors >= 5) throw new Error(`fal.ai lip sync polling returned ${statusRes.status} ${consecutiveErrors} times: ${errText.slice(0, 200)}`);
+      continue;
+    }
+    consecutiveErrors = 0;
+    const status = await statusRes.json();
+    console.log(`[LipSync] Poll: status=${status.status}, queue_position=${status.queue_position ?? 'n/a'}`);
+    if (status.status === 'COMPLETED') {
+      // Check inline response first, then fetch from response_url
+      const result = status.response || await (async () => {
+        const resultRes = await fetch(response_url, {
+          headers: { 'Authorization': `Key ${falKey}` },
+        });
+        if (!resultRes.ok) throw new Error(`fal.ai lip sync result fetch failed (${resultRes.status})`);
+        return resultRes.json();
+      })();
       const videoUrl = result.video?.url;
       if (!videoUrl) throw new Error('fal.ai returned success but no video URL for lip sync');
       return videoUrl;
     }
     if (status.status === 'FAILED') {
-      throw new Error(`Lip sync generation failed: ${status.error || 'unknown error'}`);
+      throw new Error(`Lip sync generation failed: ${status.error || JSON.stringify(status).slice(0, 300)}`);
     }
   }
   throw new Error('Lip sync generation timed out after 10 minutes');
