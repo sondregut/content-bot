@@ -2443,7 +2443,7 @@ function buildTextPrompt(data, brand) {
     `Create a TikTok carousel slide (1080x1920, 9:16) for ${brand.name}.`,
     `Visual style: ${brand.imageStyle || 'Minimalist and clean with plenty of negative space.'}`,
     `Background: ${safeBackground} using brand palette primary ${c.primary}, accent ${c.accent}, white ${c.white}, secondary ${c.secondary}, CTA color ${c.cta} (CTA only).`,
-    `Composition: ${safeLayout}. Large left-aligned text block within safe zones (top 180px, bottom 320px, sides 90px). Plenty of negative space.`,
+    `Composition: ${safeLayout}. Large left-aligned text block with generous margins — keep text well away from all edges, especially top and bottom. Plenty of negative space.`,
     textBlocks.join('\n\n'),
     `Typography constraints: modern sans-serif like Inter/SF Pro, headline extra-bold at approximately ${data.headlineFontSize || 82}pt with tight line-height, body regular at approximately ${data.bodyFontSize || 34}pt with comfortable line-height, clean kerning, high readability.`,
     'Icon constraints: do NOT add any logos or icons; the brand watermark will be added separately after generation.',
@@ -2883,7 +2883,7 @@ Return ONLY the refined prompt text. No preamble, no explanation, no markdown.`;
 
 const BASE_REFINEMENT_INSTRUCTIONS = `Your job: Take a raw image-generation prompt and refine it for gpt-image-1.5. Your refinements should:
 - Strengthen text legibility instructions (exact spelling, letter spacing for tricky words, font weight)
-- Ensure safe zones are respected (top 180px, bottom 320px, sides 90px for TikTok 9:16)
+- Ensure generous margins on all sides — keep text and key elements well away from edges, especially top and bottom, to stay within TikTok safe zones
 - Keep backgrounds clean, simple, and uncluttered — avoid overly dramatic or staged-looking scenes
 - Reinforce correct spelling of all words
 - Optimize composition cues for the AI image model
@@ -5039,7 +5039,7 @@ app.post('/api/edit-slide', requireAuth, async (req, res) => {
       `Change: ${instructions}.`,
       `Brand colors: primary ${c.primary}, accent ${c.accent}, text ${c.white}, CTA ${c.cta}.`,
       brand.imageStyle ? `Visual style: ${brand.imageStyle}` : '',
-      `Safe zones: top 120px, bottom 200px, sides 90px. Keep text within these bounds.`,
+      `Keep text well within the frame with generous margins on all sides — away from all edges.`,
       `Keep everything else the same. Do not add new text or logos.`,
     ].filter(Boolean).join(' ');
 
