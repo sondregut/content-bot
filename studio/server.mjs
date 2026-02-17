@@ -5420,7 +5420,7 @@ Rules:
       const avatarBuffer = await generateImage({
         model: 'gemini-3-pro-image-preview',
         prompt: avatarPrompt,
-        size: '1024x1024',
+        size: '1024x1536',
         req,
       });
       const avatarFilename = `avatar_preview_${crypto.randomUUID().slice(0, 8)}.png`;
@@ -5774,7 +5774,7 @@ app.post('/api/generate-talking-head', requireAuth, generationLimiter, async (re
           const avatarBuffer = await generateImage({
             model: 'gemini-3-pro-image-preview',
             prompt: avatarPrompt,
-            size: '1024x1024',
+            size: '1024x1536',
             req: capturedReq,
           });
           job.step = 'uploading-avatar';
