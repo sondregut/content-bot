@@ -35,6 +35,8 @@ const ALLOWED_IMAGE_MODELS = {
   'imagen-4.0-generate-001': 'Imagen 4.0',
   'imagen-4.0-fast-generate-001': 'Imagen 4.0 Fast',
   'imagen-4.0-ultra-generate-001': 'Imagen 4.0 Ultra',
+  'z-image-turbo': 'Z-Image Turbo',
+  'flux-2-max': 'FLUX 2 Max',
 };
 function resolveImageModel(requested) {
   return (requested && ALLOWED_IMAGE_MODELS[requested]) ? requested : DEFAULT_IMAGE_MODEL;
@@ -43,6 +45,7 @@ function resolveImageModel(requested) {
 const DEFAULT_TEXT_MODEL = 'claude-haiku-4-5-20251001';
 const ALLOWED_TEXT_MODELS = {
   'claude-haiku-4-5-20251001': 'Claude Haiku 4.5',
+  'claude-sonnet-4-6': 'Claude Sonnet 4.6',
   'claude-sonnet-4-5-20250929': 'Claude Sonnet 4.5',
   'claude-opus-4-6': 'Claude Opus 4.6',
   'gemini-2.5-flash': 'Gemini 2.5 Flash',
@@ -165,6 +168,81 @@ async function _generateImageInner({ model, prompt, size, quality, referenceImag
     return Buffer.from(imageBytes, 'base64');
   }
 
+  // FLUX 2 Max (via Fal.ai)
+  if (resolvedModel === 'flux-2-max') {
+    const falKey = req.headers['x-fal-key'];
+    if (!falKey) throw new Error('Add your Fal.ai API key in Settings to use FLUX 2 Max.');
+    const sizeMap = { '1024x1536': 'portrait_4_3', '1536x1024': 'landscape_16_9', '1024x1024': 'square_hd' };
+    const body = {
+      prompt,
+      image_size: sizeMap[size] || 'portrait_4_3',
+      num_images: 1,
+      output_format: 'png',
+      safety_tolerance: 6,
+    };
+    if (referenceImage) {
+      body.image_url = `data:image/png;base64,${referenceImage.toString('base64')}`;
+      body.strength = 0.65;
+    }
+    const endpoint = referenceImage
+      ? 'https://fal.run/fal-ai/flux-2/max/image-to-image'
+      : 'https://fal.run/fal-ai/flux-2/max';
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Authorization': `Key ${falKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`FLUX 2 Max failed (${response.status}): ${errText}`);
+    }
+    const result = await response.json();
+    const imageUrl = result.images?.[0]?.url;
+    if (!imageUrl) throw new Error('No image returned from FLUX 2 Max');
+    const imgRes = await fetch(imageUrl);
+    if (!imgRes.ok) throw new Error('Failed to download FLUX 2 Max result');
+    return Buffer.from(await imgRes.arrayBuffer());
+  }
+
+  // Z-Image Turbo (via Fal.ai)
+  if (resolvedModel === 'z-image-turbo') {
+    const falKey = req.headers['x-fal-key'];
+    if (!falKey) throw new Error('Add your Fal.ai API key in Settings to use Z-Image.');
+    const sizeMap = { '1024x1536': 'portrait_9_16', '1536x1024': 'landscape_16_9', '1024x1024': 'square_hd' };
+    const body = {
+      prompt,
+      image_size: sizeMap[size] || 'portrait_9_16',
+      num_images: 1,
+      output_format: 'png',
+      enable_safety_checker: false,
+      num_inference_steps: 8,
+    };
+    // Style reference via image-to-image
+    if (referenceImage) {
+      const dataUrl = `data:image/png;base64,${referenceImage.toString('base64')}`;
+      body.image_url = dataUrl;
+      body.strength = 0.6;
+    }
+    const endpoint = referenceImage
+      ? 'https://fal.run/fal-ai/z-image/turbo/image-to-image'
+      : 'https://fal.run/fal-ai/z-image/turbo';
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Authorization': `Key ${falKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Z-Image failed (${response.status}): ${errText}`);
+    }
+    const result = await response.json();
+    const imageUrl = result.images?.[0]?.url;
+    if (!imageUrl) throw new Error('No image returned from Z-Image');
+    const imgRes = await fetch(imageUrl);
+    if (!imgRes.ok) throw new Error('Failed to download Z-Image result');
+    return Buffer.from(await imgRes.arrayBuffer());
+  }
+
   // OpenAI (default)
   const openai = getOpenAI(req);
   if (!openai) throw new Error('Add your OpenAI API key in Settings to generate images.');
@@ -279,6 +357,7 @@ const TALKING_HEAD_MODELS = {
   'kling-v3.0-standard': { name: 'Kling 3.0', provider: 'fal', nativeAudio: true },
   'seedance-v1.5-pro': { name: 'Seedance 1.5 Pro', provider: 'fal', nativeAudio: true },
   'veo-3.1': { name: 'Veo 3.1', provider: 'gemini', nativeAudio: true },
+  'kling-avatar-v2-pro': { name: 'Kling Avatar v2 Pro', provider: 'fal', nativeAudio: true },
 };
 
 // --- Video Generation ---
@@ -705,6 +784,28 @@ async function generateTalkingHeadNative(imageUrl, script, { model, falKey, gemi
     const { request_id, status_url, response_url } = await submitRes.json();
     if (!request_id) throw new Error('Kling 3.0 did not return a request_id');
     return await pollFalJob(status_url, response_url, falKey, 'Kling 3.0');
+  }
+
+  // --- Kling Avatar v2 Pro via fal.ai ---
+  if (model === 'kling-avatar-v2-pro') {
+    if (!falKey) throw new Error('Add your Fal.ai API key in Settings for Kling Avatar v2 Pro.');
+    const endpoint = 'https://queue.fal.run/fal-ai/kling-video/ai-avatar/v2/pro';
+    const submitRes = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Authorization': `Key ${falKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        face_image_url: imageUrl,
+        text: script.slice(0, 500),
+        aspect_ratio: '9:16',
+      }),
+    });
+    if (!submitRes.ok) {
+      const errText = await submitRes.text();
+      throw new Error(`Kling Avatar v2 Pro submit failed (${submitRes.status}): ${errText}`);
+    }
+    const { request_id, status_url, response_url } = await submitRes.json();
+    if (!request_id) throw new Error('Kling Avatar v2 Pro did not return a request_id');
+    return await pollFalJob(status_url, response_url, falKey, 'Kling Avatar v2 Pro');
   }
 
   // --- Veo 3.1 via Gemini API ---
@@ -2903,6 +3004,11 @@ REALISM RULES — apply to ALL image prompts:
 - Colors should be natural and slightly muted — no oversaturation, no HDR look.
 - Subjects should feel candid and mid-moment, not stiffly posed or perfectly centered.
 - Include small environmental imperfections: creases, dust, wear marks, natural asymmetry.
+- For portraits/people: prioritize the subject description in the first 5-10 words of the prompt — this is where models like FLUX and Gemini lock visual identity.
+- Camera specifics matter: "shot on iPhone 16 Pro, 24mm f/2.2 front camera" is better than generic "phone camera".
+- Include at least one human micro-imperfection: asymmetric freckle pattern, slight redness around nose, tiny scar, uneven tan line.
+- UGC aesthetic: composition should feel accidental, not art-directed. Off-center subject, slightly tilted horizon, real environment clutter.
+- Avoid AI-giveaway smoothness in hair — describe individual strands, flyaways, frizz, or product texture.
 
 Return ONLY the refined prompt text. No preamble, no explanation, no markdown formatting.`;
 
@@ -3072,7 +3178,7 @@ async function refinePromptWithClaude(rawPrompt, slideType, formData, brand, req
       context += `\n\nIMPORTANT: A reference image will be passed directly to the image model via the edit API. The model can SEE the image — do NOT describe what might be in the reference image. Instead, instruct the model on HOW to use the reference (e.g. "match the color palette", "use the same composition style", "incorporate the background elements").`;
     }
 
-    const videoModel = slideType === 'video' ? 'claude-sonnet-4-5-20250929' : null;
+    const videoModel = slideType === 'video' ? 'claude-sonnet-4-6' : null;
     const refined = await generateText({
       model: videoModel || req.body?.textModel,
       system: systemPrompt,
@@ -5680,7 +5786,7 @@ Return ONLY the refined script text, nothing else.`;
       try {
         const presenterHint = presenterDescription ? `\nPresenter description from user: "${presenterDescription}"` : '';
         avatarPrompt = await generateText({
-          model: 'claude-sonnet-4-5-20250929',
+          model: 'claude-sonnet-4-6',
           system: `You generate image prompts for TikTok talking-head thumbnails. The image becomes the base frame for AI lip-sync video.
 
 CRITICAL REALISM RULES — this must look like a REAL phone selfie, NOT a professional photo:
@@ -5689,6 +5795,11 @@ CRITICAL REALISM RULES — this must look like a REAL phone selfie, NOT a profes
 - Normal phone-camera lighting (not cinematic, not golden hour unless truly natural)
 - Messy, real environments — not styled or aesthetically perfect
 - Think "screenshot from someone's Instagram story" not "portrait photography"
+- ALWAYS include "real iPhone photo" or "candid iPhone front camera selfie" at the START of the prompt
+- Include natural skin details: freckles, pores, subtle blemishes, uneven skin tone
+- Mention natural lighting explicitly: "natural daylight", "soft window light", "ambient indoor lighting"
+- Slightly off-center framing, not perfectly composed — like a real arm's-length selfie
+- Subtle lens characteristics: slight wide-angle barrel distortion from phone front camera
 
 SETTINGS — pick ONE based on brand + script energy:
 
@@ -5725,10 +5836,13 @@ PERSON:
 - Hands should be relaxed or gesturing naturally — NEVER holding a phone, camera, or device
 
 TECHNICAL:
+- Start every prompt with: "Real iPhone front camera selfie photo, natural lighting, "
 - Front-facing phone camera perspective (NOT a DSLR or professional camera)
 - Everything in the frame is sharp and in focus — f/2.2 iPhone front camera, deep depth of field, crisp background details
 - 9:16 vertical frame
 - Photorealistic with normal phone-camera quality — slight noise/grain is OK
+- Include at least 2 skin imperfection details (freckles, visible pores, slight under-eye shadows, uneven skin tone)
+- UGC iPhone aesthetic, 4k detail, candid composition
 - No text, logos, overlays, watermarks
 - Do NOT describe the scene poetically — use plain, direct language
 - Return ONLY the prompt, nothing else`,
@@ -5740,12 +5854,13 @@ TECHNICAL:
         console.warn('[TalkingHead Preview] Smart avatar prompt failed, using fallback:', err.message);
       }
       if (!avatarPrompt) {
-        avatarPrompt = 'Very attractive young content creator sitting in parked car, driver seat, filming a selfie-style TikTok video. Symmetrical face, great bone structure, clear glowing skin, bright eyes. Looking directly at camera with natural slight smile, mid-sentence mouth slightly open. Natural daylight through car windows, selfie camera perspective, face and upper chest visible. Hands relaxed or gesturing naturally, not holding anything. Photorealistic, 9:16 vertical frame, casual and authentic feel.';
+        avatarPrompt = 'Real iPhone front camera selfie photo, natural lighting, attractive young content creator sitting in parked car, driver seat, filming a selfie-style TikTok video. Symmetrical face, great bone structure, visible pores, natural skin texture with slight imperfections. Looking directly at camera with natural slight smile, mid-sentence mouth slightly open. Natural daylight through car windows, selfie camera perspective, face and upper chest visible, slightly off-center framing. Hands relaxed or gesturing naturally, not holding anything. Photorealistic, 9:16 vertical frame, casual candid iPhone aesthetic.';
       }
 
       console.log(`[TalkingHead Preview] Avatar prompt: ${avatarPrompt.slice(0, 120)}...`);
+      const avatarModel = isFalEnabled(req) ? 'z-image-turbo' : 'gemini-3-pro-image-preview';
       const avatarBuffer = await generateImage({
-        model: 'gemini-3-pro-image-preview',
+        model: avatarModel,
         prompt: avatarPrompt,
         size: '1024x1536',
         req,
@@ -6199,10 +6314,11 @@ Return ONLY the refined script text, nothing else.`;
 
         } else {
           job.step = 'generating-avatar';
-          const avatarPrompt = `Attractive young content creator sitting in parked car, driver seat, filming a selfie-style TikTok video. Looking directly at camera with a natural slight smile, mid-sentence. Natural daylight through car windows, selfie camera perspective, face and upper chest visible. Photorealistic, 9:16 vertical frame, casual and authentic feel.`;
+          const avatarPrompt = `Real iPhone front camera selfie photo, natural lighting, attractive young content creator sitting in parked car, driver seat, filming a selfie-style TikTok video. Looking directly at camera with a natural slight smile, mid-sentence. Visible pores, slight under-eye shadows, natural skin texture. Natural daylight through car windows, selfie camera perspective, face and upper chest visible, slightly off-center framing. Photorealistic, 9:16 vertical frame, casual candid iPhone aesthetic.`;
           console.log(`[TalkingHead] Generating AI avatar...`);
+          const avatarModel = isFalEnabled(capturedReq) ? 'z-image-turbo' : 'gemini-3-pro-image-preview';
           const avatarBuffer = await generateImage({
-            model: 'gemini-3-pro-image-preview',
+            model: avatarModel,
             prompt: avatarPrompt,
             size: '1024x1536',
             req: capturedReq,
