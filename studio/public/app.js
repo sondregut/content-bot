@@ -3419,6 +3419,10 @@ function applyVideoMode() {
   const densityRow = document.getElementById('carousel-density-row');
   if (densityRow) densityRow.style.display = (!isVideo && slideEdits.length > 1) ? '' : 'none';
 
+  // AI Backgrounds row — show alongside density row
+  const aiBgRow = document.getElementById('carousel-ai-bg-row');
+  if (aiBgRow) aiBgRow.style.display = (!isVideo && slideEdits.length > 1) ? '' : 'none';
+
   // Submit button text
   const submitBtn = form.querySelector('button[type="submit"]');
   if (submitBtn) {
@@ -5089,6 +5093,7 @@ async function startBatchGeneration() {
 
   const slides = slideEdits.map((s, i) => buildSlidePayload(s, i));
   const densitySelect = document.getElementById('imageDensity');
+  const aiBgToggle = document.getElementById('ai-backgrounds-toggle');
   const payload = {
     slides,
     includeOwl: form.elements.includeOwl.checked,
@@ -5098,6 +5103,7 @@ async function startBatchGeneration() {
     imageModel: getSelectedImageModel(),
     textModel: getSelectedTextModel(),
     imageDensity: densitySelect ? densitySelect.value : 'photo-heavy',
+    useAiBackgrounds: aiBgToggle ? aiBgToggle.checked : true,
   };
 
   progressSection.style.display = 'block';

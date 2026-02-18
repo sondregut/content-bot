@@ -1169,6 +1169,16 @@
                 </div>
               </div>
 
+              <div class="form-row" id="carousel-ai-bg-row" style="display:none">
+                <div class="form-group">
+                  <label class="checkbox">
+                    <input type="checkbox" id="ai-backgrounds-toggle" checked />
+                    AI Backgrounds — generate illustrative backgrounds for text slides
+                  </label>
+                  <p class="form-hint">When off, text slides use solid navy backgrounds (faster, no AI cost)</p>
+                </div>
+              </div>
+
               <div class="action-buttons">
                 <button type="submit" class="btn primary">Generate This Slide</button>
                 <button type="button" class="btn accent" id="generate-all-btn">Generate All Slides</button>
@@ -1637,7 +1647,7 @@
                 </optgroup>
                 <optgroup label="Nano Banana">
                   <option value="gemini-2.5-flash-image">Nano Banana</option>
-                  <option value="gemini-3-pro-image-preview">Nano Banana Pro</option>
+                  <option value="gemini-3-pro-image-preview" selected>Nano Banana Pro</option>
                 </optgroup>
                 <optgroup label="Gemini (Legacy)">
                   <option value="gemini-2.5-flash-preview-image-generation">Gemini 2.5 Flash</option>

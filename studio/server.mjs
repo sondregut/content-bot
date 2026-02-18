@@ -5199,7 +5199,7 @@ const videoJobs = new Map();
 const talkingHeadPreviews = new Map();
 
 app.post('/api/generate-carousel', requireAuth, generationLimiter, async (req, res) => {
-  const { slides, includeOwl, owlPosition, quality, brand: brandId, imageModel, referenceImage, referenceUsage, referenceInstructions, imageDensity } = req.body || {};
+  const { slides, includeOwl, owlPosition, quality, brand: brandId, imageModel, referenceImage, referenceUsage, referenceInstructions, imageDensity, useAiBackgrounds = true } = req.body || {};
   if (!slides || !Array.isArray(slides) || slides.length === 0) {
     return res.status(400).json({ error: 'Missing slides array' });
   }
@@ -5472,6 +5472,36 @@ app.post('/api/generate-carousel', requireAuth, generationLimiter, async (req, r
           effectiveType = 'photo';
         } else if (imageDensity === 'text-heavy' && effectiveType === 'photo' && i !== 0) {
           effectiveType = 'text';
+        }
+
+        // When AI backgrounds are off and slide is text-type, use solid navy background
+        if (!useAiBackgrounds && effectiveType === 'text') {
+          console.log(`[Carousel ${jobId}] ${brand.name} | Slide ${i + 1}/${slides.length} (solid navy bg — AI backgrounds off)`);
+          let buffer = await sharp({
+            create: {
+              width: 1024,
+              height: 1536,
+              channels: 4,
+              background: { r: 7, g: 47, b: 87, alpha: 1 },
+            },
+          }).png().toBuffer();
+          if (slideData.includeOwl) {
+            buffer = await addAppIconOverlay(buffer, slideData.owlPosition, brand);
+          }
+
+          const slug = crypto.randomUUID().slice(0, 8);
+          const filename = `carousel_${brand.id}_${jobId}_s${i + 1}_${slug}.png`;
+          const slideUrl = await uploadToStorage(buffer, filename);
+          saveImageRecord({ userId: req.user?.uid, brandId: brand.id, filename, type: 'carousel', prompt: 'solid-navy-bg', refinedPrompt: null, model: 'none', brandName: brand.name, width: 1024, height: 1536 });
+
+          job.slides.push({
+            slideNumber: i + 1,
+            url: slideUrl,
+            filename,
+            ok: true,
+          });
+          job.completed = i + 1;
+          continue;
         }
 
         const rawPrompt =
