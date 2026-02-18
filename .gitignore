@@ -1,7 +1,10 @@
 node_modules/
+
+# Ignore ALL .env files except .env.example
 .env
-studio/.env
-studio/.env.vercel
+.env.*
+!.env.example
+
 studio/local-brands.json
 studio/output/
 studio/uploads/
@@ -10,7 +13,6 @@ output/
 *.log
 .DS_Store
 .vercel
-.env*.local
 
 # Claude Code local files (not shared)
 CLAUDE.local.md
